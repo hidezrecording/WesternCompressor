@@ -1,0 +1,44 @@
+# Attaches a built installer PKG to an existing GitHub Release.
+#
+# Manual dispatch: give it the Build Hotdog run ID whose installer
+# artifact you want, the artifact name from that run, and the
+# release tag. The upload happens entirely inside GitHub
+# (GITHUB_TOKEN), so no local credentials are involved.
+
+name: Release Hotdog
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Build Hotdog run ID to take the installer artifact from"
+        required: true
+      artifact:
+        description: "Installer artifact name from that run"
+        required: true
+        default: "Hotdog-Installer-macOS-1"
+      tag:
+        description: "Release tag to upload the installer to"
+        required: true
+        default: "v1.0.0"
+
+jobs:
+  release:
+    name: Upload installer to release
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload installer to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ inputs.tag }}" Hotdog-1.0.0-macOS.pkg
+             --clobber --repo "${{ github.repository }}"
