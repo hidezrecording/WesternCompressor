@@ -1,0 +1,19 @@
+SmokumEmboldenedThin-Regular.ttf — a modified derivative of Smokum.
+
+Source: Smokum-Regular.ttf (Brian J. Bonislawsky DBA Astigmatic
+(AOETI)), Copyright (c) 2011 by Brian J. Bonislawsky DBA Astigmatic
+(AOETI). All rights reserved. Available under the Apache License,
+Version 2.0 — see LICENSE-Smokum.txt in this directory, which
+applies to this derivative in full.
+
+Modification (2026-10-14, for the Hotdog faceplate, GUI v25): the
+same bake as SmokumEmboldened-Regular.ttf (every glyph outline
+expanded with a FreeType stroker, original contours plus the
+stroker's band contours composed under the TrueType non-zero
+winding fill rule) but at a REDUCED stroker radius of 48 font
+units = 2.34% of the 2048-unit em, down from 72 units (3.5%) —
+Nathan found the v24 weight a touch too bold and asked for a
+slightly thinner line at slightly larger sizes. Advance widths
+are unchanged from Smokum. Family renamed to "Smokum Emboldened
+Thin" so the derivative can never be confused with the original
+font or with the v24 bake (which the flange numerals still use).

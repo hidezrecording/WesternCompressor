@@ -1,0 +1,25 @@
+SmokumEmboldenedXThin-Regular.ttf — a modified derivative of Smokum.
+
+Source: Smokum-Regular.ttf (Brian J. Bonislawsky DBA Astigmatic
+(AOETI)), Copyright (c) 2011 by Brian J. Bonislawsky DBA Astigmatic
+(AOETI). All rights reserved. Available under the Apache License,
+Version 2.0 — see LICENSE-Smokum.txt in this directory, which
+applies to this derivative in full.
+
+Modification (2026-10-14, for the Hotdog faceplate, GUI v26): the
+same bake as SmokumEmboldened-Regular.ttf (every glyph outline
+expanded with a FreeType stroker, original contours plus the
+stroker's band contours composed under the TrueType non-zero
+winding fill rule) but at a FURTHER REDUCED stroker radius of 29
+font units = 1.42% of the 2048-unit em — down from 48 units
+(2.34%, the v25 "Thin" bake) and 72 units (3.5%, the v24 bake).
+Nathan found the v25 weight still a little too thick and said
+the lettering "can still thin out a little bit and be okay", so
+v26 deliberately bakes below the cautious band and verifies
+legibility on the finished panel (solid-core gate, see
+docs/build-report-v26.md). Advance widths are unchanged from
+Smokum. Family renamed to "Smokum Emboldened XThin" so the
+derivative can never be confused with the original font or with
+the v24/v25 bakes. In v26 this bake serves ALL panel text AND
+the flange numerals (v24/v25 kept a heavier bake for the
+numerals; Nathan's v26 note said "all fonts").

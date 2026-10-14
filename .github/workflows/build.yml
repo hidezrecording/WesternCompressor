@@ -1,0 +1,66 @@
+# Builds Hotdog on every push and uploads downloadable plugins.
+#
+# Mirrors the DN1000 pipeline: Actions tab -> pick a run -> download
+# the Hotdog-macOS / Hotdog-Installer-macOS artifacts (VST3/AU/pkg).
+#
+# NOTE: macOS run is the deliverable (Nathan's Mac).
+
+name: Build Hotdog
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  macos:
+    name: macOS (VST3 + AU, Apple Silicon + Intel)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download JUCE 8.0.6
+        run: |
+          curl -L https://github.com/juce-framework/JUCE/archive/refs/tags/8.0.6.zip -o juce.zip
+          unzip -q juce.zip
+          mv JUCE-8.0.6 /tmp/juce-8.0.6
+
+      - name: Configure
+        env:
+          JUCE_DIR: /tmp/juce-8.0.6
+        run: cmake -B build -G Xcode -DCMAKE_BUILD_TYPE=Release
+                 -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+                 -S juce
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Build installer PKG
+        run: |
+          PKGROOT=pkgroot
+          mkdir -p "$PKGROOT/Library/Audio/Plug-Ins/VST3"
+          mkdir -p "$PKGROOT/Library/Audio/Plug-Ins/Components"
+          mkdir -p "$PKGROOT/Applications"
+          cp -R "build/OSC72_artefacts/Release/VST3/Hotdog.vst3" "$PKGROOT/Library/Audio/Plug-Ins/VST3/"
+          cp -R "build/OSC72_artefacts/Release/AU/Hotdog.component" "$PKGROOT/Library/Audio/Plug-Ins/Components/"
+          if [ -d "build/OSC72_artefacts/Release/Standalone/Hotdog.app" ]; then
+            cp -R "build/OSC72_artefacts/Release/Standalone/Hotdog.app" "$PKGROOT/Applications/"
+          fi
+          pkgbuild --root "$PKGROOT" \
+            --identifier com.sabatinoaudio.hotdog \
+            --version 1.0.0 \
+            --install-location / \
+            --scripts pkg_scripts \
+            Hotdog-1.0.0-macOS.pkg
+
+      - name: Upload plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hotdog-macOS-${{ github.run_number }}
+          path: build/OSC72_artefacts/Release/
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hotdog-Installer-macOS-${{ github.run_number }}
+          path: Hotdog-1.0.0-macOS.pkg

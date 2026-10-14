@@ -1,0 +1,17 @@
+SmokumEmboldened-Regular.ttf — a modified derivative of Smokum.
+
+Source: Smokum-Regular.ttf (Brian J. Bonislawsky DBA Astigmatic
+(AOETI)), Copyright (c) 2011 by Brian J. Bonislawsky DBA Astigmatic
+(AOETI). All rights reserved. Available under the Apache License,
+Version 2.0 — see LICENSE-Smokum.txt in this directory, which
+applies to this derivative in full.
+
+Modification (2026-10-14, for the Hotdog faceplate): every glyph
+outline was expanded with a FreeType stroker at a radius of 72
+font units = 3.5% of the 2048-unit em (a single stroked outline
+pass: the original contours plus the stroker's band contours,
+composed under the TrueType non-zero winding fill rule, so each
+letterform gains real outline weight on all sides). Advance
+widths are unchanged from Smokum. Family renamed to "Smokum
+Emboldened" so the derivative can never be confused with the
+original font.
