@@ -143,6 +143,9 @@ void Osc72Processor::prepareToPlay(double sampleRate, int)
     dryLineL_.assign(kDryLineSize, 0.0f);
     dryLineR_.assign(kDryLineSize, 0.0f);
     dryWrite_ = 0;
+    // v44: the dry tap starts settled on the current target.
+    dryDelayA_ = dryDelayB_ = powerOn_ ? chain_.latencySamples() : 0;
+    dryTapFade_ = 1.0f;
     // Truthful latency: 0 unless mod is in; then the ADT
     // insert's base delay (20 ms). v19: 0 while POWER is off — the chain
     // is out of the path entirely.
@@ -218,8 +221,11 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
     // tap's read offset — the chain's CURRENT latency, taken
     // after the toggle edges above have settled it, so dry
     // and wet are time-aligned at every mix position (MOD
-    // in: 960 samples; out: 0). The delay lines are sized
-    // defensively here too (prepareToPlay is the real init).
+    // in: 960 samples; out: 0). v44: at the toggle instant
+    // itself the offset now crossfades over 30 ms instead of
+    // stepping (the dryDelayA_/B_ machinery below). The
+    // delay lines are sized defensively here too
+    // (prepareToPlay is the real init).
     const float blendTarget = juce::jlimit(
         0.0f, 1.0f, apvts.getRawParameterValue("mix")->load());
     if ((int) dryLineL_.size() != kDryLineSize)
@@ -228,7 +234,18 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
         dryLineR_.assign(kDryLineSize, 0.0f);
         dryWrite_ = 0;
     }
-    const int dryDelay = powerOn_ ? chain_.latencySamples() : 0;
+    // v44: on a latency-target change (the MOD or POWER edges
+    // above), start the dry tap's 30 ms offset crossfade from
+    // the old offset to the new one — the same span the ADT
+    // itself takes to engage, so the blend's two sides morph
+    // together.
+    const int dryTarget = powerOn_ ? chain_.latencySamples() : 0;
+    if (dryTarget != dryDelayB_)
+    {
+        dryDelayA_ = dryDelayB_;
+        dryDelayB_ = dryTarget;
+        dryTapFade_ = 0.0f;
+    }
 
     float* outL = buffer.getWritePointer(0);
     float* outR = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;
@@ -242,6 +259,7 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
     // trims included in the bypass.
     const double sr = getSampleRate() > 0.0 ? getSampleRate() : 48000.0;
     const float fadeCoef = 1.0f - std::exp(-1.0f / (0.025f * (float) sr));
+    const float tapStep = 1.0f / (0.030f * (float) sr);   // v44: dry-tap offset crossfade rate
     const float mixTarget = powerOn_ ? 1.0f : 0.0f;
     for (int i = 0; i < n; ++i)
     {
@@ -259,9 +277,21 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
         // whatever the pot (or the POWER fade) does next.
         dryLineL_[(size_t) dryWrite_] = inL;
         dryLineR_[(size_t) dryWrite_] = inR;
-        const int dryRead = (dryWrite_ - dryDelay) & (kDryLineSize - 1);
-        const float dryL = dryLineL_[(size_t) dryRead];
-        const float dryR = dryLineR_[(size_t) dryRead];
+        // Read at the target offset; during a latency
+        // transition, crossfade from the old offset's read
+        // over 30 ms (v44 — see the header note).
+        const int readB = (dryWrite_ - dryDelayB_) & (kDryLineSize - 1);
+        float dryL = dryLineL_[(size_t) readB];
+        float dryR = dryLineR_[(size_t) readB];
+        if (dryTapFade_ < 1.0f)
+        {
+            const int readA = (dryWrite_ - dryDelayA_) & (kDryLineSize - 1);
+            const float aL = dryLineL_[(size_t) readA];
+            const float aR = dryLineR_[(size_t) readA];
+            dryL = aL + (dryL - aL) * dryTapFade_;
+            dryR = aR + (dryR - aR) * dryTapFade_;
+            dryTapFade_ = std::min(1.0f, dryTapFade_ + tapStep);
+        }
         dryWrite_ = (dryWrite_ + 1) & (kDryLineSize - 1);
         if (powerMix_ == 0.0f)
             continue;   // unit off: input passes dry, untouched

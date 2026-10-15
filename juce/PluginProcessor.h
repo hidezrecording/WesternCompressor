@@ -101,6 +101,21 @@ private:
     std::vector<float> dryLineL_, dryLineR_;
     int dryWrite_ = 0;
     static constexpr int kDryLineSize = 16384;   // power of two; >> the 960-sample max chain latency
+    // v44 (mix-alignment diagnosis, docs/mix-alignment-
+    // diagnosis.md): the dry tap's read offset, crossfaded.
+    // dryDelayB_ is the current target (the chain's latency,
+    // or 0 while POWER is off); when the target changes (MOD
+    // or POWER edge), dryDelayA_ keeps the old offset and
+    // dryTapFade_ ramps 0 -> 1 over 30 ms — the ADT's own
+    // engagement time — so during the transition the blend's
+    // dry side follows the same crossfade law as the wet
+    // side's internal dry component, instead of stepping to
+    // the new offset instantly while the chain is still
+    // morphing (which weighted a mid-fade transient almost
+    // entirely at the new offset: a momentary flam at the
+    // toggle, measured in the diagnosis battery §5).
+    int dryDelayA_ = 0, dryDelayB_ = 0;
+    float dryTapFade_ = 1.0f;   // 1 = settled on dryDelayB_
     std::atomic<float> displayedGrDb_ { 0.0f };
     std::atomic<float> grDisplayOverrideDb_ { -1.0f };
 

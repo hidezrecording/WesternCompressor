@@ -840,6 +840,64 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.1.4 — BALLISTICS RE-VOICE
+(v45; research docs/ballistics-refs.md, report
+docs/build-report-v45.md). The four toggle ballistics
+are re-timed after Nathan's reference units.
+PROVENANCE, stated plainly: the RCA BA-6A has no
+attack/release controls — these are NOT factory BA-6A
+settings. ATTACK SLOW and RELEASE SLOW are timed after
+the opto pair (seated between the LA-3A and the LA-2A,
+with the T4 family's shaped attack and two-stage
+memory release); ATTACK FAST is timed after the 1176
+attack knob at ~11 o'clock, RELEASE FAST after the
+1176 release knob at ~4:30–5 o'clock. Measured
+(suite definitions): FAST attack t90 0.67 -> 0.19 ms;
+SLOW attack t90 31.8 -> 3.9 ms (demand-shaped);
+FAST (Single) release 90% recovery 0.32 -> 0.061 s;
+SLOW (Dual) release 50% recovery 0.154 -> 0.069 s,
+90% 2.43 -> 2.53 s, now with memory (90% after an
+8 s hold 3.03 s vs 2.08 s after a 0.3 s hold).
+Suites: DSP 42/42, processor 31/31; moved pins listed
+in the report (C1/C2/C3/C4 recalibrated to the new
+seats, E3b ceiling 3.0 -> 3.5 and I2 tolerance
+0.5 -> 0.75 dB with the mechanism documented, P6c
+DUAL clause 0.35 -> 0.28). Rides on top of the
+1.1.4 work below. Shipped as release 1.1.4.
+
+v1.1.4 — MIX-alignment
+diagnosis + dry-tap transition fix + GUI v44 palette
+(full write-up: docs/mix-alignment-diagnosis.md).
+Nathan reported a double attack and asked whether the
+MIX blend was ever verified phase/sample-accurate.
+Honest answer: not directly — P7 pinned the blend
+arithmetic against the NOMINAL latency, circularly.
+An impulse battery through the full processor now
+measures the paths themselves: the blend is
+sample-exact in steady state at 44.1/48/96 kHz (wet
+IR = dry IR shifted by exactly the latency; DSP pin
+F5: max diff 5.8e-11, silence before arrival), and
+reported latency is truthful in every switch state.
+One real defect found and fixed: the dry tap's read
+offset STEPPED at MOD/POWER latency changes while
+the chain crossfades over 30 ms, so a transient
+inside the engagement window was weighted almost
+entirely at the new offset (mid-fade impulse: +0 peak
+0.128 / +960 peak 0.378 pre-fix; 0.336 / 0.336
+post-fix — pin P9e, which fails on the pre-fix code).
+The tap now crossfades its offset over the same
+30 ms. New pins P9a–P9e (processor) + F5 (DSP);
+suites DSP 38/38, processor 31/31, NO existing pin
+moved. The ADT decks' near-unison approaches to the
+SRC delay are characterised in the diagnosis §7 and
+left as-is per Nathan's ruling ("if it's on the ADT,
+it's fine"). GUI v44: the meter's dark end lifted a
+fourth step (floor (12, 68, 28) -> (14, 82, 34),
+masks = floor, dead glass in step); pixel proofs
+re-run (centre strip at 25 dB identical to the 0 dB
+artwork, 14,256 mask px exactly the floor); headroom
+note in the diagnosis §8.
+
 v1.1.3 / GUI v43 (the Luna-stereo fix + SIDECHAIN
 release; reports docs/build-report-v42.md (feature +
 diagnosis), docs/build-report-v43.md (v42 tweaks),

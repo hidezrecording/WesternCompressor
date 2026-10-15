@@ -23,6 +23,16 @@
 //          the 960-sample chain latency), mix=0.5 the exact
 //          mean of aligned dry and wet, POWER off bypassing
 //          regardless of mix
+//   P9     MIX ALIGNMENT at impulse level (v44 diagnosis):
+//          P7's pins took the nominal latency as their own
+//          reference, so a wet path arriving a sample early
+//          or late would have passed them. P9 measures the
+//          paths themselves: wet/dry cross-correlation peaks
+//          at lag 0, the blended impulse peak sits exactly at
+//          the expected sample at exactly the mean-of-peaks
+//          height (a split peak cannot), and during a MOD
+//          toggle the dry tap crossfades its offset with the
+//          chain's own engagement law instead of stepping
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "PluginProcessor.h"
 #include <cstdio>
@@ -290,7 +300,14 @@ int main() {
         auto dul = grAfter(false, 0.30);
         std::snprintf(b, sizeof b, "GR after stop: SINGLE %.1f of %.1f dB @+0.35 s, DUAL %.1f of %.1f dB @+0.30 s",
                       sgl.second, sgl.first, dul.second, dul.first);
-        check(sgl.first > 5.0f && sgl.second < 0.45f * sgl.first && dul.second > 0.35f * dul.first,
+        // v45: the DUAL clause 0.35 -> 0.28 — the re-voiced
+        // opto front (50% recovery at ~60 ms, per the
+        // manuals) leaves only the tail share by +0.30 s:
+        // raw trace 37%, readout (block-quantised sampling)
+        // 33.7%. SINGLE's clause is unchanged and now passes
+        // at 0.0 — the 1176-seat Single is fully home by
+        // +0.35 s. See build-report-v45.md.
+        check(sgl.first > 5.0f && sgl.second < 0.45f * sgl.first && dul.second > 0.28f * dul.first,
               "P6c proc: SINGLE releases fast, DUAL holds (readout)", b);
     }
 
@@ -454,6 +471,133 @@ int main() {
         float mfLo = grSteady(1000.0f, -1.0f), mfHi = grSteady(1000.0f, 1.0f);
         std::snprintf(b, sizeof b, "1 kHz GR: default %.2f dB, sc200 %.2f dB", mfLo, mfHi);
         check(std::fabs(mfHi - mfLo) <= 0.5f, "P8d proc: 1 kHz GR essentially unaffected", b);
+    }
+
+    // ── P9. MIX alignment at impulse level (v44) ─────────────
+    {
+        // One impulse at low drive ( knob 0: minimal GR), full
+        // history. Params are set before processing starts, so
+        // by the impulse (0.5 s in) every fade has settled.
+        auto runImp = [](float mix, bool warble, int impAt, int total) {
+            Osc72Processor p;
+            p.prepareToPlay(kFs, 512);
+            p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.0f);
+            p.apvts.getParameter("warble")->setValueNotifyingHost(warble ? 1.0f : 0.0f);
+            p.apvts.getParameter("mix")->setValueNotifyingHost(mix);
+            juce::MidiBuffer midi;
+            std::vector<float> out((size_t)total, 0.0f);
+            const int block = 512;
+            for (int base = 0; base + block <= total; base += block) {
+                juce::AudioBuffer<float> buf(2, block);
+                for (int j = 0; j < block; ++j) {
+                    const float s = (base + j == impAt) ? 0.5f : 0.0f;
+                    buf.setSample(0, j, s); buf.setSample(1, j, s);
+                }
+                p.processBlock(buf, midi);
+                for (int j = 0; j < block; ++j) out[(size_t)(base + j)] = buf.getSample(0, j);
+            }
+            return out;
+        };
+        auto peakAt = [](const std::vector<float>& y, int centre, int halfWin, int& at) {
+            float best = -1.0f; at = centre;
+            for (int i = centre - halfWin; i <= centre + halfWin; ++i)
+                if (std::fabs(y[(size_t)i]) > best) { best = std::fabs(y[(size_t)i]); at = i; }
+            return best;
+        };
+        // Normalised cross-correlation peak lag of two impulse
+        // responses over a window, lags in [lagMin, lagMax].
+        auto xcorrLag = [](const std::vector<float>& a, const std::vector<float>& c,
+                           int w0, int wLen, int lagMin, int lagMax) {
+            int bestLag = 0; double best = -1e30;
+            for (int lag = lagMin; lag <= lagMax; ++lag) {
+                double s = 0.0;
+                for (int i = 0; i < wLen; ++i)
+                    s += (double)a[(size_t)(w0 + i)] * c[(size_t)(w0 + i + lag)];
+                if (s > best) { best = s; bestLag = lag; }
+            }
+            return bestLag;
+        };
+        const int total = (int)(1.5 * kFs), impAt = (int)(0.5 * kFs);
+        char b[256];
+        for (bool warble : { false, true }) {
+            const int lat = warble ? 960 : 0;
+            auto dry = runImp(0.0f, warble, impAt, total);
+            auto wet = runImp(1.0f, warble, impAt, total);
+            auto half = runImp(0.5f, warble, impAt, total);
+            int atDry = 0, atWet = 0, atHalf = 0;
+            const float pkDry = peakAt(dry, impAt + lat, 400, atDry);
+            const float pkWet = peakAt(wet, impAt + lat, 400, atWet);
+            const float pkHalf = peakAt(half, impAt + lat, 400, atHalf);
+            std::snprintf(b, sizeof b, "warble=%d: peaks dry@%+d wet@%+d half@%+d (want all %+d)",
+                          (int)warble, atDry - impAt, atWet - impAt, atHalf - impAt, lat);
+            check(atDry == impAt + lat && atWet == impAt + lat && atHalf == impAt + lat,
+                  warble ? "P9a blended impulse peak exactly at +960 (MOD in)"
+                         : "P9a blended impulse peak exactly at +0 (MOD out)", b);
+            // Coincidence: the blended peak must reach the mean
+            // of the two path peaks. Any path offset splits the
+            // peak and the height collapses toward the larger
+            // single-path share (~0.25 here vs the 0.40 mean).
+            const float meanPk = 0.5f * (pkDry + pkWet);
+            std::snprintf(b, sizeof b, "warble=%d: half peak %.4f vs mean-of-peaks %.4f",
+                          (int)warble, pkHalf, meanPk);
+            check(std::fabs(pkHalf - meanPk) < 0.03f * meanPk,
+                  warble ? "P9b blend peak coincides (no split) (MOD in)"
+                         : "P9b blend peak coincides (no split) (MOD out)", b);
+            // Wet vs dry path cross-correlation: lag must be 0
+            // about the nominal arrival.
+            const int lag = xcorrLag(dry, wet, impAt + lat - 200, 600, -16, 16);
+            std::snprintf(b, sizeof b, "warble=%d: xcorr(dry, wet) peak lag %+d (want 0)", (int)warble, lag);
+            check(lag == 0, warble ? "P9c wet/dry cross-correlation offset 0 (MOD in)"
+                                   : "P9c wet/dry cross-correlation offset 0 (MOD out)", b);
+            // First sample over half the wet peak: the arrival
+            // itself, not a deck pre-echo (deck peaks are ~1/4
+            // of the SRC peak and cannot cross this threshold).
+            int first = -1;
+            for (int i = impAt; i < impAt + lat + 400 && first < 0; ++i)
+                if (std::fabs(wet[(size_t)i]) > 0.5f * pkWet) first = i;
+            std::snprintf(b, sizeof b, "warble=%d: first >50%% sample at %+d (want %+d)",
+                          (int)warble, first - impAt, lat);
+            check(first == impAt + lat, warble ? "P9d wet arrival exactly at the latency (MOD in)"
+                                               : "P9d wet arrival exactly at the input (MOD out)", b);
+        }
+        // P9e: MOD toggle mid-stream at mix 0.5 — the dry tap
+        // must follow the chain's own 30 ms engagement law.
+        // An impulse fired 5 ms into the fade has to appear at
+        // BOTH offsets with crossfade weights (like the wet
+        // path's own dry component does), not sit entirely at
+        // the new offset while the chain is still morphing:
+        // without the tap crossfade the +0 copy measures only
+        // the wet path's fading share (~0.13 of the settled
+        // 0.40 peak); with it, ~0.33.
+        {
+            Osc72Processor p;
+            p.prepareToPlay(kFs, 512);
+            p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.0f);
+            p.apvts.getParameter("mix")->setValueNotifyingHost(0.5f);
+            juce::MidiBuffer midi;
+            const int tot2 = 96000, flipBlock = 48128, midImp = flipBlock + 240;
+            std::vector<float> out((size_t)tot2, 0.0f);
+            const int block = 512;
+            for (int base = 0; base + block <= tot2; base += block) {
+                if (base == flipBlock)
+                    p.apvts.getParameter("warble")->setValueNotifyingHost(1.0f);
+                juce::AudioBuffer<float> buf(2, block);
+                for (int j = 0; j < block; ++j) {
+                    const int idx = base + j;
+                    const float s = (idx == midImp) ? 0.5f : 0.0f;
+                    buf.setSample(0, j, s); buf.setSample(1, j, s);
+                }
+                p.processBlock(buf, midi);
+                for (int j = 0; j < block; ++j) out[(size_t)(base + j)] = buf.getSample(0, j);
+            }
+            int at0 = 0, at960 = 0;
+            const float pk0 = peakAt(out, midImp, 48, at0);
+            const float pk960 = peakAt(out, midImp + 960, 96, at960);
+            std::snprintf(b, sizeof b, "mid-fade impulse: +0 peak %.3f @%+d, +960 peak %.3f @%+d",
+                          pk0, at0 - midImp, pk960, at960 - midImp);
+            check(pk0 > 0.22f && at0 == midImp && at960 == midImp + 960,
+                  "P9e dry tap crossfades its offset on MOD toggle (no step)", b);
+        }
     }
 
     std::printf("%s (%d checks, %d failures)\n",

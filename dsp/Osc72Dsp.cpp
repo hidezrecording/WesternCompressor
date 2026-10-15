@@ -33,6 +33,7 @@ void Ba6aLimiter::reset()
     lastPreL_ = lastPreR_ = 0.0f;
     prePeak_ = 0.0f;
     grSingle_ = grDual1_ = grDual2_ = 0.0f;
+    stress_ = 0.0f;
     grDb_ = 0.0f;
     avgGrDb_ = 0.0f;
     makeupDb_ = 0.0f;
@@ -131,7 +132,7 @@ void Ba6aLimiter::process(float inL, float inR, float& outL, float& outR)
     const float peak = kBa6aDetSense
                      * std::max(std::fabs(senL), std::fabs(senR));
     const float detTau = peak > detEnv_
-        ? (attackFast_ ? kBa6aDetFastTauSec : kBa6aDetSlowTauSec)
+        ? (attackFast_ ? kBa6aDetFastTauSec : ba6aDetSlowTau(peak, detEnv_))
         : kBa6aDetDecayTauSec;
     detEnv_ += (peak - detEnv_) * tauCoef(detTau, fs_);
 
@@ -151,11 +152,24 @@ void Ba6aLimiter::process(float inL, float inR, float& outL, float& outR)
         grDual1_ += (t1 - grDual1_) * tauCoef(attTau, fs_);
     else
         grDual1_ += (t1 - grDual1_) * tauCoef(kBa6aRelDualFastTauSec, fs_);
+    // The Dual tail pole carries the T4 memory: the stress
+    // state (integrated GR history, updated below from the
+    // PREVIOUS sample's GR — the cell remembers what it has
+    // already done) stretches the pole monotonically.
+    const float dualSlowTau = kBa6aRelDualSlowTauSec
+        * (1.0f + kBa6aMemStretch * clampf(stress_ / kBa6aMemRefDb, 0.0f, 1.0f));
     if (t2 > grDual2_)
         grDual2_ += (t2 - grDual2_) * tauCoef(attTau, fs_);
     else
-        grDual2_ += (t2 - grDual2_) * tauCoef(kBa6aRelDualSlowTauSec, fs_);
+        grDual2_ += (t2 - grDual2_) * tauCoef(dualSlowTau, fs_);
     grDb_ = releaseFast_ ? grSingle_ : grDual1_ + grDual2_;
+
+    // ── T4 memory state (v45): charges toward the GR being
+    // done (tau ~1.2 s), forgets in quiet (tau ~8 s). Bounded
+    // by the GR cap itself; only ever read as a 0..1 stretch
+    // of the Dual tail pole. ──
+    stress_ += (grDb_ - stress_) * tauCoef(
+        grDb_ > stress_ ? kBa6aMemChargeTauSec : kBa6aMemDecayTauSec, fs_);
 
     // ── Auto make-up (design §3.2): tracks the ACTUAL GR
     // (slow average) + a crank term in the knob; applied after

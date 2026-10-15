@@ -205,24 +205,55 @@ inline float ba6aVariMuDb(float envLin) {
     const float gr = kBa6aDbPerVolt * over;
     return gr > kBa6aGrCapDb ? kBa6aGrCapDb : gr;
 }
-// Ballistics (design §2.2). Attack FAST = stock detector;
-// SLOW = the era mod (flagged). Release FAST = SINGLE network
-// (90 % ≈ 0.30 s); SLOW = DUAL network (fast partial + slow
-// tail, 90 % ≈ 3 s).
-inline constexpr float kBa6aDetFastTauSec  = 0.00015f; // detector env charge
-inline constexpr float kBa6aDetSlowTauSec  = 0.008f;   // v1.1.2: 5 -> 8 ms (below)
+// Ballistics (v45 re-voice; research: docs/ballistics-refs.md).
+// The four toggle seats are Nathan's chosen reference voicings
+// — the BA-6A panel has no attack/release controls of its own
+// (provenance: docs/build-report-v45.md):
+//   FAST attack  = 1176 attack knob at ~11 o'clock
+//                  (≈ 190 µs class, geometric-taper reading).
+//   FAST release = 1176 release knob at ~4:30–5 o'clock
+//                  (≈ 50 ms class, at the fast end of travel).
+//   SLOW attack  = between the LA-3A (≤ 1.5 ms) and the
+//                  LA-2A (10 ms); T4-shaped: the charge rate
+//                  follows the demand (see ba6aDetSlowTau).
+//   SLOW release = the same opto seat: both manuals print the
+//                  same release line (50 % ≈ 60 ms, complete
+//                  0.5–5 s); the T4 two-stage shape + memory.
+inline constexpr float kBa6aDetFastTauSec  = 0.00006f; // detector env charge, FAST
 inline constexpr float kBa6aDetDecayTauSec = 0.030f;   // detector env decay
-inline constexpr float kBa6aAttFastTauSec  = 0.0005f;  // control attack pole
-// v1.1.2 (Nathan on 1.1.1: SLOW still "a little too
-// grabby"): the era mod's charge path lengthens — detector
-// tau 5 -> 8 ms, control pole 12 -> 24 ms. Measured GR
-// t90: 18.5 -> ~31.6 ms on the analysis harness (1.7x);
-// FAST is stock and untouched.
-inline constexpr float kBa6aAttSlowTauSec  = 0.024f;
-inline constexpr float kBa6aRelSingleTauSec = 0.130f;
-inline constexpr float kBa6aRelDualFastTauSec = 0.055f;
-inline constexpr float kBa6aRelDualSlowTauSec = 1.500f;
-inline constexpr float kBa6aRelDualFastShare  = 0.55f;
+// SLOW detector charge is SHAPED, not a single tau — the T4
+// behaviours the manuals document: the EL panel burns brighter
+// on a bigger demand so the cell charges faster toward it
+// (grab), the rate tapers as the cell nears the demanded state
+// (creep), and a small demand (dim panel) slows the whole
+// response. tau = lerp(grab, creep, approach)
+//                 x (1 + dim x (1 - demand)).
+inline constexpr float kBa6aDetSlowGrabTauSec  = 0.0009f;
+inline constexpr float kBa6aDetSlowCreepTauSec = 0.0030f;
+inline constexpr float kBa6aDetSlowDim         = 2.6f;   // dim-panel slowdown factor
+inline float ba6aDetSlowTau(float peak, float env) {
+    const float demand = clampf(ba6aVariMuDb(peak) / 25.0f, 0.0f, 1.0f);
+    const float approach = peak > 1.0e-6f ? clampf(env / peak, 0.0f, 1.0f) : 1.0f;
+    const float base = kBa6aDetSlowGrabTauSec
+        + (kBa6aDetSlowCreepTauSec - kBa6aDetSlowGrabTauSec) * approach;
+    return base * (1.0f + kBa6aDetSlowDim * (1.0f - demand));
+}
+inline constexpr float kBa6aAttFastTauSec  = 0.00009f; // control attack pole, FAST
+inline constexpr float kBa6aAttSlowTauSec  = 0.0018f;  // control attack pole, SLOW
+inline constexpr float kBa6aRelSingleTauSec = 0.014f;  // FAST release (1176 seat)
+inline constexpr float kBa6aRelDualFastTauSec = 0.022f;
+inline constexpr float kBa6aRelDualSlowTauSec = 0.900f; // unstressed tail pole
+inline constexpr float kBa6aRelDualFastShare  = 0.60f;
+// T4 memory: a stress state integrates the GR actually being
+// done (charges over ~1.2 s under reduction, forgets over
+// ~8 s in quiet) and stretches the Dual tail pole
+// monotonically, bounded: at full stress the pole is
+// x(1 + stretch), keeping even the longest tail inside the
+// manuals' printed 0.5–5 s complete-release envelope.
+inline constexpr float kBa6aMemChargeTauSec = 1.2f;
+inline constexpr float kBa6aMemDecayTauSec  = 8.0f;
+inline constexpr float kBa6aMemStretch      = 1.6f;
+inline constexpr float kBa6aMemRefDb        = 25.0f;   // GR depth counted as full stress
 // Auto make-up (v1.0.3 law carried per Nathan; design §3.2).
 inline constexpr float kBa6aMakeupAvgChargeTauSec = 0.080f;
 inline constexpr float kBa6aMakeupAvgDecayTauSec  = 0.300f;
@@ -296,6 +327,7 @@ private:
     float scCoef_ = 0.0f;             // v41: its one-pole LP coefficient
     float scLpL_ = 0.0f, scLpR_ = 0.0f; // v41: per-channel LP states (HP = sense - LP)
     float detEnv_ = 0.0f;             // detector envelope (linear peak)
+    float stress_ = 0.0f;             // v45: T4 memory state (dB of sustained GR)
     float lastPreL_ = 0.0f, lastPreR_ = 0.0f; // post-iron, pre-makeup (detector source)
     float prePeak_ = 0.0f;            // slow-decay peak of the pre-makeup output (make-up ceiling)
     float grSingle_ = 0.0f;           // SINGLE-network state (dB)

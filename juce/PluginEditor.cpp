@@ -1607,11 +1607,23 @@ juce::Image Osc72Editor::buildGrFieldImage()
     // untouched. The bow tie stays clearly readable and
     // the fully-closed state is still the dark end of the
     // green family. Masks follow the floor exactly.
+    // v44 (Nathan): the dark STILL reads too black — the
+    // fourth nudge in this direction, the same modest step
+    // as v43's: floor (12, 68, 28) -> (14, 82, 34), 0.30
+    // (18, 104, 41) -> (20, 116, 46), 0.55 (22, 132, 48)
+    // -> (23, 140, 51); same hue ratios, 0.78 up still
+    // untouched. Headroom accounting is in
+    // docs/mix-alignment-diagnosis.md §8: the floor's
+    // luminance has reached ~27% of the peak stop's, and
+    // roughly five more steps of this size would halve the
+    // remaining contrast again to ~2:1, where "closed"
+    // would stop reading as dark — this step is safe, the
+    // direction is not bottomless.
     auto ramp = [](float L, float& r, float& g, float& b) {
         static const float stops[][4] = {
-            { 0.00f,  12.0f,  68.0f,  28.0f },
-            { 0.30f,  18.0f, 104.0f,  41.0f },
-            { 0.55f,  22.0f, 132.0f,  48.0f },
+            { 0.00f,  14.0f,  82.0f,  34.0f },
+            { 0.30f,  20.0f, 116.0f,  46.0f },
+            { 0.55f,  23.0f, 140.0f,  51.0f },
             { 0.78f,  53.0f, 196.0f,  82.0f },
             { 0.95f,  96.0f, 244.0f, 120.0f },
             { 1.12f, 138.0f, 250.0f, 150.0f },
@@ -1814,9 +1826,12 @@ void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
     // -> (6, 29, 12), still a step below the new floor.
     // v43: in step with the v43 ramp — (12, 58, 23)
     // -> (7, 38, 15), still a step below the new floor.
+    // v44: in step with the v44 ramp — (15, 72, 29)
+    // -> (9, 47, 19), still a step below the new floor
+    // (top G 72 vs floor G 82, the same 10-unit gap as v43).
     {
-        juce::ColourGradient dead(juce::Colour(0xff0c3a17), window.getX(), window.getY(),
-                                  juce::Colour(0xff07260f), window.getX(), window.getBottom(), false);
+        juce::ColourGradient dead(juce::Colour(0xff0f481d), window.getX(), window.getY(),
+                                  juce::Colour(0xff092f13), window.getX(), window.getBottom(), false);
         g.setGradientFill(dead);
         g.fillRoundedRectangle(window, 3.0f);
     }
@@ -1862,7 +1877,9 @@ void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
                 // mask follows it exactly, as before.
                 // v43: the floor moved to (12, 68, 28); the
                 // mask follows it exactly, as before.
-                const auto maskCol = juce::Colour(12, 68, 28);
+                // v44: the floor moved to (14, 82, 34); the
+                // mask follows it exactly, as before.
+                const auto maskCol = juce::Colour(14, 82, 34);
                 const float fL = field.getX(), fR = field.getRight();
                 const float fCx = field.getCentreX();
                 const float fTop = field.getY(), fBot = field.getBottom();
