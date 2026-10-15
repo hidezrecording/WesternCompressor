@@ -1345,259 +1345,478 @@ void BatToggle::paintButton(juce::Graphics& g, bool, bool)
     }
 }
 
-// ── Magic-eye retaining bezel (v20, Nathan) ─────────────────
-// Until v19 the eye wore a clean silk-white ring — flat pure
-// white, vector-perfect — and next to the now-realistic
-// hardware it "looks almost like a graphic" (Nathan). The
-// ring becomes what it is on the real unit: a brass RETAINING
-// BEZEL, gold to match the jewel bezels' gold tone, drawn as
-// aged metal: a gold gradient raked from the upper left (as
-// the whole panel is lit), its highlight broken into uneven
-// arc runs instead of one perfect circular stroke, fine
-// scratches worried into the band and a few chips on the
-// rim — all deterministic, so the wear never moves. The
-// glass, phosphor and hub inside it are untouched.
-void drawEyeBezel(juce::Graphics& g, float cx, float cy,
-                  float ringR, float glassR)
+// ── GR display frame (v4, Nathan 2026-10-15) ────────────────
+// The magic eye's aged-gold RETAINING BEZEL, carried over at
+// Nathan's direction and reshaped from the round ring into
+// the WIDE RECTANGULAR frame of the Pioneer 202W display:
+// the SAME rendering language as the deleted drawEyeBezel —
+// the panel's aged-brass gradient raked from the upper left,
+// its highlight broken into uneven runs instead of one
+// perfect stroke, fine scratches worried into the band, a
+// few chips on the rim, a dark inner seat where the frame
+// meets the glass — all deterministic, so the wear never
+// moves. Only the geometry changed (rounded rectangle).
+void drawDisplayFrame(juce::Graphics& g, juce::Rectangle<float> outer)
 {
-    const float midR = (ringR + glassR) * 0.5f;
-    const float bandW = ringR - glassR;
+    const float bandW = 6.5f;
+    const auto mid = outer.reduced(bandW * 0.5f);
+    const float corner = 5.0f;
 
-    // Seat shadow under the bezel's outer rim
+    // Seat shadow under the frame's outer rim
     g.setColour(juce::Colour(0x80000000));
-    g.drawEllipse(cx - ringR - 0.8f, cy - ringR - 0.8f,
-                  (ringR + 0.8f) * 2.0f, (ringR + 0.8f) * 2.0f, 1.6f);
+    g.drawRoundedRectangle(outer.expanded(0.8f), corner + 0.8f, 1.6f);
 
-    // The gold band: an aged-brass gradient across the ring
-    // (the panel's aged-gold anchors), bright at the upper
-    // left, deep at the lower right.
-    juce::ColourGradient gold(juce::Colour(0xffe9c96e), cx - ringR, cy - ringR,
-                              juce::Colour(0xff6e4a10), cx + ringR, cy + ringR, false);
+    // The gold band: the bezel's aged-brass gradient.
+    juce::ColourGradient gold(juce::Colour(0xffe9c96e), outer.getX(), outer.getY(),
+                              juce::Colour(0xff6e4a10), outer.getRight(), outer.getBottom(), false);
     gold.addColour(0.38, juce::Colour(0xffc08c2a));
     gold.addColour(0.68, juce::Colour(0xff9a6d1e));
     g.setGradientFill(gold);
-    g.drawEllipse(cx - midR, cy - midR, midR * 2.0f, midR * 2.0f, bandW);
+    g.drawRoundedRectangle(mid, corner, bandW);
 
-    // Unevenness: the highlight is NOT one perfect circle —
-    // brighter broken runs where the rim catches the light
-    // (upper left), duller runs at the lower right, each at a
-    // hair different radius, like a turned ring worn by
-    // thumbs. (JUCE arc angles run clockwise from 3 o'clock
-    // with y down: pi..1.5pi is the upper left.)
-    auto arc = [&](float rOff, float wdt, float a0, float a1,
-                   juce::Colour col) {
-        juce::Path p;
-        const float r = midR + rOff;
-        p.addArc(cx - r, cy - r, r * 2.0f, r * 2.0f, a0, a1, true);
+    // Unevenness: brighter broken runs where the rim catches
+    // the light (top + upper left), duller runs at the lower
+    // right — straight-segment echoes of the bezel's arcs.
+    auto run = [&](float x0, float y0, float x1, float y1, float wdt, juce::Colour col) {
         g.setColour(col);
-        g.strokePath(p, juce::PathStrokeType(wdt));
+        g.drawLine(x0, y0, x1, y1, wdt);
     };
-    arc( 0.5f, 1.9f, 0.82f * kPi, 1.30f * kPi, juce::Colour(0x8cffe9b0));
-    arc( 0.2f, 1.5f, 1.38f * kPi, 1.62f * kPi, juce::Colour(0x59ffe9b0));
-    arc(-0.4f, 2.1f, 0.08f * kPi, 0.55f * kPi, juce::Colour(0x663d2c07));
-    arc(-0.9f, 1.1f, 0.60f * kPi, 0.95f * kPi, juce::Colour(0x4d3d2c07));
+    const float mx = mid.getX(), my = mid.getY(), mr = mid.getRight(), mb = mid.getBottom();
+    run(mx + 6.0f, my, mr - 40.0f, my, 1.9f, juce::Colour(0x8cffe9b0));       // top highlight
+    run(mx, my + 8.0f, mx, mb - 18.0f, 1.5f, juce::Colour(0x59ffe9b0));       // left highlight
+    run(mx + 30.0f, mb, mr - 6.0f, mb, 2.1f, juce::Colour(0x663d2c07));       // bottom shade
+    run(mr, my + 16.0f, mr, mb - 6.0f, 1.1f, juce::Colour(0x4d3d2c07));       // right shade
 
     // Fine scratches worried into the band: short strokes
-    // running mostly WITH the ring (turning marks and
-    // handling scratches follow the circle), pale where they
-    // cut to bright metal, dark where they hold dirt.
+    // running mostly ALONG the band (handling scratches follow
+    // the frame), pale where they cut to bright metal, dark
+    // where they hold dirt. Same seed discipline as the bezel.
     PanelRand rng(0x5eed0be7u);
     for (int i = 0; i < 34; ++i) {
-        const float aDeg = rng.range(0.0f, 360.0f);
-        const float rr = midR + rng.range(-bandW * 0.36f, bandW * 0.36f);
+        const bool horiz = rng.next() < 0.72f;
         const float len = rng.range(1.5f, 7.5f);
-        const auto p0 = polar(cx, cy, rr, aDeg);
-        const auto p1 = polar(cx, cy, rr + rng.range(-0.5f, 0.5f),
-                              aDeg + len * 57.2958f / juce::jmax(8.0f, rr));
+        float x0, y0, x1, y1;
+        if (horiz) {
+            const bool top = rng.next() < 0.55f;
+            y0 = y1 = (top ? outer.getY() : outer.getBottom())
+                    + rng.range(1.2f, bandW - 1.2f) * (top ? 1.0f : -1.0f)
+                    + (top ? 0.0f : 0.0f);
+            if (!top) y0 = y1 = outer.getBottom() - rng.range(1.2f, bandW - 1.2f);
+            x0 = rng.range(outer.getX() + 4.0f, outer.getRight() - 12.0f);
+            x1 = x0 + len;
+            y1 = y0 + rng.range(-0.5f, 0.5f);
+        } else {
+            const bool left = rng.next() < 0.5f;
+            x0 = x1 = left ? outer.getX() + rng.range(1.2f, bandW - 1.2f)
+                           : outer.getRight() - rng.range(1.2f, bandW - 1.2f);
+            y0 = rng.range(outer.getY() + 4.0f, outer.getBottom() - 10.0f);
+            y1 = y0 + len;
+            x1 = x0 + rng.range(-0.5f, 0.5f);
+        }
         if (rng.next() < 0.55f)
             g.setColour(juce::Colour::fromRGBA(240, 214, 150,
                         (uint8_t)rng.range(22.0f, 60.0f)));
         else
             g.setColour(juce::Colour::fromRGBA(24, 15, 3,
                         (uint8_t)rng.range(24.0f, 56.0f)));
-        g.drawLine(p0.x, p0.y, p1.x, p1.y, 0.8f);
+        g.drawLine(x0, y0, x1, y1, 0.8f);
     }
-    // A few chips on the rim: tiny dark bites, the first
-    // with a bright lip where the metal turned over.
+    // A few chips on the rim: tiny dark bites, the first with
+    // a bright lip where the metal turned over.
     for (int i = 0; i < 3; ++i) {
-        const float aDeg = rng.range(0.0f, 360.0f);
-        const float rr = midR + rng.range(-bandW * 0.3f, bandW * 0.3f);
-        const auto p = polar(cx, cy, rr, aDeg);
+        const bool top = rng.next() < 0.5f;
+        const float px = rng.range(outer.getX() + 8.0f, outer.getRight() - 8.0f);
+        const float py = (top ? outer.getY() : outer.getBottom())
+                       + rng.range(1.5f, bandW - 1.5f) * (top ? 1.0f : -1.0f);
         const float r = rng.range(0.7f, 1.4f);
         g.setColour(juce::Colour(0xb014100a));
-        g.fillEllipse(p.x - r, p.y - r, r * 2.0f, r * 2.0f);
+        g.fillEllipse(px - r, py - r, r * 2.0f, r * 2.0f);
         if (i == 0) {
             g.setColour(juce::Colour(0x59ffe9b0));
-            g.drawEllipse(p.x - r, p.y - r, r * 2.0f, r * 2.0f, 0.6f);
+            g.drawEllipse(px - r, py - r, r * 2.0f, r * 2.0f, 0.6f);
         }
     }
 
-    // Inner seat: a dark line where the bezel meets the glass.
+    // Inner seat: a dark line where the frame meets the glass.
     g.setColour(juce::Colour(0xcc000000));
-    g.drawEllipse(cx - glassR - 0.4f, cy - glassR - 0.4f,
-                  (glassR + 0.4f) * 2.0f, (glassR + 0.4f) * 2.0f, 1.0f);
+    g.drawRoundedRectangle(outer.reduced(bandW - 0.4f), corner - 1.0f, 1.0f);
+}
+
+// ── GR field image (v37, Nathan) ────────────────────────────
+// v36's woven band still read as stacked HORIZONTAL BANDS —
+// a light strip, a dark strip, a row of diamonds, a dark
+// strip, a light strip — because it was built from
+// horizontal terms: a centre-weighted channel around a
+// centreline, with darkness falling away above and below
+// it. Nathan re-sent his 202W photo and corrected the
+// reading again; the field's actual structure (measured
+// from the photo, see docs/build-report-v37.md) is:
+//   - A UNIFORM set of full-height vertical louver slices
+//     glowing green. Brightness does NOT come in horizontal
+//     layers: the width-averaged vertical profile is one
+//     smooth, continuous sag (bright at the top, easing
+//     ~25% down through the middle heights where the fins
+//     live, recovering toward the bottom) — no steps, no
+//     strata, no centre-weighted band.
+//   - The only angles are in the TOPS of the slices'
+//     shading: each slice carries ONE dark fin (a sail /
+//     wedge) whose top edge is an angled curve. The fins
+//     lean per field-half, mirrored about the centre —
+//     thick blunt edge toward the centre, point outward —
+//     so the luminance contour across the field is a row
+//     of angled facets, not a horizontal line.
+//   - The interlocking diamond motif is SMALL and lives
+//     only where the fins meet at the centre: the fins
+//     shrink (in height and reach) as they approach the
+//     centre slices, becoming small diamonds around the
+//     vertical centre (~15–20% of the field height), with
+//     a tiny bright sparkle at the meeting point.
+// So v37 builds the field from exactly those ingredients
+// and nothing else: per column, the rib louver shading and
+// its fin (top/bottom edges per column, grown from the
+// centre); per row, ONE smooth vertical base curve (the
+// measured sag). There is no band centreline, no channel,
+// no centre-weighting term — nothing that can stack into
+// horizontal layers. The converging-darkness law is
+// unchanged (lit fraction from GR, fronts closing
+// symmetrically); coverage is per column, feathered
+// across ~one rib at each front. The image is rendered
+// at 4x the virtual field size and cached on the
+// quantised lit fraction (see drawGrDisplay).
+//
+// v38 (Nathan) — the fin SIZES follow his own law now,
+// stated over our photo readings and implemented as
+// specified: there is NO dark at the centre — the centre
+// columns are pure bright green, the dark shape's size
+// there is ZERO. Moving outward, the dark shape in each
+// slice grows GRADUALLY and MONOTONICALLY across the
+// WHOLE half-width (no floor at the centre, no early
+// saturation), each slice's shape CENTRED on the slice's
+// vertical middle, growing symmetrically up and down
+// from the centre line; by the far left and right the
+// dark fills the slice completely — all dark at the
+// corners. Per column: h = t^1.2 with t = |u - 1/2| * 2
+// (0 at the centre column, 1 at the field edges) is the
+// shape's vertical span as a fraction of the field
+// height, centred on v = 1/2. Within the span the v37
+// sail keeps its character (angled top sweeping from
+// the blunt centre-facing edge down to the point, at
+// the v37 ratios); as h -> 1 two ramps complete the
+// fill — the edges straighten to the blunt span
+// (fullness) and the shadow strength rises from v37's
+// 0.26 to full — so the outermost slices go truly dark.
+// The aggregate dark at rest reads as a BOW TIE: two
+// triangles, full height at the edges, tapering to
+// points that meet at the centre, the sparkle sitting
+// where the points meet. Under GR the converging law
+// rides on top unchanged: the fronts consume the bow
+// tie's wide ends first and its centre point last
+// (verified in the gr= series, build-report-v38.md).
+// The bright slices' vertical gradient (the measured
+// sag) is v37's, untouched.
+//
+// v39 (Nathan) — "very close", three exact fixes to the
+// bow tie. (1) STRAIGHT EDGES: the span grows LINEARLY
+// with distance from the centre (h = t, not t^1.2) and
+// the sail inside the span is DELETED — the span is
+// blunt (top = 1/2 - h/2, bottom = 1/2 + h/2 per
+// column), so the dark region's top and bottom
+// boundaries are two ruler-straight lines per side;
+// the v38 growth read as two half-circles. (2) THE
+// TRIANGLES MEET: the straight edges run all the way
+// in to the central bar instead of stopping short.
+// (3) ONE SINGLE GREEN BAR IN THE CENTRE: the louver
+// phase shifts half a rib so ONE rib is centred on
+// u = 1/2, and h is ZERO across exactly that rib's
+// width (|u - 1/2| <= 1/(2*ribs)) — the centre slice
+// alone stays fully solid green, and the bow tie's
+// edges terminate on either side of it. The shadow
+// strength law (0.26 rising to full as h -> 1) and
+// the centre sparkle are v38's, unchanged; the
+// sparkle sits on the central bar. Measured in
+// build-report-v39.md (straight-line fit, the
+// one-green-bar count, monotone fractions, the
+// edges-first GR erosion).
+juce::Image Osc72Editor::buildGrFieldImage(float lit)
+{
+    // Field geometry — must match drawGrDisplay's.
+    const juce::Rectangle<float> frame(124.0f, 41.0f, 192.0f, 70.0f);
+    const auto field = frame.reduced(6.5f).reduced(5.0f, 5.0f);
+    const float fx = field.getX(), fy = field.getY();
+    const float fw = field.getWidth(), fh = field.getHeight();
+    const float fcx = frame.getCentreX();
+
+    const int S = 4;                                   // supersample
+    const int W = (int)std::lround(fw * (float)S);
+    const int H = (int)std::lround(fh * (float)S);
+    juce::Image img(juce::Image::ARGB, W, H, true);
+
+    // Fin constants (v39 — Nathan's straight-edge law,
+    // see the note above; build-report-v39.md).
+    const int   ribs    = 26;
+    const float finStr  = 0.26f;   // fin shadow strength in the inner field (v37's value)
+    const float strFrom = 0.22f;   // strength ramp: h where the shadow starts deepening past finStr
+
+    const float ribW = fw / (float)ribs;
+    const float litW = fw * lit;
+
+    auto ss = [](float a, float b, float x) {
+        const float t = osc72::clampf((x - a) / (b - a), 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    };
+    // Green phosphor ramp by luminance L.
+    auto ramp = [](float L, float& r, float& g, float& b) {
+        static const float stops[][4] = {
+            { 0.00f,   2.0f,  10.0f,   4.0f },
+            { 0.30f,  10.0f,  66.0f,  26.0f },
+            { 0.55f,  18.0f, 116.0f,  43.0f },
+            { 0.78f,  53.0f, 196.0f,  82.0f },
+            { 0.95f,  96.0f, 244.0f, 120.0f },
+            { 1.12f, 138.0f, 250.0f, 150.0f },
+        };
+        L = osc72::clampf(L, 0.0f, 1.12f);
+        int i = 0;
+        while (i < 4 && L > stops[i + 1][0]) ++i;
+        const float t = (L - stops[i][0]) / (stops[i + 1][0] - stops[i][0]);
+        r = stops[i][1] + (stops[i + 1][1] - stops[i][1]) * t;
+        g = stops[i][2] + (stops[i + 1][2] - stops[i][2]) * t;
+        b = stops[i][3] + (stops[i + 1][3] - stops[i][3]) * t;
+    };
+
+    // Per-column quantities (constant down each column):
+    // the rib louver shading, the lit coverage, and the
+    // column's fin edges (top/bottom of its sail fin).
+    std::vector<float> colRib(W), colCov(W), colTop(W), colBot(W), colU(W), colStr(W);
+    for (int ix = 0; ix < W; ++ix) {
+        const float vx = fx + ((float)ix + 0.5f) / (float)S;
+        const float u = (vx - fx) / fw;
+        colU[ix] = u;
+        // Rib louver: a bright ridge with one dark groove edge.
+        // v39: the phase shifts half a rib (+ 0.5) so ONE rib
+        // is centred on u = 1/2 — the single central green bar
+        // below is exactly that rib, groove to groove.
+        const float ph = std::fmod(u * (float)ribs + 0.5f, 1.0f);
+        const float ridge = std::pow(0.5f + 0.5f * std::cos(6.2831853f * (ph - 0.45f)), 1.2f);
+        const float grooveD = std::min(ph, 1.0f - ph);
+        const float groove = std::exp(-std::pow(grooveD / 0.11f, 2.0f));
+        colRib[ix] = 0.62f + 0.42f * ridge - 0.20f * groove;
+        // Lit coverage, feathered across ~one rib at each front.
+        const float d = std::abs(vx - fcx);
+        colCov[ix] = osc72::clampf((litW * 0.5f - d) / (ribW * 0.85f) + 0.5f, 0.0f, 1.0f);
+        // v39 (Nathan's law): the dark span h is ZERO across
+        // exactly the central rib's width (halfBar each side
+        // of u = 1/2) and grows LINEARLY with distance beyond
+        // it, reaching the FULL field height at the field
+        // edges — centred on v = 1/2 throughout. The span is
+        // BLUNT: the column's dark runs from 1/2 - h/2 to
+        // 1/2 + h/2 with no sail inside it, so the aggregate
+        // boundaries are straight lines that terminate on
+        // either side of the one central green bar. The
+        // strength ramp (v38) deepens the shadow from
+        // finStr to full as h -> 1, so the corners end up
+        // completely dark; the ss(0, 0.01, h) factor keeps
+        // the empty span at the centre (top == bottom == 1/2
+        // there) from shading a sliver of the bar.
+        const float halfBar = 0.5f / (float)ribs;
+        const float h = osc72::clampf((std::abs(u - 0.5f) - halfBar) / (0.5f - halfBar),
+                                       0.0f, 1.0f);
+        colTop[ix] = 0.5f - 0.5f * h;
+        colBot[ix] = 0.5f + 0.5f * h;
+        colStr[ix] = (finStr + (1.0f - finStr) * std::pow(ss(strFrom, 1.0f, h), 0.5f))
+                   * ss(0.0f, 0.01f, h);
+    }
+
+    juce::Image::BitmapData data(img, juce::Image::BitmapData::writeOnly);
+    for (int iy = 0; iy < H; ++iy) {
+        const float vy = fy + ((float)iy + 0.5f) / (float)S;
+        const float v = (vy - fy) / fh;
+        // The phosphor's vertical base curve — the photo's
+        // measured sag: a gentle early settle, one broad
+        // shallow dip centred just below mid-height, a
+        // slight lift toward the bottom, and the glass-seat
+        // edge falls. Smooth everywhere; no steps.
+        const float bv = ((1.0f - 0.03f * ss(0.05f, 0.45f, v))
+                        * (1.0f - 0.086f * std::exp(-std::pow((v - 0.524f) / 0.368f, 2.0f)))
+                        + 0.02f * ss(0.75f, 0.98f, v))
+                       * (0.86f + 0.14f * ss(0.0f, 0.05f, v))
+                       * (0.86f + 0.14f * (1.0f - ss(0.95f, 1.0f, v)));
+        auto* line = data.getLinePointer(iy);
+        for (int ix = 0; ix < W; ++ix) {
+            const float ft = colTop[ix], fb = colBot[ix];
+            // The dark span's shadow (v39): in through its
+            // top edge, out through its bottom edge, each
+            // crossing anti-aliased symmetrically over
+            // +-0.008 of the field height (~1.5 supersample
+            // rows) so the boundary's midpoint sits exactly
+            // on the straight line ft / fb. No ramp-in —
+            // v38's glow-soft entry under the top edge is
+            // gone; the edge must read ruler-straight.
+            const float F = ss(ft - 0.008f, ft + 0.008f, v)
+                          * (1.0f - ss(fb - 0.008f, fb + 0.008f, v));
+            float L = colRib[ix] * bv * (1.0f - colStr[ix] * F);
+            // The tiny bright sparkle at the centre meeting
+            // point (the photo's ✦), closing with the field.
+            const float du = colU[ix] - 0.5f, dv = v - 0.5f;
+            const float armV = std::exp(-std::pow(du / 0.0035f, 2.0f))
+                             * std::exp(-std::pow(dv / 0.035f, 2.0f));
+            const float armH = std::exp(-std::pow(du / 0.008f, 2.0f))
+                             * std::exp(-std::pow(dv / 0.008f, 2.0f));
+            L += 0.40f * std::max(armV, armH) * (1.0f - F);
+            float r, g, b;
+            ramp(L, r, g, b);
+            const float cov = colCov[ix];
+            juce::PixelARGB px;
+            px.setARGB(0xff,
+                       (juce::uint8)(3.0f + (r - 3.0f) * cov + 0.5f),
+                       (juce::uint8)(16.0f + (g - 16.0f) * cov + 0.5f),
+                       (juce::uint8)(7.0f + (b - 7.0f) * cov + 0.5f));
+            *reinterpret_cast<juce::PixelARGB*>(line + ix * 4) = px;
+        }
+    }
+    return img;
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Magic eye — live gain reduction, drawn like a real 1629 tube.
-//   v3 (Nathan, on 1.0.2): "it's acting more like a VU meter… it
-//   should light up like a real magic eye where there isn't this
-//   wedge shape at all — more of a ring effect of brightness,
-//   where the whole magic eye lights up and dims in response,
-//   not one little sliver." The v6–v32 sector rendering — black
-//   blades eating the green back to a shrinking bottom sliver —
-//   is DELETED. The full green disc is whole at all times; gain
-//   reduction now modulates the phosphor's overall BRIGHTNESS:
-//     0 dB GR  -> full bright glow, whole disc lit around the
-//                 dark centre hub (the lit CT-1 rest state).
-//     GR builds-> the whole disc dims uniformly (like the real
-//                 target going dark as the shadow angle closes
-//                 over it) — no wedge, no sliver, no blades.
-//     ~32 dB+  -> deeply dimmed green (a real eye never goes
-//                 fully black while the tube is powered), hub
-//                 and gold bezel unchanged.
-//   Brightness law: t = clamp(grDb / 32); the phosphor's colour
-//   stops are interpolated toward their deep-dim endpoints by
-//   up to 82% and the layer opacity falls to 0.30 at t = 1, so
-//   the perceived luminance swings widely across the working
-//   GR range (the loop runs 15–55 dB of GR on program now).
+// GR display — the Pioneer 202W ribbed fluorescent window
+// (Nathan, 2026-10-15; replaces the magic eye in the same
+// top-centre position, reference photo docs/202w-display-
+// reference.jpg). A dark recessed window in the rectangular
+// gold frame; inside it a field of VERTICAL RIBS — louvered
+// slices, each shaded dark at its grooves and bright at its
+// ridge, so the field reads as one holographic corrugated
+// surface, brightest through its middle height.
+// v35 (Nathan): across the field's middle the ribs give way
+// to the photo's woven band of INTERLOCKING CURVED
+// TRIANGLES — chevron facets with bowed leading edges (see
+// the facet layer in the function) — the holographic heart
+// of the original display.
+// v36 (Nathan): the v35 facets read as "a bunch of jagged
+// saw teeth", and the render carried horizontal lines the
+// original doesn't have. The facet layer, its feather and
+// the shading overlay are DELETED; the field is now drawn
+// per-pixel by buildGrFieldImage (above) — the woven band
+// of bright diamonds and smooth curved triangles formed
+// by per-column vertical shading alone, no horizontal
+// strokes anywhere.
+// v37 (Nathan): the v36 band still read as stacked
+// horizontal layers (light / dark / diamonds / dark /
+// light) — its channel was a horizontal structure. The
+// band terms are DELETED; the field is now uniform
+// full-height louver slices under one smooth vertical
+// sag, with a single dark sail fin per slice (angled
+// tops, mirrored per half) shrinking to small diamonds
+// and a sparkle where they meet at the centre — the
+// photo's actual structure (see buildGrFieldImage).
+// v38 (Nathan): the fin sizes now follow HIS law — no
+// dark at the centre (size zero at the centre column),
+// growing gradually and monotonically across the whole
+// half-width, centred on each slice's middle, until
+// the dark fills the outermost slices completely: the
+// aggregate dark at rest is a bow tie (full height at
+// the edges, points meeting at the centre sparkle),
+// and the converging GR fronts consume its wide ends
+// first, its point last (see buildGrFieldImage).
+// v39 (Nathan): the bow tie's edges go RULER-STRAIGHT
+// — the span grows linearly (h = t), the sail inside
+// it is deleted, and the triangles now run all the
+// way in to ONE single solid green bar at the centre
+// (one louver rib wide), meeting on either side of it
+// (see buildGrFieldImage).
+//   Behaviour (Nathan's spec): at 0 dB GR the field glows
+//   exactly as in the photo — fully lit. As GR increases the
+//   LEFT AND RIGHT EDGES GO BLACK and the darkness closes
+//   symmetrically toward the centre (the 202W's converging
+//   pattern — NOT a wedge, NOT whole-field dimming, the
+//   v1.0.3 lesson): at 28 dB GR the window is totally dark.
+//   Lit-width law: lit = (1 - gr/28)^0.85 clamped — 10 dB
+//   leaves ~69% of the width lit, 25 dB ~15% (a centre
+//   sliver), 28 dB+ none. Driven by the single overall GR
+//   value (displayedGrDb_, with the editor's established
+//   ~16/39 ms display ballistics), mono or stereo alike.
+//   POWER off: the window is dead — frame stays (hardware
+//   doesn't go anywhere), no green at all.
+// Geometry (virtual): frame (124, 41, 192, 70), centre
+// (220, 76) — tucked BETWEEN the ATTACK/RELEASE toggle
+// plates (x 73..113 / 327..367): 11 px of air each side.
 // ─────────────────────────────────────────────────────────────────────
-void Osc72Editor::drawMagicEye(juce::Graphics& g, juce::Rectangle<float> bounds,
-                               float grDb, bool dark)
+void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
 {
-    const float cx = bounds.getCentreX();
-    const float cy = bounds.getCentreY();
-    const float ringR = bounds.getWidth() * 0.5f;      // ~58 for v6
-    const float glassR = ringR - 6.0f;   // bezel inset (eye is 70 px across at v16)
+    const juce::Rectangle<float> frame(124.0f, 41.0f, 192.0f, 70.0f);
+    const auto window = frame.reduced(6.5f);          // inside the gold band
+    const auto field = window.reduced(5.0f, 5.0f);    // the ribbed field
+    const float cx = frame.getCentreX();
+    const float cy = frame.getCentreY();
 
-    // v19: POWER off — a dead tube. No phosphor glow, no green,
-    // no glass glint: just the dead black, the gold bezel (v20;
-    // hardware doesn't go anywhere) and the hub. The phosphor
-    // block below is gated on !dark (at grDb alone the eye can
-    // never be fully dark on power — 0 dB is full green).
-    const float t = dark ? 1.0f : juce::jlimit(0.0f, 1.0f, grDb / 32.0f);
-    // Overall phosphor brightness, 1 = full glow. Eased so the
-    // dimming is already clearly under way by ~8–10 dB of GR
-    // and keeps deepening through the v3 working range.
-    const float bright = 1.0f - 0.82f * std::pow(t, 0.8f);
-    auto shade = [](juce::Colour lit, juce::Colour dim, float te) {
-        return lit.interpolatedWith(dim, te);
-    };
-    const float dimMix = 1.0f - bright;   // 0 at rest -> 0.82 deep
+    // Lit fraction from GR (the converging-darkness law).
+    const float lit = dark ? 0.0f
+        : std::pow(osc72::clampf(1.0f - grDb / 28.0f, 0.0f, 1.0f), 0.85f);
 
-    // Phosphor glow spilling onto the panel — scales with the
-    // disc's brightness. (Skipped when dark: a dead tube
-    // spills nothing.)
-    if (!dark) {
-        const auto glowCol = juce::Colour(0x4646ff7d)
-                                 .withAlpha(0.30f * bright);
+    // Phosphor glow spilling onto the panel — scales with how
+    // much of the field is lit. (Skipped when dark.)
+    if (!dark && lit > 0.01f) {
+        const auto glowCol = juce::Colour(0x4646ff7d).withAlpha(0.22f * lit);
         juce::ColourGradient glow(glowCol, cx, cy,
-                                  juce::Colour(0x0046ff7d), cx, cy + ringR * 1.35f, true);
+                                  juce::Colour(0x0046ff7d), cx, cy + frame.getHeight() * 0.95f, true);
         g.setGradientFill(glow);
-        const float gr = ringR * 1.35f;
-        g.fillEllipse(cx - gr, cy - gr, gr * 2.0f, gr * 2.0f);
+        const auto spill = frame.expanded(10.0f, 8.0f);
+        g.fillRoundedRectangle(spill, 10.0f);
     }
 
-    // Glass disc, clipped
-    juce::Path glass;
-    glass.addEllipse(cx - glassR, cy - glassR, glassR * 2.0f, glassR * 2.0f);
-    g.saveState();
-    g.reduceClipRegion(glass);
-
-    // Dead tube black underneath everything
+    // The recessed window: dead black-green glass, shaded
+    // down from the top (the recess shadow).
     {
-        juce::ColourGradient dead(juce::Colour(0xff0a0f0b), cx, cy - glassR * 0.5f,
-                                  juce::Colour(0xff020302), cx, cy + glassR * 0.7f, false);
+        juce::ColourGradient dead(juce::Colour(0xff0a0f0b), window.getX(), window.getY(),
+                                  juce::Colour(0xff020302), window.getX(), window.getBottom(), false);
         g.setGradientFill(dead);
-        g.fillRect(bounds);
+        g.fillRoundedRectangle(window, 3.0f);
     }
-    // The phosphor: the WHOLE disc, always (v3 — no sector clip,
-    // no blade edges). Its gradient stops are dimmed toward
-    // deep green-black by dimMix and the layer's opacity falls
-    // with brightness, so the entire eye breathes bright<->dim
-    // with the gain action. (Skipped when dark — no green at
-    // all in a dead tube.)
-    if (!dark) {
-        juce::ColourGradient phos(
-            shade(juce::Colour(0xff86ffa6), juce::Colour(0xff123d1e), dimMix),
-            cx, cy + glassR * 0.30f,
-            shade(juce::Colour(0xff0d9c3c), juce::Colour(0xff031f0a), dimMix),
-            cx, cy - glassR * 1.15f, true);
-        phos.addColour(0.42, shade(juce::Colour(0xff3bea66),
-                                   juce::Colour(0xff082f12), dimMix));
-        g.setGradientFill(phos);
-        g.setOpacity(0.30f + 0.70f * bright);
-        g.fillRect(bounds);
-        g.setOpacity(1.0f);
-        // Faint radial phosphor rays across the whole disc
-        g.setColour(juce::Colour(0x10ffffff).withAlpha(0.06f * bright));
-        for (int i = 0; i < 24; ++i) {
-            const auto pt = polar(cx, cy, glassR, (float)i * 15.0f);
-            g.drawLine(cx, cy, pt.x, pt.y, 1.0f);
-        }
-    }
-    g.restoreState();
 
-    // Inner bezel shade — a soft shadow where the glass sinks
-    // below the retaining ring.
-    g.setColour(juce::Colour(0x59000000));
-    g.drawEllipse(cx - glassR, cy - glassR, glassR * 2.0f, glassR * 2.0f, 3.0f);
-    // The retaining bezel (v20): aged GOLD hardware, scratched
-    // and uneven — see drawEyeBezel. (v18–v19 drew a clean
-    // silk-white ring here; Nathan: it "looks almost like a
-    // graphic" next to the real hardware.)
-    drawEyeBezel(g, cx, cy, ringR, glassR);
-
-    // Dark round centre hub — always present, lit or not (the
-    // metal cap at the heart of the real tube's target). v11: its
-    // screw is an ALLEN head — a hexagonal socket recess at the
-    // hub's centre, near-black inside, its lower-right inner walls
-    // catching a faint rim of light so it reads as a recess.
+    // The ribbed field — v36: rendered PER-PIXEL into a
+    // cached image (buildGrFieldImage, below), so the whole
+    // field — woven diamond band included — is formed by
+    // per-column VERTICAL shading alone, the way the
+    // original's is: no strokes, seams, feather edges or
+    // overlay stops can draw a horizontal line across it
+    // (Nathan, studying his photo: the v34 ribs + v35 teeth
+    // render had ~3 horizontal lines through the field and
+    // they had to go). The dead state draws no image — just
+    // the dark window glass above.
     {
-        const float hr = glassR * 0.21f;
-        juce::ColourGradient hub(juce::Colour(0xff39423c), cx - hr, cy - hr,
-                                 juce::Colour(0xff05070a), cx + hr, cy + hr, false);
-        g.setGradientFill(hub);
-        g.fillEllipse(cx - hr, cy - hr, hr * 2.0f, hr * 2.0f);
-        g.setColour(juce::Colour(0x55cfe8d2));
-        g.drawEllipse(cx - hr, cy - hr, hr * 2.0f, hr * 2.0f, 1.0f);
-        // Hex socket: vertices on the polar dial (0° = top).
-        const float hexR = hr * 0.46f;
-        juce::Point<float> vtx[6];
-        for (int k = 0; k < 6; ++k)
-            vtx[k] = polar(cx, cy, hexR, (float)k * 60.0f);
-        juce::Path hex;
-        hex.startNewSubPath(vtx[0].x, vtx[0].y);
-        for (int k = 1; k < 6; ++k) hex.lineTo(vtx[k].x, vtx[k].y);
-        hex.closeSubPath();
-        g.setColour(juce::Colour(0xff060806));
-        g.fillPath(hex);
-        // Facet light: edges whose midpoint sits on the lower /
-        // right of the dial (90°–210°) are the recess walls that
-        // face the upper-left light — stroke them faintly; the
-        // opposite walls go darker, deepening the socket.
-        for (int k = 0; k < 6; ++k) {
-            const auto p1 = vtx[k], p2 = vtx[(k + 1) % 6];
-            const float mid = (float)k * 60.0f + 30.0f;
-            if (mid >= 80.0f && mid <= 220.0f) {
-                g.setColour(juce::Colour(0x59cfe8d2));
-                g.drawLine(p1.x, p1.y, p2.x, p2.y, 1.0f);
-            } else {
-                g.setColour(juce::Colour(0xa0000000));
-                g.drawLine(p1.x, p1.y, p2.x, p2.y, 1.0f);
+        g.saveState();
+        juce::Path clip;
+        clip.addRoundedRectangle(field, 2.0f);
+        g.reduceClipRegion(clip);
+
+        if (!dark) {
+            const int key = (int)std::lround(lit * 512.0f);
+            if (key != grFieldKey_ || grFieldCache_.isNull()) {
+                grFieldCache_ = buildGrFieldImage(lit);
+                grFieldKey_ = key;
             }
+            g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
+            g.drawImage(grFieldCache_, field);
         }
+
+        // Glass reflection (skipped when dead — no glint on a
+        // dark window): a soft diagonal sheen, clipped to the
+        // field like the eye's was to its glass.
+        if (!dark) {
+            juce::ColourGradient refl(juce::Colour(0x24ffffff), field.getX() + field.getWidth() * 0.16f, field.getY(),
+                                      juce::Colour(0x00ffffff), field.getX() + field.getWidth() * 0.52f, field.getBottom(), false);
+            g.setGradientFill(refl);
+            g.fillRect(field);
+        }
+        g.restoreState();
     }
 
-    // Glass reflection (skipped when dark — no glint on a
-    // dead tube)
-    if (!dark) {
-        juce::ColourGradient refl(juce::Colour(0x2effffff), cx - ringR * 0.42f, cy - ringR * 0.58f,
-                                  juce::Colour(0x00ffffff), cx - ringR * 0.06f, cy - ringR * 0.20f, true);
-        g.setGradientFill(refl);
-        g.fillEllipse(cx - ringR * 0.58f, cy - ringR * 0.72f,
-                      ringR * 0.84f, ringR * 0.44f);
-    }
+    // Recess shading inside the window rim (top shadow where
+    // the glass sinks below the frame).
+    g.setColour(juce::Colour(0x59000000));
+    g.drawRoundedRectangle(window, 3.0f, 2.0f);
+
+    // The gold frame over everything (Nathan: the eye's aged
+    // brass surround, reshaped — same rendering language).
+    drawDisplayFrame(g, frame);
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1623,6 +1842,44 @@ Osc72Editor::Osc72Editor(Osc72Processor& p) : AudioProcessorEditor(&p), proc_(p)
     addAndMakeVisible(powerToggle_);
     powerAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         proc_.apvts, "power", powerToggle_);
+    // v4 (Nathan): ATTACK / RELEASE toggles flanking the GR
+    // display — 'attackFast' (default FAST = stock detector)
+    // and 'releaseFast' (default SLOW = DUAL recovery).
+    addAndMakeVisible(attackToggle_);
+    attackAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        proc_.apvts, "attackFast", attackToggle_);
+    addAndMakeVisible(releaseToggle_);
+    releaseAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        proc_.apvts, "releaseFast", releaseToggle_);
+    // v36 (Nathan): the strip's LINK toggle ('outLink',
+    // default linked). The linkage is EDITOR-SIDE: with link
+    // on, a change to either O/P LEVEL pot sets the other pot
+    // to the same value (its SliderAttachment then writes its
+    // own parameter — the APVTS attachments hook the Slider
+    // listener list, not onValueChange, so these lambdas
+    // coexist). ABSOLUTE link, per Nathan's spec ("dragging
+    // either sets both to the same value"): engaging link
+    // changes nothing until a pot moves; the first drag then
+    // imposes the dragged pot's value on both — a resting
+    // offset between unequal pots is NOT preserved. Host
+    // automation of one pot drags the other the same way.
+    addAndMakeVisible(linkToggle_);
+    linkAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        proc_.apvts, "outLink", linkToggle_);
+    outLevelL_.onValueChange = [this] {
+        if (linkageArmed_ && linkToggle_.getToggleState() && !linkingPots_) {
+            linkingPots_ = true;
+            outLevelR_.setValue(outLevelL_.getValue(), juce::sendNotificationSync);
+            linkingPots_ = false;
+        }
+    };
+    outLevelR_.onValueChange = [this] {
+        if (linkageArmed_ && linkToggle_.getToggleState() && !linkingPots_) {
+            linkingPots_ = true;
+            outLevelL_.setValue(outLevelR_.getValue(), juce::sendNotificationSync);
+            linkingPots_ = false;
+        }
+    };
     // O/P LEVEL knobs (v12): small black rotaries bound to the
     // outLevelL/outLevelR trims; double-click returns to 0 dB.
     for (juce::Slider* s : { &outLevelL_, &outLevelR_ }) {
@@ -1637,6 +1894,21 @@ Osc72Editor::Osc72Editor(Osc72Processor& p) : AudioProcessorEditor(&p), proc_(p)
         proc_.apvts, "outLevelL", outLevelL_);
     outAttR_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         proc_.apvts, "outLevelR", outLevelR_);
+    // MIX pot (v38, Nathan): the strip's wet/dry pot — the
+    // same small knob as the O/P LEVEL pair, configured the
+    // same way; double-click returns to fully WET (1.0), the
+    // pot's home and the unit's default sound. Its silk
+    // (dots, '0'/'100' numerals, MIX word) is in paint();
+    // bounds in resized().
+    mixKnob_.setLookAndFeel(&smallLaf_);
+    mixKnob_.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    mixKnob_.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    mixKnob_.setRotaryParameters(kPi * 1.25f, kPi * 2.75f, true);
+    mixKnob_.setDoubleClickReturnValue(true, 1.0);
+    addAndMakeVisible(mixKnob_);
+    mixAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        proc_.apvts, "mix", mixKnob_);
+    linkageArmed_ = true;   // v36: pot linkage live from here (see the LINK block above)
     startTimerHz(60);   // v3: 30 -> 60 Hz — the eye's display ballistics (below) now track the limiter's GR envelope instead of sweeping lazily (Nathan: the old motion read like a VU)
 }
 
@@ -1646,6 +1918,7 @@ Osc72Editor::~Osc72Editor()
     knob_.setLookAndFeel(nullptr);
     outLevelL_.setLookAndFeel(nullptr);
     outLevelR_.setLookAndFeel(nullptr);
+    mixKnob_.setLookAndFeel(nullptr);
 }
 
 void Osc72Editor::timerCallback()
@@ -1670,6 +1943,12 @@ void Osc72Editor::timerCallback()
         repaint(modToggle_.getBounds());
     if (powerToggle_.advanceAnimation())
         repaint(powerToggle_.getBounds());
+    if (attackToggle_.advanceAnimation())
+        repaint(attackToggle_.getBounds());
+    if (releaseToggle_.advanceAnimation())
+        repaint(releaseToggle_.getBounds());
+    if (linkToggle_.advanceAnimation())
+        repaint(linkToggle_.getBounds());
     // v19: a POWER flip changes every light on the unit (all
     // three jewels + the eye) — repaint the whole panel.
     const bool pwr = powerToggle_.getToggleState();
@@ -1685,11 +1964,18 @@ void Osc72Editor::timerCallback()
     const bool mod = modToggle_.getToggleState();
     if (lim != lastLimitState_) {
         lastLimitState_ = lim;
-        repaint(juce::Rectangle<int>(14, 402, 76, 74));   // LIMIT jewel, centre device (52, 439) — v32: back down with its cluster to the flange-bottom line; x2 in audio v2
+        repaint(juce::Rectangle<int>(100, 403, 76, 74));   // LIMIT jewel, centre device (138, 440) — v36: swapped to the cluster's INNER flank (was outer, centre device (52, 439))
     }
     if (mod != lastModState_) {
         lastModState_ = mod;
-        repaint(juce::Rectangle<int>(394, 402, 76, 74));  // MOD jewel, centre device (432, 439) — v32: back down with its cluster to the flange-bottom line; x2 in audio v2
+        repaint(juce::Rectangle<int>(309, 403, 76, 74));  // MOD jewel, centre device (347, 440) — v36: swapped to the cluster's INNER flank (was outer, centre device (432, 439))
+    }
+    // v36: the LINK jewel is editor paint too — repaint its
+    // area when the link state flips (lit = linked).
+    const bool lnk = linkToggle_.getToggleState();
+    if (lnk != lastLinkState_) {
+        lastLinkState_ = lnk;
+        repaint(juce::Rectangle<int>(603, 403, 76, 74));  // LINK jewel, centre device (641, 440) — v37: cluster dropped to the y-400 row
     }
     // v10: the flange numerals rotate with the knob, but the
     // flange is editor paint — the Slider only repaints its own
@@ -1770,10 +2056,44 @@ void Osc72Editor::resized()
     knob_.setBounds(148, 238, 188, 188);            // centre (242, 332) = virtual (220, 302)
     limitToggle_.setBounds(72, 410, 44, 60);        // centre (94, 440) = virtual (85, 400) — v32: back down to the flange-bottom line (v31: virtual (93, 76))
     modToggle_.setBounds(368, 410, 44, 60);         // centre (390, 440) = virtual (355, 400) — v32: back down to the flange-bottom line (v31: virtual (347, 76))
-    powerToggle_.setBounds(572, 54, 44, 60);        // centre (594, 84) = virtual (540, 76) — on the eye-hub line (76)
+    powerToggle_.setBounds(572, 54, 44, 60);        // centre (594, 84) = virtual (540, 76) — on the display centre line (76)
+    // v4: ATTACK / RELEASE toggles flank the GR display at the
+    // v31 span, centres on the same y-76 line.
+    // v35 (Nathan): the pair DROPS DOWN with its silk (see
+    // paint()) — the words land on the GAIN REDUCTION caption
+    // line (baseline 149) and the toggles follow directly
+    // under their words. Whole assemblies, +110 virtual px
+    // (+121 device px): centre row 84 -> 205 device =
+    // virtual y 76 -> 186. The internal cluster geometry is
+    // untouched (word baseline = centre - 37 -> 149, the
+    // caption's own baseline, so the three words share one
+    // line by construction).
+    attackToggle_.setBounds(80, 175, 44, 60);       // centre (102, 205) = virtual (93, 186)
+    releaseToggle_.setBounds(360, 175, 44, 60);     // centre (382, 205) = virtual (347, 186)
+    // v36 (Nathan): the strip's LINK toggle.
+    // v37 (Nathan): the whole LINK cluster drops to the
+    // bottom row — its toggle CENTRE sits on the LIMIT/MOD
+    // toggle centres' line, virtual y 400, so the three
+    // toggles form one continuous row across both plates
+    // (the v36 raised-header placement, toggle bottom on
+    // the pots' top-dot line, is retired).
+    linkToggle_.setBounds(572, 410, 44, 60);        // centre (594, 440) = virtual (540, 400)
+    // v38 (Nathan): the MIX pot — the O/P pots' 54-device-px
+    // component, centred under the POWER toggle (device
+    // centre x 594 = its centre, virtual 540) with its centre
+    // ON the ATTACK/RELEASE toggles' centre line (device row
+    // 205 = virtual y 186, the same row as their bounds).
+    // v39 (Nathan): the pot drops a hair — device row 205 ->
+    // 209 (virtual 186 -> 190) — because its word leaves the
+    // under-pot seat and rises onto the ATTACK/RELEASE word
+    // line (baseline 149, in paint()); the word's ink and
+    // the pot's top dot (ring R 30, dot top now at virtual
+    // 158) clear with a small honest gap, and the label
+    // line takes priority over the pot's exact y-186 seat.
+    mixKnob_.setBounds(567, 182, 54, 54);           // centre (594, 209) = virtual (540, 190)
     outLevelL_.setBounds(518, 304, 54, 54);         // centre (545, 331) = virtual (495, 301) — on the knob-centre line
     outLevelR_.setBounds(616, 304, 54, 54);         // centre (643, 331) = virtual (584, 301) — on the knob-centre line
-    eyeArea_ = juce::Rectangle<int>(148, 0, 192, 172);  // the eye + its glow, centre device (244, 86) — follows the eye (v29: up with the rise); x2 in audio v2
+    eyeArea_ = juce::Rectangle<int>(128, 16, 232, 122);  // v4: the GR display window + its glow (frame virtual (124, 41, 192, 70)); x2 in audio v2. v36: extended up — the GAIN REDUCTION caption now rides ABOVE the display (ink virtual y ~20..31) inside this repaint region
 }
 
 void Osc72Editor::paint(juce::Graphics& g)
@@ -1880,8 +2200,11 @@ void Osc72Editor::paint(juce::Graphics& g)
     // v29 addition: the eye rises 10 with everything
     // (top 31 -> 21, centre (220, 86) -> (220, 76));
     // the caption rides with it (159 -> 149).
-    drawMagicEye(g, juce::Rectangle<float>(mcx - 55.0f, 21.0f, 110.0f, 110.0f),
-                 displayedGrDb_, !powerOn);
+    // v4 (Nathan, 2026-10-15): the magic eye is REPLACED by
+    // the 202W-style ribbed GR display (see drawGrDisplay) —
+    // same top-centre position, centre (220, 76), caption
+    // unchanged under it.
+    drawGrDisplay(g, displayedGrDb_, !powerOn);
     g.setColour(kSilk);
     // v19 text sizes (VIRTUAL points; they land at x0.55 on
     // screen): ONE label size panel-wide — 16.5, the v18
@@ -1943,8 +2266,22 @@ void Osc72Editor::paint(juce::Graphics& g)
     // (190 -> 180), so the caption/INPUT daylight is
     // unchanged; the whole stack gains air toward the
     // bare top band and the wordmark band below.
+    // v36 (Nathan): the caption leaves the line below the
+    // window entirely and rides JUST ABOVE the meter —
+    // baseline 149 -> 30, centred over the display: ink
+    // ~20.5..31 keeps ~10 virtual px of air to the gold
+    // frame's top (41) and ~20 to the panel's top edge.
+    // Still drawn after the display, so the phosphor glow
+    // never washes over it. The ATTACK / RELEASE words stay
+    // at 149 — that line is theirs alone now.
+    // v38 (Nathan): the caption rode a touch too high —
+    // it drops "just the slightest amount" toward the
+    // frame: baseline 30 -> 33, ink ~23.5..34, so the air
+    // to the frame's top tightens to ~7 virtual px (panel
+    // edge air grows to ~23.5). Audit in
+    // build-report-v38.md.
     drawTrackedText(g, "GAIN REDUCTION", capsFont(14.5f), 0.6f,
-                    mcx, 149.0f, Anchor::centre);
+                    mcx, 33.0f, Anchor::centre);
 
     // ── Module: knob skirt flange + numerals (v9; rotating v10) ──
     // From Nathan's reference photo (a vintage decade box): the
@@ -2194,18 +2531,75 @@ void Osc72Editor::paint(juce::Graphics& g)
     // flank): word baselines 363, IN/OUT 397/415,
     // jewels (48, 400) / (392, 400) — the corrected
     // line lands exactly on the v29 bottom geometry.
+    // v36 (Nathan): the jewel and the IN/OUT labels SWAP
+    // sides on BOTH bottom clusters — the labels move to
+    // the OUTER flank (the jewel's old slot), the jewel to
+    // the INNER flank (the labels' old slot, between
+    // toggle and knob): left->right the LIMIT cluster now
+    // reads IN/OUT, toggle, jewel; MOD reads jewel,
+    // toggle, IN/OUT. Both lights end up on the inside,
+    // both label pairs on the outside. The label anchors
+    // take the jewel slot's outer line (right-anchor 62
+    // for LIMIT, its mirror left-anchor 378 for MOD); the
+    // jewels take the label blocks' centres ((125, 400) /
+    // (315, 400) — mirror pair about the module centre).
+    // Words, toggles, baselines unchanged.
     drawTrackedText(g, "LIMIT", capsFont(14.5f), 0.6f,
                     86.0f, 363.0f, Anchor::centre);
     drawTrackedText(g, "MOD", capsFont(14.5f), 0.6f,
                     354.0f, 363.0f, Anchor::centre);
     drawTrackedText(g, "IN", capsFont(14.0f), 0.4f,
-                    114.0f, 397.0f, Anchor::left);
+                    62.0f, 397.0f, Anchor::right);
     drawTrackedText(g, "OUT", capsFont(14.0f), 0.4f,
-                    114.0f, 415.0f, Anchor::left);
+                    62.0f, 415.0f, Anchor::right);
     drawTrackedText(g, "IN", capsFont(14.0f), 0.4f,
-                    326.0f, 397.0f, Anchor::right);
+                    378.0f, 397.0f, Anchor::left);
     drawTrackedText(g, "OUT", capsFont(14.0f), 0.4f,
-                    326.0f, 415.0f, Anchor::right);
+                    378.0f, 415.0f, Anchor::left);
+
+    // ── v4 (Nathan): ATTACK / RELEASE clusters flanking the
+    //    GR display at the v31 positions (toggle centres
+    //    (93, 76) / (347, 76), on the display centre line).
+    //    Same house convention as LIMIT/MOD — function word
+    //    above (baseline = centre - 37), position labels at
+    //    centre - 3 / + 15, FAST above / SLOW below — with
+    //    two amendments from Nathan: NO jewels, and the
+    //    FAST/SLOW labels ride the OUTER flank (where the
+    //    jewels would have been), buying the display its
+    //    room between the toggles: ATTACK's labels anchor
+    //    right at centre - 28, RELEASE's anchor left at
+    //    centre + 28.
+    // v35 (Nathan): the clusters DROP DOWN — "their labels
+    //    should be lined up with the gain reduction and
+    //    then their toggles should follow down below that
+    //    in the same orientation." The whole assemblies move
+    //    +110 virtual px (the components follow in
+    //    resized()): ATTACK / RELEASE land ON the caption
+    //    line — baseline 149, the very draw baseline of
+    //    GAIN REDUCTION above, same font and tracking — so
+    //    the top band reads ATTACK · GAIN REDUCTION ·
+    //    RELEASE on one common line, and the toggles sit
+    //    directly under their own words at centres
+    //    (93, 186) / (347, 186), same orientation (vertical
+    //    bat, FAST above / SLOW below on the OUTER flank,
+    //    anchors unchanged). The display and the POWER
+    //    cluster do not move.
+    // v36 (Nathan): the GAIN REDUCTION caption leaves this
+    //    line (it now rides above the display) — ATTACK /
+    //    RELEASE do NOT move: words stay at baseline 149,
+    //    toggles under them, exactly as v35 left them. ──
+    drawTrackedText(g, "ATTACK", capsFont(14.5f), 0.6f,
+                    93.0f, 149.0f, Anchor::centre);
+    drawTrackedText(g, "RELEASE", capsFont(14.5f), 0.6f,
+                    347.0f, 149.0f, Anchor::centre);
+    drawTrackedText(g, "FAST", capsFont(14.0f), 0.4f,
+                    65.0f, 183.0f, Anchor::right);
+    drawTrackedText(g, "SLOW", capsFont(14.0f), 0.4f,
+                    65.0f, 201.0f, Anchor::right);
+    drawTrackedText(g, "FAST", capsFont(14.0f), 0.4f,
+                    375.0f, 183.0f, Anchor::left);
+    drawTrackedText(g, "SLOW", capsFont(14.0f), 0.4f,
+                    375.0f, 201.0f, Anchor::left);
 
     // ── Module: section indicator jewels (v15, Nathan) ──────────
     // A small amber jewel on each toggle's OUTER flank — left of
@@ -2228,8 +2622,13 @@ void Osc72Editor::paint(juce::Graphics& g)
     // v32: back down with their clusters to the
     // flange-bottom line — (48, 400) and (392, 400),
     // the v29 bottom positions, still centre -/+ 38.
-    drawPowerJewel(g, 48.0f, 400.0f, powerOn && limitToggle_.getToggleState(), 1.0f);
-    drawPowerJewel(g, 392.0f, 400.0f, powerOn && modToggle_.getToggleState(), 1.0f);
+    // v36 (Nathan): SWAPPED to the INNER flanks (see the
+    // cluster silk above) — (125, 400) and (315, 400),
+    // the old IN/OUT label blocks' centres, mirror pair
+    // about the module centre; the repaint rects in
+    // timerCallback follow.
+    drawPowerJewel(g, 125.0f, 400.0f, powerOn && limitToggle_.getToggleState(), 1.0f);
+    drawPowerJewel(g, 315.0f, 400.0f, powerOn && modToggle_.getToggleState(), 1.0f);
 
     // ── Module wordmark (v29, Nathan): 'WESTERN
     //    COMPRESSOR' at the very BOTTOM of the module,
@@ -2414,8 +2813,105 @@ void Osc72Editor::paint(juce::Graphics& g)
     // L/R 351 -> 341; the components follow in
     // resized()) — the pot centres stay on the input
     // knob's centre line, which rises the same 10.
+    // v36 (Nathan): the OUTPUT caption MOVED UP (259 ->
+    // 211) to head a stacked header above the pots.
+    // v37 (Nathan): that header was too crowded up top —
+    // the caption comes back DOWN to the pots' own bottom
+    // line, CENTRED BETWEEN the L and R labels, so the
+    // line reads L · OUTPUT · R (L/R stay under their own
+    // pots, same baseline 341; drawn here, they follow
+    // below). The pots and dots do NOT move, and the band
+    // the header vacated under POWER stays empty panel.
+    // v38 (Nathan, superseding the v37 line): the caption
+    // leaves the L/R line and rides ABOVE THE LINK TOGGLE,
+    // the way LIMIT and MOD ride above theirs — same word
+    // and size, centred over the LINK cluster at scx, word
+    // baseline 341 -> 363, which is the LIMIT/MOD words'
+    // own line (toggle centre 400 - 37, the same
+    // word-to-toggle relationship). The L and R letters
+    // stand alone under their pots again at 341 (the
+    // positions they held in v36), untouched. Clearances:
+    // the word's ink (~353..363) clears the L/R ink
+    // bottom (341) by ~12 virtual px and the pots' lowest
+    // dots (~323) by ~30; below it the LINK plate's top
+    // (~374.7) keeps the same ~11.7 the module's plates
+    // keep under LIMIT/MOD, and the plate-to-BITEY air
+    // (11.5) is unchanged. Audit in build-report-v38.md.
     drawTrackedText(g, "OUTPUT", capsFont(14.5f), 0.6f,
-                    scx, 259.0f, Anchor::centre);
+                    scx, 363.0f, Anchor::centre);
+
+    // ── Strip LINK cluster (v36; dropped to the bottom
+    //    row in v37, Nathan) ─────────────────────────────
+    // A full switch cluster keeping its v36 internal
+    // arrangement, which REVERSES the POWER cluster's
+    // left/right order: the LINK/UNLINK markings to the
+    // LEFT of the toggle (right-anchored at 512, the
+    // mirror of POWER's ON/OFF anchor 568) and the JEWEL
+    // to the RIGHT of the toggle — left->right: labels,
+    // toggle, jewel. The jewel is lit while LINKED (and
+    // dark with the unit's power off, like every light).
+    // v37 vertical placement (Nathan): the whole cluster
+    // drops BELOW the pots, under the L · OUTPUT · R line,
+    // lined up with the module's bottom row — the toggle
+    // component's centre is virtual (540, 400) (resized()),
+    // the SAME line as the LIMIT/MOD toggle centres, so
+    // the three toggles read straight across both plates.
+    // The labels keep their v36 offsets from the toggle
+    // centre (-3.5 / +14.5), the jewel rides the centre
+    // line at (583, 400), and the audit (plate bottom
+    // ~425.3 vs the BITEY wordmark's ink top 437, the
+    // bottom screws at y 442) is in build-report-v37.md.
+    // v38 (Nathan): the OUTPUT word (drawn just above, in
+    // the O/P section) now heads this cluster from
+    // baseline 363 — the strip's bottom stack reads word
+    // / toggle / BITEY exactly as the module's LIMIT and
+    // MOD stacks do. The cluster itself does not move.
+    drawTrackedText(g, "LINK", capsFont(14.0f), 0.4f,
+                    512.0f, 396.5f, Anchor::right);
+    drawTrackedText(g, "UNLINK", capsFont(14.0f), 0.4f,
+                    512.0f, 414.5f, Anchor::right);
+    drawPowerJewel(g, 583.0f, 400.0f, powerOn && linkToggle_.getToggleState(), 1.0f);
+
+    // ── Strip MIX pot silk (v38, Nathan) ─────────────────────
+    // The MIX pot component (mixKnob_; bounds in resized())
+    // is centred at virtual (540, 190) — under the POWER
+    // toggle. Its silk follows the O/P LEVEL pots'
+    // convention exactly: the same five dot markers at
+    // R 30 around the travel (min at 7:30, max at 4:30).
+    // The sweep ends are marked NUMERICALLY — a percentage
+    // without the sign (Nathan: NO 'wet'/'dry' words
+    // anywhere): '0' at the full-left end of the arc
+    // (bottom-left), '100' at the full-right end, set just
+    // outside the end dots at R 45 on the end angles.
+    // v39 (Nathan): the word MIX leaves the under-pot seat
+    // (the v38 draw at baseline 227 is DELETED — no
+    // duplicate) and rises ABOVE the pot onto the
+    // ATTACK/RELEASE word line — the identical draw call
+    // (capsFont 14.5, tracking 0.6, baseline 149), centred
+    // on the pot's x — so ATTACK · MIX · RELEASE share one
+    // word line across both plates. The pot itself drops
+    // 186 -> 190 (resized()) so the word's ink clears the
+    // top dot of the ring (dot top at virtual 158).
+    g.setColour(kSilk);
+    drawTrackedText(g, "MIX", capsFont(14.5f), 0.6f,
+                    540.0f, 149.0f, Anchor::centre);
+    for (int i = 0; i <= 4; ++i) {
+        const float aDeg = 225.0f + 67.5f * (float)i;
+        const auto dp = polar(540.0f, 190.0f, 30.0f, aDeg);
+        const float dr = (i == 2) ? 2.0f : 1.6f;
+        g.setColour(kSilk.withAlpha(0.9f));
+        g.fillEllipse(dp.x - dr, dp.y - dr, dr * 2.0f, dr * 2.0f);
+    }
+    g.setColour(kSilk);
+    {
+        const auto n0 = polar(540.0f, 190.0f, 45.0f, 225.0f);
+        const auto n1 = polar(540.0f, 190.0f, 45.0f, 495.0f);
+        drawTrackedText(g, "0", capsFont(14.0f), 0.4f,
+                        n0.x, n0.y + 4.0f, Anchor::centre);
+        drawTrackedText(g, "100", capsFont(14.0f), 0.4f,
+                        n1.x, n1.y + 4.0f, Anchor::centre);
+    }
+
     for (float kcx : { 496.0f, 584.0f }) {
         for (int i = 0; i <= 4; ++i) {
             const float aDeg = 225.0f + 67.5f * (float)i;
@@ -2448,6 +2944,12 @@ void Osc72Editor::paint(juce::Graphics& g)
     // controls rise 10 — the OUTPUT section above it
     // rises away (L/R ink now ends ~342), widening
     // this band's air (audited, build-report-v29).
+    // v37: the LINK cluster now sits between the pots
+    // and this wordmark (toggle centre y 400, plate
+    // bottom ~425.3) — its ~11.7 virtual px of air to
+    // the ink top (437) is the same class of clearance
+    // the module's bottom row keeps to WESTERN
+    // COMPRESSOR (audited, build-report-v37.md).
     g.setColour(kSilk);
     drawTrackedText(g, "BITEY", capsFont(14.5f), 0.6f,
                     scx, 446.4f, Anchor::centre);

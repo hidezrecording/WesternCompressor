@@ -207,6 +207,43 @@
 // docs/gui-v33-eye-{0,10,25}.png, plus the standard
 // gui-v33-a.png / gui-v33-b.png ("warble") /
 // gui-v33-off.png ("poweroff") set.
+// v34 shots (ENGINE v4 + display replacement): the standard
+// set gui-v34-a.png / gui-v34-b.png ("warble") /
+// gui-v34-off.png ("poweroff") — now showing the ATTACK /
+// RELEASE toggles flanking the new 202W-style GR display
+// (defaults: attack FAST up, release SLOW down) — plus the
+// GR proof series gui-v34-gr-{0,10,25}.png via the gr=
+// token: the display's lit field narrows symmetrically as
+// GR rises (full glow / partly closed / near-dark).
+// v35 shots: gui-v35-a.png / gui-v35-b.png ("warble") /
+// gui-v35-off.png ("poweroff") + gui-v35-gr-{0,10,25}.png,
+// same tokens. Two changes: (1) the ATTACK / RELEASE
+// clusters drop down — words on the GAIN REDUCTION caption
+// line (baseline 149), toggles directly under their words
+// at virtual centres (93, 186) / (347, 186), FAST/SLOW
+// still on the outer flanks; (2) the display's rib field
+// gains the 202W's woven centre band of interlocking
+// curved triangles, closing with the same converging-
+// darkness law (the gr= series shows the patterned field
+// narrowing: full woven glow / partly closed / narrow
+// patterned centre strip).
+// v36 shots: gui-v36-a.png / gui-v36-b.png ("warble") /
+// gui-v36-off.png ("poweroff") + gui-v36-gr-{0,10,25}.png
+// + gui-v36-display-crop.png (the 0 dB display at 3x).
+// Four changes: (1) the display field is rendered
+// PER-PIXEL (buildGrFieldImage) — the woven band of bright
+// diamonds and smooth curved triangles formed by
+// per-column vertical shading alone; the v35 teeth, their
+// feather and the shading overlay (the render's horizontal
+// lines) are gone; (2) the GAIN REDUCTION caption rides
+// ABOVE the display (baseline 30); ATTACK/RELEASE stay at
+// 149; (3) the bottom clusters swap jewel <-> IN/OUT —
+// jewels to the inner flanks (125/315, 400), labels to the
+// outer; (4) the strip gains a LINK cluster under the
+// raised OUTPUT caption (baseline 211): LINK/UNLINK left
+// of the toggle, jewel right of it, toggle plate bottom
+// on the pots' top-dot line (y ~270); 'outLink' defaults
+// linked, so its jewel is lit in these stills.
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"

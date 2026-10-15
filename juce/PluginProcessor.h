@@ -3,9 +3,11 @@
 #include <atomic>
 #include "Osc72Dsp.h"
 
-// Hotdog — one-knob stereo parallel FET limiter
-// (reconstruction of a documented 1971-72 Record Plant session
-// trick; see dsp/Osc72Dsp.h). Internal project name: OSC-72.
+// Western Compressor — engine v4 (2026-10-15): a BA-6A
+// limiting-amplifier emulation (LIMIT) plus an Abbey Road
+// Reel ADT widest-configuration insert (MOD) behind the
+// v32 face; see docs/engine-v4-design.md. Internal project
+// name: OSC-72.
 // Parameters: ALL THE WAY (0..10), the 'limit' in/out toggle
 // (bool, default IN — the compressor bypass), the 'mod' toggle
 // (the "warble" parameter: bool, default OUT — a Lo-Fi Loop
@@ -16,6 +18,18 @@
 // power off bypasses the whole unit in processBlock (dry
 // passthrough through a click-free fade, latency reported 0)
 // and every panel light goes out.
+// Since v38, a 'mix' pot (float 0..1, default 1.0 = fully
+// WET) sits on the strip under POWER: processBlock blends
+// the raw input with the chain's processed output. Signal
+// order: input -> [dry tap: a delay line read at the
+// chain's CURRENT latency, so dry and wet are time-aligned
+// at every mix position — 960 samples with MOD in, 0 with
+// it out] in parallel with [osc72::Chain -> O/P LEVEL
+// trims] -> wet/dry blend by 'mix' -> the v19 POWER fade
+// (settled off, the whole blend is out of the path and the
+// unit is bit-exact bypass whatever the mix). At mix == 1
+// the blend is skipped entirely: the pre-feature output,
+// bit-for-bit.
 // All limiter/mod routing lives in osc72::Chain, so the tested
 // code is the shipped code.
 class Osc72Processor : public juce::AudioProcessor
@@ -71,10 +85,21 @@ private:
     osc72::Chain chain_;
     bool limitIn_ = true;
     bool warbleOn_ = false;
+    bool attackFast_ = true;    // v4: stock detector (default FAST)
+    bool releaseFast_ = false;  // v4: DUAL recovery (default SLOW)
     bool powerOn_ = true;      // v19 strip POWER toggle (default ON)
     float powerMix_ = 1.0f;    // v19 bypass fade position, 1 = unit on
     float outGainL_ = 1.0f;   // smoothed O/P LEVEL gains (v12)
     float outGainR_ = 1.0f;
+    // v38 MIX: the smoothed wet/dry blend position (1 = fully
+    // wet) and the dry tap's delay lines. The lines are
+    // written every sample whatever the state, so the
+    // latency-aligned dry signal is always ready; the read
+    // offset follows the chain's current latency.
+    float mixCur_ = 1.0f;
+    std::vector<float> dryLineL_, dryLineR_;
+    int dryWrite_ = 0;
+    static constexpr int kDryLineSize = 16384;   // power of two; >> the 960-sample max chain latency
     std::atomic<float> displayedGrDb_ { 0.0f };
     std::atomic<float> grDisplayOverrideDb_ { -1.0f };
 

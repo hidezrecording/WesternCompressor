@@ -383,11 +383,27 @@ public:
 private:
     void timerCallback() override;
 
-    // Magic eye: grDb 0 -> full glowing green disc, dark hub;
-    // GR -> black eats the green; ~24 dB -> nearly all black.
-    // dark (v19) = POWER off: a dead tube — no green at all.
-    void drawMagicEye(juce::Graphics& g, juce::Rectangle<float> bounds,
-                      float grDb, bool dark = false);
+    // GR display (v4, Nathan 2026-10-15): the round magic eye
+    // is replaced by the Pioneer 202W-style wide rectangular
+    // ribbed fluorescent display in the same top-centre spot,
+    // framed by the eye's aged-gold bezel reshaped rectangular.
+    // grDb 0 -> the full green ribbed field lit (the photo);
+    // as GR rises the field's edges go black and the darkness
+    // closes symmetrically toward the centre; 28 dB -> totally
+    // dark. Driven by the single overall GR, mono or stereo.
+    // dark = POWER off: a dead display — no green at all.
+    void drawGrDisplay(juce::Graphics& g, float grDb, bool dark = false);
+
+    // v36: the GR field is rendered PER-PIXEL into a cached
+    // image — Nathan: the original 202W has NO horizontal
+    // lines across its field; its pattern is formed by the
+    // vertical slices' individual shading alone. The builder
+    // shades every column as its own vertical gradient (rib
+    // louver + vertical phosphor profile + the woven diamond
+    // band emerging from neighbouring columns' stop
+    // positions), so no stroke, seam or band edge can draw a
+    // horizontal line. Cached on the quantised lit fraction.
+    juce::Image buildGrFieldImage(float lit);
 
     Osc72Processor& proc_;
     OscKnobLookAndFeel laf_;
@@ -395,18 +411,57 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> att_;
     BatToggle limitToggle_, modToggle_, powerToggle_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> limitAtt_, modAtt_, powerAtt_;
+    // v4: ATTACK / RELEASE ballistics toggles flanking the GR
+    // display at the v31 positions (no jewels on these two).
+    // v35: the pair drops down — words on the line the GAIN
+    // REDUCTION caption then shared (baseline 149), toggles
+    // directly under their words at virtual centres
+    // (93, 186) / (347, 186).
+    // v36: the caption moves ABOVE the display; the words
+    // stay at 149, now their own line.
+    BatToggle attackToggle_, releaseToggle_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attackAtt_, releaseAtt_;
+    // v36 (Nathan): the strip's LINK toggle — a POWER-style
+    // cluster (jewel to the RIGHT of the toggle, LINK/UNLINK
+    // labels to its LEFT — the reverse of POWER's order,
+    // per Nathan's explicit arrangement). Bound to 'outLink'
+    // (default linked); the linkage itself is editor-side
+    // (see the constructor).
+    // v37 (Nathan): the cluster drops below the output pots
+    // to the bottom row — toggle centre on virtual y 400,
+    // the LIMIT/MOD toggle centres' line.
+    BatToggle linkToggle_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> linkAtt_;
+    bool linkingPots_ = false;   // reentrancy guard for the pot linkage
+    bool linkageArmed_ = false;  // v36: set at the end of the constructor, so the
+                                 // attachments' initial updates can't equalise
+                                 // saved unequal pot values at load
     SmallKnobLookAndFeel smallLaf_;
     juce::Slider outLevelL_, outLevelR_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> outAttL_, outAttR_;
+    // v38 (Nathan): the MIX pot — the same small knob as the
+    // O/P LEVEL pots, centred under the POWER toggle on the
+    // ATTACK/RELEASE centre line (virtual (540, 186)), bound
+    // to 'mix' (0 = dry, 1 = wet, default wet). Its silk —
+    // dot ring, '0'/'100' end numerals and the MIX word
+    // under the pot, L/R-style — is drawn in paint().
+    juce::Slider mixKnob_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAtt_;
 
     float displayedGrDb_ = 0.0f;   // ballistics-smoothed eye value
     float lastFlangeProp_ = -1.0f; // v10: knob pos at last flange repaint
     juce::Rectangle<int> eyeArea_; // repaint region for the eye
+    // v36: the per-pixel GR field image cache (see
+    // buildGrFieldImage) — rebuilt only when the quantised
+    // lit fraction changes.
+    juce::Image grFieldCache_;
+    int grFieldKey_ = -1;
     // v15: the LIMIT/MOD/POWER jewels are editor paint, so their
     // areas need a repaint when a toggle state flips.
     bool lastLimitState_ = true;
     bool lastModState_ = false;
     bool lastPowerState_ = true;   // v19: power flip repaints the whole panel (all lights + eye)
+    bool lastLinkState_ = true;    // v36: LINK jewel repaint tracking
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Osc72Editor)
 };

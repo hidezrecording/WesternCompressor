@@ -840,6 +840,249 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+GUI v39 (two changes on the v4 engine tree, both
+Nathan's: (1) THE BOW TIE GOES RULER-STRAIGHT — the
+v38 span law (t^1.2, sail inside the span) read as
+two half-circles that stopped short of the centre;
+now the span grows LINEARLY (h = t beyond the
+centre bar) and is BLUNT (no sail), so the dark
+region's top and bottom boundaries are two straight
+lines per side, running all the way in to ONE
+SINGLE SOLID GREEN BAR at the centre — the louver
+phase shifts half a rib so exactly one rib is
+centred on u = ½ and h is zero across precisely
+its width, the triangles meeting on either side of
+it, the sparkle on the bar. Measured
+(build-report-v39.md): silhouette boundary fits a
+straight line to max 0.08 virtual px (RMS 0.03;
+≤ 0.54 from the design line); zero-dark slices at
+0 dB: exactly ONE (the central rib), per-slice
+fractions monotone .000 → full at the corners; GR
+erosion still edges-first (lit 1.000/.688/.151 vs
+law 1.000/.687/.150; extent inside the fronts
+1.00 → .68 → .11, centre 0.00 at every GR). The
+strength law, the sag, the coverage and the
+converging law are v38's, untouched. (2) THE MIX
+WORD JOINS THE WORD LINE — the under-pot MIX word
+is deleted and the word is redrawn ABOVE its pot
+with the identical call as ATTACK/RELEASE
+(baseline 149, centred on the pot's x): ink rows
+139.5..148.2 for all three words, delta +0.0. The
+pot and its markings drop a hair to clear it —
+centre (540, 186) → (540, 190), measured
+(540.0, 189.8); word-ink-to-top-dot gap 10.0
+virtual px. Pixel diff vs v38 confined to the
+display field and the MIX zone — 0 changed pixels
+anywhere else; DSP suite 31/31, processor suite
+18/18, full build green) — **stopped at Nathan's
+screenshot gate.** Details: docs/build-report-v39.md.
+
+GUI v38 (four changes on the v4 engine tree, all
+Nathan's: (1) the DISPLAY FIELD'S DARK PATTERN NOW
+FOLLOWS NATHAN'S OWN LAW, overriding our photo
+readings — NO dark at the centre (the shape's size
+is ZERO at the centre column, no floor), each
+slice's dark shape CENTRED on the slice's vertical
+middle and growing gradually and monotonically
+across the WHOLE half-width (span h = t^1.2 of the
+field height, t = |u − ½|·2), until the dark FILLS
+the outermost slices — all dark at the corners (a
+fullness ramp straightens the v37 sail to its blunt
+span and the shadow strength rises 0.26 → full as
+h → 1; the sail's angled-top character and the
+bright slices' measured sag are v37's, untouched).
+The aggregate at rest is a BOW TIE: two triangles,
+full height at the edges, points meeting at the
+centre sparkle. Measured (build-report-v38.md):
+per-slice dark fraction 0.000 at the innermost
+pair rising monotonically to .94 (luminance domain;
+.88 on the shipped render's green channel, whose
+ramp floor caps the measurable deficit), silhouette
+extent 0 across the inner five slice-pairs climbing
+to .95 at the edges, profile still one smooth curve
+(interior max row-step .034; the centre dip deepens
+by construction). The converging GR law rides on
+top unchanged (lit .981/.694/.152 vs 1.000/.687/
+.150) and the bow tie erodes EDGES-FIRST exactly as
+specified — dark extent just inside the fronts
+.73 → .37 → .00 across gr 0/10/25, centre 0.00 at
+every GR, no closing tweak needed. (2) the GAIN
+REDUCTION caption drops "just the slightest
+amount" toward the frame: baseline 30 → 33 (ink
++2.7), air to the frame top 11.0 → 8.3 virtual px.
+(3) the OUTPUT word LEAVES the v37 L · OUTPUT · R
+line and rides ABOVE THE LINK TOGGLE like LIMIT/MOD
+above theirs — baseline 363, the LIMIT/MOD words'
+own line (ink tops identical at 353.6; air 12.7 to
+the L/R ink bottoms, 30.6 to the lowest dots); L
+and R stand alone under their pots again, untouched.
+(4) NEW: a MIX POT on the strip — the O/P pots' own
+small knob centred under the POWER toggle at
+virtual (540, 186), ON the ATTACK/RELEASE centre
+line, with the O/P silk convention (five dots at
+R 30), the word MIX under the pot at the L/R offset,
+and the sweep ends marked NUMERICALLY — '0' at the
+full-left end of the arc, '100' at the full-right,
+just outside the end dots; NO wet/dry words anywhere.
+New APVTS float 'mix' 0..1, DEFAULT 1.0 (fully wet —
+the pre-feature sound; value strings read "0".."100").
+The blend lives in processBlock around the chain:
+the dry tap is a delay line read at the chain's
+CURRENT latency (MOD in 960, out 0) so mix positions
+never comb; the O/P trims stay the wet side's final
+stage; POWER off remains bit-exact bypass whatever
+the mix. Processor suite grows 8 checks (P7a–P7g):
+mix=1 bit-for-bit the default instance (MOD out and
+in), mix=0 the input exactly (MOD in: delayed by
+exactly 960), mix=0.5 the mean of aligned dry and
+wet (max error 5.96e-08), power-off bypass at
+mix=0.3 — 18/18; DSP suite 31/31; full JUCE build
+green. Pixel diff vs v37 confined to the display,
+the caption band, the MIX zone and the OUTPUT zone —
+0 changed pixels anywhere else) — **stopped at
+Nathan's screenshot gate.** Details:
+docs/build-report-v38.md.
+
+GUI v37 (two changes on the v4 engine tree, both
+Nathan's: (1) the GR DISPLAY FIELD IS REBUILT AGAIN —
+v36's woven band still read as stacked HORIZONTAL
+BANDS (light strip / dark strip / diamond row / dark
+strip / light strip) because it was built from
+horizontal terms; Nathan re-sent his 202W photo and
+the field is now built to the photo's actual
+structure (measured, docs/build-report-v37.md):
+uniform full-height vertical louver slices under ONE
+smooth vertical base curve — the width-averaged
+profile is a single continuous sag (0.99 at the top,
+0.70 at the mid-height minimum, 0.97 at the bottom;
+max interior row-step 0.032 at 92-row sampling vs
+the photo's 0.019 and v36's 0.079) — plus ONE dark
+sail fin per slice: angled top edge, lean mirrored
+per field-half (blunt edge toward the centre, point
+outward), the fins shrinking toward the centre
+slices into small diamonds (~13% of field height at
+the innermost pair, photo's pair ~18%) with a tiny
+bright sparkle at the meeting point. The band
+centreline, the bright channel, the pinch/petal
+terms and the width centre-weighting are all DELETED
+— nothing horizontal remains to stack into layers.
+Frame, caption, converging law and ballistics
+unchanged (lit fractions track (1-gr/28)^0.85);
+(2) the strip's OUTPUT/LINK header is RELOCATED:
+the v36 raised header was too crowded — the OUTPUT
+caption drops to the pots' bottom line, centred
+between the L and R labels (reads L · OUTPUT · R,
+ink gaps 16.4 / 16.2 virtual px, OUTPUT ink centre
+539.3 vs strip centre 540), and the LINK cluster
+(labels left of toggle, jewel right, lit = linked —
+v36 arrangement kept) drops BELOW the pots to the
+bottom row: toggle centre virtual (540, 400), the
+LIMIT/MOD toggle centres' line — straight across
+(jewel centroid measured (582.8, 399.8)); plate
+bottom ~425.3 vs BITEY ink top 436.8 = 11.5 virtual
+px air, the same clearance the module's bottom row
+keeps to WESTERN COMPRESSOR; the band the header
+vacated under POWER stays empty panel. The v36
+toggle-bottom/top-dot alignment is retired. Block
+diff vs v36 confined to the display field, the
+vacated header band, the caption line and the LINK
+cluster's new home; pots, dots, POWER, LIMIT/MOD
+and ATTACK/RELEASE zones: 0 changed pixels. DSP
+suite 31/31, processor suite 10/10, full JUCE build
+green) — **stopped at Nathan's screenshot gate.**
+Details: docs/build-report-v37.md.
+
+GUI v36 (five changes on the v4 engine tree, all
+Nathan's: (1) the GR DISPLAY FIELD IS REBUILT PER-PIXEL
+— the v35 teeth (which "read as a bunch of jagged saw
+teeth"), their feather and the shading overlay are
+deleted; the field is now a cached per-pixel image
+(buildGrFieldImage) in which every column carries its
+own vertical shading (rib louver × phosphor falloff ×
+centre-weighting), and the 202W's woven band emerges
+from the columns exactly as the original's does: a
+bright lens-shaped channel whose half-height swells to
+~0.155 of the field at each of 13 diamond centres (one
+per two ribs) and pinches to ~0.015 between them, so
+the darker regions read as smooth curved triangles
+pointing into bright diamonds, with a sparkle point at
+each pinch; NO horizontal lines exist anywhere in the
+field (self-check: side-by-side crop vs the reference
++ a row-step scan — max single-row step 14.7/255 in
+broad gradient shoulders, vs v35's 54 spike at the
+feather seam); the converging lit law is unchanged
+(bright fractions 0.995 / 0.68 / 0.145 at 0 / 10 / 25
+dB, vs law values 1.0 / 0.687 / 0.150); (2) the GAIN
+REDUCTION caption moves ABOVE the display (baseline
+149 -> 30, centred on the display, ink 20.9..30.0,
+10.9 px air to the frame top); ATTACK / RELEASE do
+NOT move — baseline 149 is their own line now (their
+zone diff vs v35 is exactly the departed caption's
+ink, nothing else); (3) the bottom clusters swap
+jewel <-> IN/OUT: jewels to the INNER flanks
+(125, 400) / (315, 400), labels to the OUTER (anchors
+62 right / 378 left); LIMIT now reads IN/OUT, toggle,
+jewel and MOD jewel, toggle, IN/OUT; jewel-to-flange
+clearance 23.4 virtual px circle-exact; (4)+(5) the
+strip gains a LINK CLUSTER in a stacked OUTPUT
+header: the OUTPUT caption rises (259 -> 211) and
+under it sits a POWER-convention cluster with
+Nathan's reversed left/right order — LINK/UNLINK
+labels LEFT of the toggle (right-anchored at 512,
+baselines 242/260), jewel RIGHT of it at (583,
+245.5), lit = linked; toggle centre virtual
+(540, 245.5), plate bottom at virtual ~270.7 vs the
+pots' top-dot centre line 269.8 — in line, inside
+the dot's own span; new APVTS bool 'outLink'
+(default linked) with EDITOR-SIDE absolute linkage:
+dragging either O/P pot sets both to the dragged
+value; engaging link alone changes nothing (a resting
+offset persists until the first drag); audio path
+untouched; audits re-run and passing, block diff vs
+v35 confined to the display, the departed/arrived
+caption bands, the bottom clusters and the strip
+header band; DSP suite 31/31, processor suite 10/10,
+full JUCE build green) — **stopped at Nathan's
+screenshot gate.** Details: docs/build-report-v36.md.
+
+GUI v35 (two changes on the v4 engine tree: (1) the
+ATTACK / RELEASE clusters DROP DOWN as whole assemblies
+(+110 virtual px) — their words land ON the GAIN
+REDUCTION caption line (baseline 149, the caption's own
+draw baseline; measured ink-centroid deltas +0.05 /
++0.65 still px — one common line reading ATTACK · GAIN
+REDUCTION · RELEASE) and the toggles follow directly
+under their words at centres (93, 186) / (347, 186),
+FAST/SLOW still on the outer flanks, no jewels; the
+display and POWER do not move; audit re-run and
+passing (plates ≈35.8 virtual px circle-exact off the
+flange, word ink 28.5 px clear of the frame's bottom);
+(2) the GR display's rib field gains the 202W
+original's woven centre band of INTERLOCKING CURVED
+TRIANGLES — dark teeth on the bright field, mirror-
+symmetric, tapering to a point-to-point pair at the
+centre, closing with the same converging-darkness law
+(lit widths 168.2 / 115.9 / 25.5 virtual px at
+0 / 10 / 25 dB, fronts symmetric to 1 still px);
+block diff vs v34 confined to the display + cluster
+bands, everything below still y 484 pixel-identical;
+DSP suite 31/31, processor suite 10/10, full JUCE
+build green) — **stopped at Nathan's screenshot
+gate.** Details: docs/build-report-v35.md.
+
+ENGINE v4 / GUI v34 (documented in
+docs/engine-v4-design.md and docs/engine-v4-
+research.md rather than this log: the BA-6A limiter
++ widest Reel ADT engine replaces the v1.0.3 audio
+under the kept face; the round magic eye becomes
+the Pioneer 202W-style ribbed GR display in the
+eye's aged-gold frame reshaped rectangular, and two
+new toggles flank it — ATTACK fast/slow at left,
+RELEASE fast/slow (Single/Dual) at right, no
+jewels, FAST/SLOW on the outer flanks) — built and
+locally verified, awaiting Nathan's verdict
+alongside v35.
+
 GUI v32 (the LIMIT/MOD clusters return to the
 module's bottom corners as whole assemblies —
 toggle centres at virtual (86, 400) and (354,
