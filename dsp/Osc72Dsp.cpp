@@ -13,6 +13,7 @@ namespace osc72 {
 void Ba6aLimiter::prepare(double sampleRate)
 {
     fs_ = sampleRate > 0.0 ? sampleRate : 48000.0;
+    setScCutoff(scCutoffHz_);   // v41: refresh the sidechain coefficient at the real rate
     ironInL_.prepare(fs_);  ironInR_.prepare(fs_);
     ironMidL_.prepare(fs_); ironMidR_.prepare(fs_);
     ironOutL_.prepare(fs_); ironOutR_.prepare(fs_);
@@ -27,6 +28,7 @@ void Ba6aLimiter::reset()
     hpLpL_ = hpLpR_ = 0.0f;
     lpL_ = lpR_ = 0.0f;
     sag_ = 0.0f;
+    scLpL_ = scLpR_ = 0.0f;
     detEnv_ = 0.0f;
     lastPreL_ = lastPreR_ = 0.0f;
     prePeak_ = 0.0f;
@@ -116,8 +118,18 @@ void Ba6aLimiter::process(float inL, float inR, float& outL, float& outR)
     // the loop's inherent one-sample delay (the analogue loop
     // is continuous; one sample at audio rates is the honest
     // discrete equivalent and keeps the loop stable). ──
+    // v41 sidechain low-cut: the per-channel LP states track
+    // the sense every sample (engaging the filter never
+    // steps); above the 10 Hz bottom stop the detector hears
+    // sense − LP (the high-passed sense), at the stop it
+    // hears the raw sense exactly as before the feature.
+    scLpL_ += (lastPreL_ - scLpL_) * scCoef_;
+    scLpR_ += (lastPreR_ - scLpR_) * scCoef_;
+    const bool scIn = scCutoffHz_ > 10.5f;
+    const float senL = scIn ? lastPreL_ - scLpL_ : lastPreL_;
+    const float senR = scIn ? lastPreR_ - scLpR_ : lastPreR_;
     const float peak = kBa6aDetSense
-                     * std::max(std::fabs(lastPreL_), std::fabs(lastPreR_));
+                     * std::max(std::fabs(senL), std::fabs(senR));
     const float detTau = peak > detEnv_
         ? (attackFast_ ? kBa6aDetFastTauSec : kBa6aDetSlowTauSec)
         : kBa6aDetDecayTauSec;

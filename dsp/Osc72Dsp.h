@@ -249,6 +249,24 @@ public:
     void setReleaseFast(bool fast) { releaseFast_ = fast; }
     bool releaseFast() const { return releaseFast_; }
 
+    // Sidechain low-cut (v41, Nathan): a one-pole high-pass
+    // in the DETECTOR FEED ONLY — per channel on the post-
+    // iron sense signal, ahead of the peak combine. The
+    // audio path never sees it; it only decides how much
+    // low end the 6H6 detector reacts to. 10 Hz is the
+    // bottom stop: there the filter is OUT of the path
+    // (the sense passes bit-identical), so the shipped
+    // 1.1.2 sound and every ballistics pin hold exactly
+    // at the default. The LP states track the sense even
+    // while bypassed, so sweeping up from the stop never
+    // steps the envelope.
+    void setScCutoff(float hz)
+    {
+        scCutoffHz_ = clampf(hz, 10.0f, 200.0f);
+        scCoef_ = tauCoef(1.0f / (6.283185307179586f * scCutoffHz_), fs_);
+    }
+    float scCutoff() const { return scCutoffHz_; }
+
     void process(float inL, float inR, float& outL, float& outR);
 
     float gainReductionDb() const { return grDb_; }
@@ -274,6 +292,9 @@ private:
     float lpL_ = 0.0f, lpR_ = 0.0f;
 
     float sag_ = 0.0f;                // B+ sag state (linked), 0..1 — v1.1.2 (study §2.3a)
+    float scCutoffHz_ = 10.0f;        // v41: detector sidechain low-cut (Hz)
+    float scCoef_ = 0.0f;             // v41: its one-pole LP coefficient
+    float scLpL_ = 0.0f, scLpR_ = 0.0f; // v41: per-channel LP states (HP = sense - LP)
     float detEnv_ = 0.0f;             // detector envelope (linear peak)
     float lastPreL_ = 0.0f, lastPreR_ = 0.0f; // post-iron, pre-makeup (detector source)
     float prePeak_ = 0.0f;            // slow-decay peak of the pre-makeup output (make-up ceiling)
@@ -405,6 +426,8 @@ public:
 
     void setLimitIn(bool in);
     bool limitIn() const { return limitTarget_; }
+    void setScCutoff(float hz) { limiter_.setScCutoff(hz); }
+    float scCutoff() const { return limiter_.scCutoff(); }
     void setModIn(bool in) { adt_.setEnabled(in); }
     bool modIn() const { return adt_.enabled(); }
 

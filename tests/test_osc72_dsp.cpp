@@ -28,12 +28,13 @@ static float db(float lin) { return 20.0f * (float)std::log10(lin > 1e-12f ? lin
 struct Meas { float rmsL, peakL, meanGr, makeupDb; };
 static Meas runLim(float knob, float amp, float freq, double seconds = 2.0,
                    bool attackFast = true, bool releaseFast = false,
-                   float ampR = -1.0f) {
+                   float ampR = -1.0f, float scCutoff = -1.0f) {
     osc72::Ba6aLimiter lim;
     lim.prepare(kFs);
     lim.setKnob(knob);
     lim.setAttackFast(attackFast);
     lim.setReleaseFast(releaseFast);
+    if (scCutoff > 0.0f) lim.setScCutoff(scCutoff);
     lim.reset();
     if (ampR < 0.0f) ampR = amp;
     const int total = (int)(kFs * seconds);
@@ -717,6 +718,28 @@ int main() {
         std::snprintf(d, sizeof d, "bloom %+.2f dB (hit %.1f dB GR, gap %.1f dB GR)", bloom, hitGr, gapGr);
         check(bloom >= 7.0, "H1 remix bloom >= 7 dB at knob 0.5", d);
         check(gapGr >= 3.0 && gapGr <= hitGr - 5.0, "H2 gap GR held by recovery, well under hit GR", d);
+    }
+
+    std::printf("\n=== I. SIDECHAIN LOW-CUT (v41) ===\n");
+    {
+        // Detector-feed HPF only: at the 10 Hz bottom stop the
+        // filter is out of the path (I3 pins the equivalence);
+        // at 200 Hz a 40 Hz tone's GR must fall materially
+        // while a 1 kHz tone's GR barely moves.
+        char d[512];
+        auto lf10  = runLim(0.75f, 0.5f, 40.0f, 2.0, true, false, -1.0f, 10.0f);
+        auto lf200 = runLim(0.75f, 0.5f, 40.0f, 2.0, true, false, -1.0f, 200.0f);
+        auto lfDef = runLim(0.75f, 0.5f, 40.0f, 2.0, true, false, -1.0f, -1.0f);
+        std::snprintf(d, sizeof d, "40 Hz GR: sc10 %.2f dB, sc200 %.2f dB (fall %.2f dB)",
+                      lf10.meanGr, lf200.meanGr, lf10.meanGr - lf200.meanGr);
+        check(lf10.meanGr - lf200.meanGr >= 5.0f, "I1 40 Hz GR falls materially at sc=200", d);
+        auto mf10  = runLim(0.75f, 0.5f, 1000.0f, 2.0, true, false, -1.0f, 10.0f);
+        auto mf200 = runLim(0.75f, 0.5f, 1000.0f, 2.0, true, false, -1.0f, 200.0f);
+        std::snprintf(d, sizeof d, "1 kHz GR: sc10 %.2f dB, sc200 %.2f dB (delta %.2f dB)",
+                      mf10.meanGr, mf200.meanGr, std::fabs(mf200.meanGr - mf10.meanGr));
+        check(std::fabs(mf200.meanGr - mf10.meanGr) <= 0.5f, "I2 1 kHz GR essentially unaffected", d);
+        std::snprintf(d, sizeof d, "GR default %.4f vs sc10 %.4f dB", lfDef.meanGr, lf10.meanGr);
+        check(std::fabs(lfDef.meanGr - lf10.meanGr) < 1.0e-4f, "I3 bottom stop = default path (filter out)", d);
     }
 
     std::printf("\n%s (%d checks, %d failures)\n",

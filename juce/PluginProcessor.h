@@ -87,6 +87,7 @@ private:
     bool warbleOn_ = false;
     bool attackFast_ = true;    // v4: stock detector (default FAST)
     bool releaseFast_ = false;  // v4: DUAL recovery (default SLOW)
+    float scCutoffHz_ = 10.0f;  // v41: detector sidechain low-cut (default = bottom stop, filter out)
     bool powerOn_ = true;      // v19 strip POWER toggle (default ON)
     float powerMix_ = 1.0f;    // v19 bypass fade position, 1 = unit on
     float outGainL_ = 1.0f;   // smoothed O/P LEVEL gains (v12)

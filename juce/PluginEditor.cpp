@@ -583,6 +583,7 @@ juce::Font numeralFont(float size)
 // Letter-spaced capitals, CT-1 silk-screen style. Draws with the
 // current font/colour; alignment via the anchor x meaning.
 enum class Anchor { left, centre, right };
+
 void drawTrackedText(juce::Graphics& g, const juce::String& text,
                      const juce::Font& font, float tracking,
                      float anchorX, float baselineY, Anchor anchor)
@@ -1576,11 +1577,41 @@ juce::Image Osc72Editor::buildGrFieldImage()
         return t * t * (3.0f - 2.0f * t);
     };
     // Green phosphor ramp by luminance L.
+    // v41 (Nathan, on the meter colour): the BLACKS were too
+    // black — the contrast against the green too sharp. The
+    // dark end of the ramp is LIFTED into deep green of the
+    // same hue family, so the field's dark regions read as
+    // shading of the green (as in his 202W photo, where the
+    // closed areas are deep green, never black): the floor
+    // stop (2, 10, 4) -> (6, 32, 14), the 0.30 stop eased up
+    // with it (10, 66, 26) -> (13, 74, 30) to keep the low
+    // ramp smooth. The bright stops are untouched. The
+    // closing masks in drawGrDisplay use the floor colour
+    // EXACTLY, so artwork darks, masks and the fully-closed
+    // state are one and the same deep green — the bottom of
+    // the field's own ramp, still reading "totally dark".
+    // v42 (Nathan): even subtler — the dark green area moves
+    // closer still to the brighter green, "less black even
+    // than this version", so the facets read more subtle and
+    // glowy. The dark end lifts again, same hue ratios: floor
+    // (6, 32, 14) -> (10, 54, 22), 0.30 (13, 74, 30) ->
+    // (16, 92, 36), 0.55 (18, 116, 43) -> (20, 124, 46);
+    // everything from 0.78 up is untouched, so the bow tie
+    // and facets keep their shape — only the dark-to-bright
+    // gap narrows. Masks stay exactly the floor colour.
+    // v43 (Nathan): "the dark green can be even a little
+    // closer to the main green" — one more step, smaller
+    // than v42's: floor (10, 54, 22) -> (12, 68, 28), 0.30
+    // (16, 92, 36) -> (18, 104, 41), 0.55 (20, 124, 46) ->
+    // (22, 132, 48); same hue ratios, 0.78 up still
+    // untouched. The bow tie stays clearly readable and
+    // the fully-closed state is still the dark end of the
+    // green family. Masks follow the floor exactly.
     auto ramp = [](float L, float& r, float& g, float& b) {
         static const float stops[][4] = {
-            { 0.00f,   2.0f,  10.0f,   4.0f },
-            { 0.30f,  10.0f,  66.0f,  26.0f },
-            { 0.55f,  18.0f, 116.0f,  43.0f },
+            { 0.00f,  12.0f,  68.0f,  28.0f },
+            { 0.30f,  18.0f, 104.0f,  41.0f },
+            { 0.55f,  22.0f, 132.0f,  48.0f },
             { 0.78f,  53.0f, 196.0f,  82.0f },
             { 0.95f,  96.0f, 244.0f, 120.0f },
             { 1.12f, 138.0f, 250.0f, 150.0f },
@@ -1773,11 +1804,19 @@ void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
         g.fillRoundedRectangle(spill, 10.0f);
     }
 
-    // The recessed window: dead black-green glass, shaded
-    // down from the top (the recess shadow).
+    // The recessed window: dead deep-green glass, shaded
+    // down from the top (the recess shadow). v41: lifted
+    // with the field palette (was 0x0a0f0b -> 0x020302,
+    // near-black) — (10, 28, 16) -> (5, 18, 9), a step
+    // below the phosphor floor: unlit glass of the same
+    // hue. This gradient IS the power-off dead field.
+    // v42: lifted in step with the v42 ramp — (11, 44, 19)
+    // -> (6, 29, 12), still a step below the new floor.
+    // v43: in step with the v43 ramp — (12, 58, 23)
+    // -> (7, 38, 15), still a step below the new floor.
     {
-        juce::ColourGradient dead(juce::Colour(0xff0a0f0b), window.getX(), window.getY(),
-                                  juce::Colour(0xff020302), window.getX(), window.getBottom(), false);
+        juce::ColourGradient dead(juce::Colour(0xff0c3a17), window.getX(), window.getY(),
+                                  juce::Colour(0xff07260f), window.getX(), window.getBottom(), false);
         g.setGradientFill(dead);
         g.fillRoundedRectangle(window, 3.0f);
     }
@@ -1815,7 +1854,15 @@ void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
             g.drawImage(grFieldCache_, field);
 
             if (lit < 0.999f) {
-                const auto maskCol = juce::Colour(3, 16, 7);   // the dead-glass floor the old coverage blended to
+                // v41: the mask colour IS the artwork ramp's
+                // floor (6, 32, 14) — deep green, not the old
+                // near-black (3, 16, 7) — so the closing
+                // darkness is the field's own darkest shade.
+                // v42: the floor moved to (10, 54, 22); the
+                // mask follows it exactly, as before.
+                // v43: the floor moved to (12, 68, 28); the
+                // mask follows it exactly, as before.
+                const auto maskCol = juce::Colour(12, 68, 28);
                 const float fL = field.getX(), fR = field.getRight();
                 const float fCx = field.getCentreX();
                 const float fTop = field.getY(), fBot = field.getBottom();
@@ -1966,6 +2013,19 @@ Osc72Editor::Osc72Editor(Osc72Processor& p) : AudioProcessorEditor(&p), proc_(p)
     addAndMakeVisible(mixKnob_);
     mixAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         proc_.apvts, "mix", mixKnob_);
+    // SIDECHAIN pot (v41, Nathan): the detector low-cut —
+    // same small knob, same configuration; double-click
+    // returns to 10 Hz (the bottom stop: filter out, the
+    // unit's default ears). Silk in paint(), bounds in
+    // resized().
+    scKnob_.setLookAndFeel(&smallLaf_);
+    scKnob_.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    scKnob_.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    scKnob_.setRotaryParameters(kPi * 1.25f, kPi * 2.75f, true);
+    scKnob_.setDoubleClickReturnValue(true, 10.0);
+    addAndMakeVisible(scKnob_);
+    scAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        proc_.apvts, "scCutoff", scKnob_);
     linkageArmed_ = true;   // v36: pot linkage live from here (see the LINK block above)
     startTimerHz(60);   // v3: 30 -> 60 Hz — the eye's display ballistics (below) now track the limiter's GR envelope instead of sweeping lazily (Nathan: the old motion read like a VU)
 }
@@ -1977,6 +2037,7 @@ Osc72Editor::~Osc72Editor()
     outLevelL_.setLookAndFeel(nullptr);
     outLevelR_.setLookAndFeel(nullptr);
     mixKnob_.setLookAndFeel(nullptr);
+    scKnob_.setLookAndFeel(nullptr);
 }
 
 void Osc72Editor::timerCallback()
@@ -2151,6 +2212,19 @@ void Osc72Editor::resized()
     mixKnob_.setBounds(567, 182, 54, 54);           // centre (594, 209) = virtual (540, 190)
     outLevelL_.setBounds(518, 304, 54, 54);         // centre (545, 331) = virtual (495, 301) — on the knob-centre line
     outLevelR_.setBounds(616, 304, 54, 54);         // centre (643, 331) = virtual (584, 301) — on the knob-centre line
+    // v41 (Nathan): the strip's small pots become a 2x2 GRID
+    // on the output pots' columns, and ALL FOUR shrink a
+    // touch (54 -> 50 device px; the silk radii in paint()
+    // scale in proportion, dot ring 30 -> 28, numeral ring
+    // 45 -> 42). Columns: left = the L pot's x (silk 496),
+    // right = the R pot's x (silk 584). Bottom row: OUTPUT
+    // L / R, centres unmoved (virtual y 300). Top row
+    // (virtual y 190, the v39 MIX row): SIDECHAIN takes the
+    // left column; MIX moves right into the R column.
+    scKnob_.setBounds(521, 184, 50, 50);            // centre (546, 209) = virtual (496, 190) — left column, top row
+    mixKnob_.setBounds(617, 184, 50, 50);           // centre (642, 209) = virtual (584, 190) — right column, top row (was (540, 190) in v38–v40)
+    outLevelL_.setBounds(521, 305, 50, 50);         // centre (546, 330) = virtual (496, 300) — left column, bottom row
+    outLevelR_.setBounds(617, 305, 50, 50);         // centre (642, 330) = virtual (584, 300) — right column, bottom row
     eyeArea_ = juce::Rectangle<int>(128, 16, 232, 122);  // v4: the GR display window + its glow (frame virtual (124, 41, 192, 70)); x2 in audio v2. v36: extended up — the GAIN REDUCTION caption now rides ABOVE the display (ink virtual y ~20..31) inside this repaint region
 }
 
@@ -2930,50 +3004,61 @@ void Osc72Editor::paint(juce::Graphics& g)
                     512.0f, 414.5f, Anchor::right);
     drawPowerJewel(g, 583.0f, 400.0f, powerOn && linkToggle_.getToggleState(), 1.0f);
 
-    // ── Strip MIX pot silk (v38, Nathan) ─────────────────────
-    // The MIX pot component (mixKnob_; bounds in resized())
-    // is centred at virtual (540, 190) — under the POWER
-    // toggle. Its silk follows the O/P LEVEL pots'
-    // convention exactly: the same five dot markers at
-    // R 30 around the travel (min at 7:30, max at 4:30).
-    // The sweep ends are marked NUMERICALLY — a percentage
-    // without the sign (Nathan: NO 'wet'/'dry' words
-    // anywhere): '0' at the full-left end of the arc
-    // (bottom-left), '100' at the full-right end, set just
-    // outside the end dots at R 45 on the end angles.
-    // v39 (Nathan): the word MIX leaves the under-pot seat
-    // (the v38 draw at baseline 227 is DELETED — no
-    // duplicate) and rises ABOVE the pot onto the
-    // ATTACK/RELEASE word line — the identical draw call
-    // (capsFont 14.5, tracking 0.6, baseline 149), centred
-    // on the pot's x — so ATTACK · MIX · RELEASE share one
-    // word line across both plates. The pot itself drops
-    // 186 -> 190 (resized()) so the word's ink clears the
-    // top dot of the ring (dot top at virtual 158).
-    g.setColour(kSilk);
-    drawTrackedText(g, "MIX", capsFont(14.5f), 0.6f,
-                    540.0f, 149.0f, Anchor::centre);
-    for (int i = 0; i <= 4; ++i) {
-        const float aDeg = 225.0f + 67.5f * (float)i;
-        const auto dp = polar(540.0f, 190.0f, 30.0f, aDeg);
-        const float dr = (i == 2) ? 2.0f : 1.6f;
-        g.setColour(kSilk.withAlpha(0.9f));
-        g.fillEllipse(dp.x - dr, dp.y - dr, dr * 2.0f, dr * 2.0f);
-    }
-    g.setColour(kSilk);
+    // ── Strip pot-grid silk (v41, Nathan) ────────────────────
+    // The four small pots are a 2x2 grid on the output pots'
+    // columns (resized()): top row SIDECHAIN (496, 190) /
+    // MIX (584, 190), bottom row the OUTPUT pots (496/584,
+    // 300). All four pots shrank a touch (54 -> 50 device
+    // px), so the silk radii scale in proportion: dot ring
+    // R 30 -> 28, numeral ring R 45 -> 42; the words, end
+    // numerals and letters stay with their pots.
+    // Top-row words ride the ATTACK/RELEASE word line
+    // (capsFont 14.5, tracking 0.6, baseline 149): MIX is
+    // centred on its new column (584; it sat at 540 in
+    // v38–v40), and SIDECHAIN — word + the low-cut symbol
+    // glyph beside it, laid out as one unit — is centred on
+    // 496. End numerals follow the MIX convention (MIX-pot
+    // style): '0'/'100' on MIX, '10'/'200' (Hz) on
+    // SIDECHAIN, at the arc ends (225° / 495°) on R 42.
+    // v42 (Nathan): the low-cut glyph is DELETED — the
+    // SIDECHAIN word alone centres on 496 (see below).
     {
-        const auto n0 = polar(540.0f, 190.0f, 45.0f, 225.0f);
-        const auto n1 = polar(540.0f, 190.0f, 45.0f, 495.0f);
-        drawTrackedText(g, "0", capsFont(14.0f), 0.4f,
-                        n0.x, n0.y + 4.0f, Anchor::centre);
-        drawTrackedText(g, "100", capsFont(14.0f), 0.4f,
-                        n1.x, n1.y + 4.0f, Anchor::centre);
+        auto gridPotSilk = [&](float cx, const char* lo, const char* hi) {
+            for (int i = 0; i <= 4; ++i) {
+                const float aDeg = 225.0f + 67.5f * (float)i;
+                const auto dp = polar(cx, 190.0f, 28.0f, aDeg);
+                const float dr = (i == 2) ? 2.0f : 1.6f;
+                g.setColour(kSilk.withAlpha(0.9f));
+                g.fillEllipse(dp.x - dr, dp.y - dr, dr * 2.0f, dr * 2.0f);
+            }
+            g.setColour(kSilk);
+            const auto n0 = polar(cx, 190.0f, 42.0f, 225.0f);
+            const auto n1 = polar(cx, 190.0f, 42.0f, 495.0f);
+            drawTrackedText(g, lo, capsFont(14.0f), 0.4f,
+                            n0.x, n0.y + 4.0f, Anchor::centre);
+            drawTrackedText(g, hi, capsFont(14.0f), 0.4f,
+                            n1.x, n1.y + 4.0f, Anchor::centre);
+        };
+
+        // SIDECHAIN word. v41 drew it as one centred unit
+        // with a low-cut (high-pass) symbol glyph beside it;
+        // v42 (Nathan): the glyph goes — "no one's going to
+        // be confused about what that knob actually does" —
+        // and the word alone centres on its pot (x 496),
+        // exactly as MIX centres on its own (x 584).
+        g.setColour(kSilk);
+        drawTrackedText(g, "SIDECHAIN", capsFont(14.5f), 0.6f,
+                        496.0f, 149.0f, Anchor::centre);
+        drawTrackedText(g, "MIX", capsFont(14.5f), 0.6f,
+                        584.0f, 149.0f, Anchor::centre);
+        gridPotSilk(496.0f, "10", "200");
+        gridPotSilk(584.0f, "0", "100");
     }
 
     for (float kcx : { 496.0f, 584.0f }) {
         for (int i = 0; i <= 4; ++i) {
             const float aDeg = 225.0f + 67.5f * (float)i;
-            const auto dp = polar(kcx, 300.0f, 30.0f, aDeg);
+            const auto dp = polar(kcx, 300.0f, 28.0f, aDeg);
             const float dr = (i == 2) ? 2.0f : 1.6f;
             g.setColour(kSilk.withAlpha(0.9f));
             g.fillEllipse(dp.x - dr, dp.y - dr, dr * 2.0f, dr * 2.0f);

@@ -62,6 +62,18 @@ Osc72Processor::createParameterLayout()
         juce::ParameterID { "attackFast", 1 }, "Attack Fast", true));
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID { "releaseFast", 1 }, "Release Fast", false));
+    // Sidechain low-cut (Nathan, 2026-10-15, v41): the strip's
+    // SIDECHAIN pot — a high-pass in the BA-6A's DETECTOR feed
+    // only (audio path untouched), 10–200 Hz on a log taper.
+    // Default 10 Hz = the bottom stop, where the filter is out
+    // of the path and the shipped sound/ballistics hold
+    // exactly. Shown in Hz ("10 Hz".."200 Hz").
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID { "scCutoff", 1 }, "Sidechain Cutoff",
+        juce::NormalisableRange<float>(10.0f, 200.0f, 0.01f, 0.4077f), 10.0f,
+        juce::String(), juce::AudioProcessorParameter::genericParameter,
+        [](float v, int) { return juce::String(juce::roundToInt(v)) + " Hz"; },
+        [](const juce::String& t) { return juce::jlimit(10.0f, 200.0f, t.getFloatValue()); }));
     // Output LINK (Nathan, 2026-10-15, v36): the strip's LINK
     // toggle under the OUTPUT caption. Default LINKED (link is
     // the normal state). EDITOR-SIDE control linkage only:
@@ -117,6 +129,8 @@ void Osc72Processor::prepareToPlay(double sampleRate, int)
     chain_.setAttackFast(attackFast_);
     releaseFast_ = apvts.getRawParameterValue("releaseFast")->load() > 0.5f;
     chain_.setReleaseFast(releaseFast_);
+    scCutoffHz_ = apvts.getRawParameterValue("scCutoff")->load();
+    chain_.setScCutoff(scCutoffHz_);
     outGainL_ = juce::Decibels::decibelsToGain(
         apvts.getRawParameterValue("outLevelL")->load());
     outGainR_ = juce::Decibels::decibelsToGain(
@@ -171,6 +185,15 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
     {
         releaseFast_ = wantReleaseFast;
         chain_.setReleaseFast(releaseFast_);
+    }
+    // v41 sidechain low-cut: no latency consequence; the DSP
+    // filter's states track continuously, so moves never step
+    // the detector envelope.
+    const float wantSc = apvts.getRawParameterValue("scCutoff")->load();
+    if (wantSc != scCutoffHz_)
+    {
+        scCutoffHz_ = wantSc;
+        chain_.setScCutoff(scCutoffHz_);
     }
     // POWER edge (v19): off pulls the whole unit out of the
     // path — reported latency drops to 0 even if MOD is in,

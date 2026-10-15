@@ -452,6 +452,18 @@ private:
     // under the pot, L/R-style — is drawn in paint().
     juce::Slider mixKnob_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAtt_;
+    // v41 (Nathan): the SIDECHAIN pot — the detector low-cut
+    // ('scCutoff', 10–200 Hz, default 10 = filter out). The
+    // strip's four small pots become a 2x2 grid on the
+    // output pots' columns: top row SIDECHAIN (left) / MIX
+    // (right, moved from x 540), bottom row OUTPUT L / R
+    // unmoved; all four shrink a touch (54 -> 50 device px,
+    // silk radii scale with them). Its silk (word, dot ring,
+    // '10'/'200' end numerals) is drawn in paint(), MIX-style.
+    // v42: the low-cut glyph that sat beside the word in v41
+    // is deleted — the SIDECHAIN word alone centres on the pot.
+    juce::Slider scKnob_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> scAtt_;
 
     float displayedGrDb_ = 0.0f;   // ballistics-smoothed eye value
     float lastFlangeProp_ = -1.0f; // v10: knob pos at last flange repaint

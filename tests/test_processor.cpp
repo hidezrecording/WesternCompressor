@@ -404,6 +404,58 @@ int main() {
         }
     }
 
+    // ── P8. SIDECHAIN low-cut (v41) ───────────────────────────
+    {
+        // Through the whole APVTS -> processor -> Chain path:
+        // the param exists (default 10 Hz, Hz strings), and a
+        // 40 Hz tone's displayed GR falls materially when the
+        // cutoff sweeps to 200 Hz while a 1 kHz tone's holds.
+        auto grSteady = [&](float freq, float scNorm) {
+            Osc72Processor q;
+            q.prepareToPlay(kFs, 512);
+            q.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.75f);
+            if (scNorm >= 0.0f)
+                q.apvts.getParameter("scCutoff")->setValueNotifyingHost(scNorm);
+            juce::MidiBuffer midi;
+            const int block = 512;
+            double acc = 0; int cnt = 0;
+            const int total = (int)(2.5 * kFs);
+            for (int base = 0; base < total; base += block) {
+                juce::AudioBuffer<float> buf(2, block);
+                for (int j = 0; j < block; ++j) {
+                    int i = base + j;
+                    float s = 0.5f * (float)std::sin(2.0 * kPi * freq * i / kFs);
+                    buf.setSample(0, j, s); buf.setSample(1, j, s);
+                }
+                q.processBlock(buf, midi);
+                if (base >= (int)(1.5 * kFs)) { acc += q.currentGainReductionDb(); ++cnt; }
+            }
+            return (float)(acc / cnt);
+        };
+        char b[256];
+        {
+            Osc72Processor q;
+            auto* p = q.apvts.getParameter("scCutoff");
+            bool ok = p != nullptr
+                   && std::fabs(p->getValue() - p->convertTo0to1(10.0f)) < 1.0e-6
+                   && p->getCurrentValueAsText().contains("Hz");
+            std::snprintf(b, sizeof b, "exists=%d defaultNorm=%.4f text='%s'",
+                          (int)(p != nullptr), p ? p->getValue() : -1.0f,
+                          p ? p->getCurrentValueAsText().toRawUTF8() : "");
+            check(ok, "P8a scCutoff param exists, default 10 Hz, Hz string", b);
+            auto hi = p->getCurrentValueAsText(); (void)hi;
+            p->setValueNotifyingHost(1.0f);
+            std::snprintf(b, sizeof b, "at max: '%s'", p->getCurrentValueAsText().toRawUTF8());
+            check(p->getCurrentValueAsText().contains("200"), "P8b scCutoff max reads 200 Hz", b);
+        }
+        float lfLo = grSteady(40.0f, -1.0f), lfHi = grSteady(40.0f, 1.0f);
+        std::snprintf(b, sizeof b, "40 Hz GR: default %.2f dB, sc200 %.2f dB", lfLo, lfHi);
+        check(lfLo - lfHi >= 4.0f, "P8c proc: 40 Hz GR falls at sc=200", b);
+        float mfLo = grSteady(1000.0f, -1.0f), mfHi = grSteady(1000.0f, 1.0f);
+        std::snprintf(b, sizeof b, "1 kHz GR: default %.2f dB, sc200 %.2f dB", mfLo, mfHi);
+        check(std::fabs(mfHi - mfLo) <= 0.5f, "P8d proc: 1 kHz GR essentially unaffected", b);
+    }
+
     std::printf("%s (%d checks, %d failures)\n",
                 failures == 0 ? "ALL PROCESSOR TESTS PASSED" : "PROCESSOR TEST FAILURES",
                 checks, failures);

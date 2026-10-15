@@ -2,6 +2,27 @@
 # Western Compressor installer preinstall: wipe all previous versions,
 # including the retired Hotdog 1.0.0 bundles (the product was renamed
 # from Hotdog to Western Compressor on 2026-10-14).
+#
+# NOTE (2026-10-15, Luna stereo diagnosis): this script runs as ROOT
+# (pkg preinstall scripts always do), so $HOME is /var/root — NOT the
+# installing user's home. The previous version of this script used
+# $HOME for the user-library wipes and the AU-cache clear, so those
+# steps silently targeted root's home and never touched the real
+# user's caches — a stale/corrupt AudioUnit registration could (and
+# did) survive every install. Resolve the console user's home
+# explicitly and use it for all user-domain paths.
+
+CONSOLE_USER="$(stat -f '%Su' /dev/console 2>/dev/null)"
+USER_HOME=""
+if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+  USER_HOME="$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+fi
+if [ -z "$USER_HOME" ] || [ ! -d "$USER_HOME" ]; then
+  USER_HOME=""
+  for d in /Users/*; do
+    [ -d "$d/Library" ] && USER_HOME="$d" && break
+  done
+fi
 
 for NAME in "Western Compressor" "Hotdog"; do
   # System library
@@ -9,13 +30,20 @@ for NAME in "Western Compressor" "Hotdog"; do
   rm -rf "/Library/Audio/Plug-Ins/Components/$NAME.component"
   rm -rf "/Applications/$NAME.app"
 
-  # User library (for each user - $HOME is the installing user)
-  rm -rf "$HOME/Library/Audio/Plug-Ins/VST3/$NAME.vst3"
-  rm -rf "$HOME/Library/Audio/Plug-Ins/Components/$NAME.component"
+  # User library (console user's real home — see note above)
+  if [ -n "$USER_HOME" ]; then
+    rm -rf "$USER_HOME/Library/Audio/Plug-Ins/VST3/$NAME.vst3"
+    rm -rf "$USER_HOME/Library/Audio/Plug-Ins/Components/$NAME.component"
+  fi
 done
 
-# Clear AU cache to force rescan
-rm -rf "$HOME/Library/Caches/com.apple.audiounits.cache"
+# Clear AU caches to force rescan (system + console user)
+rm -f "/Library/Caches/com.apple.audiounits.cache" 2>/dev/null
+rm -rf "/Library/Caches/AudioUnitCache" 2>/dev/null
+if [ -n "$USER_HOME" ]; then
+  rm -f "$USER_HOME/Library/Caches/com.apple.audiounits.cache"
+  rm -rf "$USER_HOME/Library/Caches/AudioUnitCache"
+fi
 killall -9 AudioComponentRegistrar 2>/dev/null || true
 
 exit 0

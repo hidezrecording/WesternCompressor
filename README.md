@@ -840,6 +840,42 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.1.3 / GUI v43 (the Luna-stereo fix + SIDECHAIN
+release; reports docs/build-report-v42.md (feature +
+diagnosis), docs/build-report-v43.md (v42 tweaks),
+docs/build-report-v44.md (v43 palette + this release)):
+(1) INSTALLER — the preinstall root-$HOME defect is
+fixed: the script runs as root, so its $HOME-relative
+AU-cache clear and user-domain wipes targeted /var/root
+and never touched the user's account — the root cause
+of 1.1.2 not appearing on stereo tracks in Luna (the AU
+itself advertises {1,1} {2,2}, probe-verified; full
+diagnosis in docs/luna-stereo-diagnosis.md). The
+preinstall now resolves the console user (stat
+/dev/console → dscl home) for all user-domain steps.
+(2) SIDECHAIN — a detector-only high-pass (new APVTS
+float 'scCutoff', 10–200 Hz log, default 10 Hz =
+filter out of the sense path, every shipped pin
+bit-identical at the bottom stop): 40 Hz GR 25.21 →
+16.78 dB at sc=200, 1 kHz unmoved. The strip's four
+small pots become a 2×2 grid (GUI v41: SIDECHAIN top-
+left, MIX moved to the right column, OUTPUT L/R
+unmoved below; all four pots 54→50 device px, silk
+scaled; the v42 pass deleted the low-cut glyph —
+the word SIDECHAIN alone centres on its pot).
+(3) METER COLOUR — the field's darks lifted from
+near-black into the green family in three steps
+(v41 (2,10,4)→(6,32,14); v42 floor →(10,54,22);
+v43 floor →(12,68,28), 0.30 →(18,104,41), 0.55
+→(22,132,48)): Nathan's direction — the darks read as
+shading of the green, closer to the main green each
+pass; masks = the ramp floor exactly throughout;
+dead glass in step. Pixel proofs hold at v43:
+centre strip at 25 dB identical to the 0 dB artwork
+(max diff 0); 14,256 mask px read exactly (12,68,28).
+Suites: DSP 37/37, processor 22/22. Shipped as
+release 1.1.3.
+
 v1.1.2 / GUI v40 (Nathan's ear-verdict refinement pass
 on 1.1.1, all measured in docs/build-report-v41.md;
 circuit study in docs/engine-v5-circuit-study.md):
