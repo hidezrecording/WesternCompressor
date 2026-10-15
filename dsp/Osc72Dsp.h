@@ -134,7 +134,8 @@ private:
 //    the pair's useful ~38 dB.
 // ─────────────────────────────────────────────────────────────────────
 inline constexpr float kBa6aCeilingDb   = -16.0f;
-inline constexpr float kBa6aDbPerVolt   = 21.0f; // GR slope: dB per unit over-verge envelope
+inline constexpr float kBa6aDbPerVolt   = 27.0f; // GR slope on the shaped sense (v1.1.2, below)
+inline constexpr float kBa6aDetToeEnv   = 0.38f; // 6H6 square-law toe corner (sense-domain volts)
 inline constexpr float kBa6aGrCapDb     = 46.0f;
 // Drive law (design §3.1): the box runs hot by design (its
 // ~54 dB of gain normalised so nominal programme lives near
@@ -160,18 +161,46 @@ inline float ba6aDriveDb(float knob01) {
 // feeds are scaled to the diode's needs in this family; the
 // verge at the terminals therefore sits at env ~0.072).
 inline constexpr float kBa6aDetSense = 2.2f;
-// The vari-mu law, from the tube physics (research §A.3):
-// the 6H6 develops a control VOLTAGE proportional to the
-// output level (linear volts at the detector), and the
-// 6SK7's gain falls roughly linearly in dB per control volt
-// (remote-cutoff gm). So GR in dB is proportional to the
-// over-verge envelope in VOLTS — no threshold corner, an
-// effective ratio that rises continuously with depth, and a
-// genuine feedback ceiling (the deeper the excursion, the
-// harder the loop pulls back). Capped at the pair's useful
-// ~38 dB of gain range.
+// The vari-mu law, from the tube physics (research §A.3;
+// deepened by the v1.1.2 circuit study,
+// docs/engine-v5-circuit-study.md §1). Two documented
+// shapes stack between the output level and the gain:
+//  (a) the 6H6's sense characteristic: a diode detector is
+//      SQUARE-LAW at small envelopes (detected output
+//      proportional to the input VOLTAGE SQUARED) and only
+//      approaches linear at large ones — the control volts
+//      themselves arrive with a toe. Modelled as the sense
+//      shaping env^2/(env + e0), which is ~env^2/e0 below
+//      the corner e0 and ~env above it.
+//  (b) the 6SK7's remote-cutoff law: variable-pitch grid
+//      sections cut off progressively over a long grid
+//      base, so the dB-per-volt slope at the START of an
+//      excursion is small (few sections near cutoff) and
+//      rises through the mid-range. On the shaped sense
+//      the composite reads as a slope that climbs from the
+//      verge and firms with depth.
+// v1.1.1's law was a constant 21 dB/V from the first
+// millivolt over the verge — no toe. Nathan's verdict:
+// "the ratio up front feels too strong... the Fairchild
+// feels gentler, less slammy at the front of the signal"
+// (its attack is FASTER; the gentleness is the law's
+// shape). The reshaped law (slope 27 on the shaped sense)
+// measures, static sweep at knob 0.5: incremental ratio
+// 1.35:1 at ~1 dB GR (was 1.47), ~1.7 at 3 dB (was 1.84),
+// 4.14:1 at 18 dB (was 3.57) — softer at the front,
+// firmer at depth, working depth kept (GR at -10 dBFS in:
+// 11.6 dB, was 11.8-12.3). Still no threshold corner and
+// still a genuine feedback ceiling; capped at the pair's
+// useful ~38 dB of gain range. Study §4 records the
+// physics bound honestly: in a feedback law the mid-depth
+// ratio at fixed working depth is set by env x slope at
+// the equilibrium — softness is redistributed (front down,
+// top up), not conjured.
+inline float ba6aSenseShape(float envLin) {
+    return envLin * envLin / (envLin + kBa6aDetToeEnv);
+}
 inline float ba6aVariMuDb(float envLin) {
-    const float over = envLin - dbToLinear(kBa6aCeilingDb);
+    const float over = ba6aSenseShape(envLin) - ba6aSenseShape(dbToLinear(kBa6aCeilingDb));
     if (over <= 0.0f) return 0.0f;
     const float gr = kBa6aDbPerVolt * over;
     return gr > kBa6aGrCapDb ? kBa6aGrCapDb : gr;
@@ -181,10 +210,15 @@ inline float ba6aVariMuDb(float envLin) {
 // (90 % ≈ 0.30 s); SLOW = DUAL network (fast partial + slow
 // tail, 90 % ≈ 3 s).
 inline constexpr float kBa6aDetFastTauSec  = 0.00015f; // detector env charge
-inline constexpr float kBa6aDetSlowTauSec  = 0.005f;
+inline constexpr float kBa6aDetSlowTauSec  = 0.008f;   // v1.1.2: 5 -> 8 ms (below)
 inline constexpr float kBa6aDetDecayTauSec = 0.030f;   // detector env decay
 inline constexpr float kBa6aAttFastTauSec  = 0.0005f;  // control attack pole
-inline constexpr float kBa6aAttSlowTauSec  = 0.012f;
+// v1.1.2 (Nathan on 1.1.1: SLOW still "a little too
+// grabby"): the era mod's charge path lengthens — detector
+// tau 5 -> 8 ms, control pole 12 -> 24 ms. Measured GR
+// t90: 18.5 -> ~31.6 ms on the analysis harness (1.7x);
+// FAST is stock and untouched.
+inline constexpr float kBa6aAttSlowTauSec  = 0.024f;
 inline constexpr float kBa6aRelSingleTauSec = 0.130f;
 inline constexpr float kBa6aRelDualFastTauSec = 0.055f;
 inline constexpr float kBa6aRelDualSlowTauSec = 1.500f;
@@ -239,6 +273,7 @@ private:
     float hpLpL_ = 0.0f, hpLpR_ = 0.0f;
     float lpL_ = 0.0f, lpR_ = 0.0f;
 
+    float sag_ = 0.0f;                // B+ sag state (linked), 0..1 — v1.1.2 (study §2.3a)
     float detEnv_ = 0.0f;             // detector envelope (linear peak)
     float lastPreL_ = 0.0f, lastPreR_ = 0.0f; // post-iron, pre-makeup (detector source)
     float prePeak_ = 0.0f;            // slow-decay peak of the pre-makeup output (make-up ceiling)
@@ -283,8 +318,11 @@ inline constexpr float kAdtMotorTauSec = 0.180f;
 // drop the mix between the compressed and the ADT signal by
 // about a third") trims the two deck returns by a third —
 // x(2/3) — against the untouched SRC/direct path. Timing,
-// LFOs and deck machinery are unchanged.
-inline constexpr float kAdtDeckGain    = 0.82f * (2.0f / 3.0f);
+// LFOs and deck machinery are unchanged. v1.1.2 (his
+// verdict on 1.1.1: the MOD "could come down another
+// ~10%") trims a further x0.90 -> 0.492, which is 60% of
+// the 1.1.0 return level exactly.
+inline constexpr float kAdtDeckGain    = 0.82f * (2.0f / 3.0f) * 0.90f;
 inline constexpr float kAdtFadeSec     = 0.030f;
 inline constexpr float kAdtMinDelayMs  = 3.0f;
 

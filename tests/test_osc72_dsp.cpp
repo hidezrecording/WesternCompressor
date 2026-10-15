@@ -321,7 +321,10 @@ int main() {
         };
         double tF = t90of(trF), tS = t90of(trS);
         std::snprintf(d, sizeof d, "t90 fast %.2f ms, slow %.1f ms", tF, tS);
-        check(tS >= 12.0 && tS >= 4.0 * tF, "C2 attack SLOW: GR t90 >= 12 ms (detector mod)", d);
+        // v1.1.2: the pin rises 12 -> 24 ms deliberately —
+        // the mod's charge path lengthened (study §1.5);
+        // measured 31.8 ms (was 15.1-18.5 on earlier laws).
+        check(tS >= 24.0 && tS >= 4.0 * tF, "C2 attack SLOW: GR t90 >= 24 ms (detector mod, v1.1.2)", d);
     }
     {
         // C3: release FAST = SINGLE — 90% recovery in the
@@ -668,6 +671,52 @@ int main() {
         double pct = 100.0 * secs / 10.0;
         std::snprintf(d, sizeof d, "full chain: %.2f%% of realtime (sink %.4f)", pct, sink);
         check(pct < 8.0, "G1 CPU < 8% of one core @ 48 kHz", d);
+    }
+
+    // ── H. TWO-ELEMENT REMIX (v1.1.2, study §5): the
+    // vari-mu glow's proof channel. A loud rhythmic element
+    // (90 Hz bursts) and a quiet steady element (2 kHz,
+    // -30.5 dBFS peak) share the one control voltage: the
+    // quiet element must duck under the hits and BLOOM back
+    // in the gaps — the shared-gain remix. 1.1.1 baseline on
+    // this test: bloom +9.2 dB at knob 0.5 (GR 15.0 under the
+    // hit, 6.0 in the gap); the glow pass must not reduce it.
+    std::printf("\n=== H. TWO-ELEMENT REMIX ===\n");
+    {
+        auto goertzel = [](const std::vector<float>& x, int start, int len, double freq) {
+            double w = 2.0 * M_PI * freq / kFs, cw = std::cos(w), coeff = 2.0 * cw;
+            double s0 = 0, s1 = 0, s2 = 0;
+            for (int i = 0; i < len; ++i) { s0 = x[start + i] + coeff * s1 - s2; s2 = s1; s1 = s0; }
+            double re = s1 - s2 * cw, im = s2 * std::sin(w);
+            return 2.0 * std::sqrt(re * re + im * im) / len;
+        };
+        osc72::Ba6aLimiter lim; lim.prepare(kFs); lim.reset();
+        lim.setKnob(0.5f); lim.setAttackFast(true); lim.setReleaseFast(false);
+        const int cyc = (int)(0.5 * kFs), total = cyc * 14;
+        std::vector<float> out(total); std::vector<float> grv(total);
+        double phq = 0;
+        for (int i = 0; i < total; ++i) {
+            double t = (i % cyc) / kFs;
+            float loud = 0.65f * (float)std::exp(-t / 0.060) * (float)std::sin(2.0 * M_PI * 90.0 * i / kFs);
+            float quiet = 0.03f * (float)std::sin(phq); phq += 2.0 * M_PI * 2000.0 / kFs;
+            float oL, oR; lim.process(loud + quiet, loud + quiet, oL, oR);
+            out[i] = oL; grv[i] = lim.gainReductionDb();
+        }
+        double hitMag = 0, gapMag = 0, hitGr = 0, gapGr = 0; int nc = 0;
+        for (int c = 8; c < 14; ++c) {
+            hitMag += goertzel(out, c * cyc, (int)(0.08 * kFs), 2000.0);
+            gapMag += goertzel(out, c * cyc + (int)(0.32 * kFs), (int)(0.16 * kFs), 2000.0);
+            for (int i = 0; i < (int)(0.08 * kFs); ++i) hitGr += grv[c * cyc + i];
+            for (int i = 0; i < (int)(0.16 * kFs); ++i) gapGr += grv[c * cyc + (int)(0.32 * kFs) + i];
+            ++nc;
+        }
+        hitMag /= nc; gapMag /= nc;
+        hitGr /= (nc * (int)(0.08 * kFs)); gapGr /= (nc * (int)(0.16 * kFs));
+        double bloom = 20.0 * std::log10(gapMag) - 20.0 * std::log10(hitMag);
+        char d[512];
+        std::snprintf(d, sizeof d, "bloom %+.2f dB (hit %.1f dB GR, gap %.1f dB GR)", bloom, hitGr, gapGr);
+        check(bloom >= 7.0, "H1 remix bloom >= 7 dB at knob 0.5", d);
+        check(gapGr >= 3.0 && gapGr <= hitGr - 5.0, "H2 gap GR held by recovery, well under hit GR", d);
     }
 
     std::printf("\n%s (%d checks, %d failures)\n",

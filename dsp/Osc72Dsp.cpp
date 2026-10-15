@@ -26,6 +26,7 @@ void Ba6aLimiter::reset()
     ironOutL_.reset(); ironOutR_.reset();
     hpLpL_ = hpLpR_ = 0.0f;
     lpL_ = lpR_ = 0.0f;
+    sag_ = 0.0f;
     detEnv_ = 0.0f;
     lastPreL_ = lastPreR_ = 0.0f;
     prePeak_ = 0.0f;
@@ -66,7 +67,18 @@ float Ba6aLimiter::processChannel(float x, int ch, float grLin, float driveLin)
     // 5. 6V6 push-pull output: odd-dominant; its asymptote
     //    (~1.43) IS the unit's output ceiling — the bend a
     //    +30 dBm-class stage gives approaching full swing.
-    y = tubeSat(y, 0.7f, 0.015f);
+    //    B+ sag (v1.1.2, study §2.3a): the 5R4-era rail sags
+    //    under programme current demand while the OD3 holds
+    //    the screens/bias stiff — so the sag lands here, on
+    //    the output stage: under load it bends earlier and
+    //    gives back a fraction of a dB (x(1 - 0.05.sag),
+    //    -0.45 dB max). The state is driven by the output
+    //    level itself (in process()), charges in ~25 ms and
+    //    recovers over ~240 ms — the box breathes with the
+    //    programme, and because the detector reads the
+    //    sagged output the loop feels it too.
+    y = tubeSat(y, 0.7f * (1.0f + 0.30f * sag_), 0.015f);
+    y *= (1.0f - 0.05f * sag_);
     // 6. Output transformer (the fat one).
     y = ironOut.process(y);
     // 7. Response shaping: the family's ±2 dB / 30 Hz–15 kHz
@@ -86,6 +98,18 @@ void Ba6aLimiter::process(float inL, float inR, float& outL, float& outR)
     // hardware; a short slew keeps moves click-free without
     // changing the law.
     knobS_ += (knobTarget_ - knobS_) * tauCoef(0.005f, fs_);
+
+    // ── Supply sag state (v1.1.2, study §2.3a): driven by
+    // last sample's pre-make-up output level — the output
+    // stage's own current demand — like the detector beside
+    // it. Signal-driven and signal-decaying (dryness): with
+    // no signal the rail is simply full. Bounded 0..1, level
+    // effect small and monotone (predictability). ──
+    {
+        const float outPeak = std::max(std::fabs(lastPreL_), std::fabs(lastPreR_));
+        const float sagTgt = clampf(outPeak / 0.85f, 0.0f, 1.0f);
+        sag_ += (sagTgt - sag_) * tauCoef(sagTgt > sag_ ? 0.025f : 0.240f, fs_);
+    }
 
     // ── Detector (6H6): reads LAST sample's post-transformer,
     // pre-make-up output — output-referenced feedback, with

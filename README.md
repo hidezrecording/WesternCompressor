@@ -840,6 +840,32 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.1.2 / GUI v40 (Nathan's ear-verdict refinement pass
+on 1.1.1, all measured in docs/build-report-v41.md;
+circuit study in docs/engine-v5-circuit-study.md):
+(1) SLOW ATTACK GENTLER — the mod's charge path
+lengthens (detector τ 5→8 ms, control pole 12→24 ms);
+GR t90 ~15→31.8 ms (suite); FAST stock, untouched.
+(2) SOFTER UP-FRONT RATIO — the vari-mu law gains the
+6H6 square-law toe + remote-cutoff sectional rise
+(GR = 27·(shape(env) − shape(verge)), shape = e²/(e +
+0.38)): incremental ratio at ~1 dB GR 1.47→1.35:1,
+at ~18 dB 3.6→4.14:1 (firms with depth); working
+depth kept (GR at −10 dBFS in 11.6 dB; programme GR
+at max 31.7 dB).
+(3) ADT DOWN ANOTHER ~10% — deck returns ×0.90
+(0.5467 → 0.4920 = 60% of the 1.1.0 level); mono
+side/out 0.238 → 0.214 at processor level.
+(4) GLOW — B+ sag at the output stage (programme-
+driven, ~25/240 ms; H3 at working depth 1.55→1.74%);
+the two-element remix holds (bloom +9.11 dB at knob
+0.5). Two candidate mechanisms were measured and
+DROPPED (driver bias-shift — a wash; DUAL slow-share
+rebalance — bloom fell), recorded plainly in the
+report. Suites: DSP 34/34, processor 18/18; GUI
+snapshot byte-identical to v40. Shipped as
+release 1.1.2.
+
 v1.1.1 / GUI v40 (Nathan's ear-verdict fixes on 1.1.0,
 all measured in docs/build-report-v40.md):
 (1) INPUT DIGS IN — the drive law steepens from
