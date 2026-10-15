@@ -385,6 +385,10 @@ int main() {
                       net0, net1, net1 - net0, grAt1);
         check(monotone && net1 >= net0, "D1 programme level never falls as drive rises", d);
         check(net1 > net0 + 0.8f, "D2 make-up cranks: net at max > net at 0 by > 0.8 dB", d);
+        // v1.1.1 (Nathan): the input must DIG IN — pin the
+        // programme depth the steepened drive law delivers
+        // (1.1.0 law measured 9.9 dB here; target >= ~30).
+        check(grAt1 >= 28.0f, "D3 programme mean GR at max >= 28 dB (v1.1.1 drive law)", d);
     }
 
     // ═══════════════ E. COLOUR / DRYNESS / THD / FR ═══════════════
@@ -440,8 +444,16 @@ int main() {
         std::snprintf(d, sizeof d, "flux %.3f -> %.4f at +20 ms (%.1f%%); settle peak %.4f @+30 ms, %.5f @+150 ms",
                       fluxBurst, fluxAt20, 100.0 * fluxAt20 / fluxBurst, settlePeak, gonePeak);
         check(fluxAt20 < 0.03f * fluxBurst, "E2a iron flux discharges < 3% in 20 ms", d);
-        check(settlePeak < 0.02f && gonePeak < 0.0005f,
-              "E2b no ring: LF settle < -34 dBFS by +30 ms, gone by +150 ms", d);
+        // v1.1.1 pin move (drive law): this test runs the
+        // limiter at knob 0.6, which now digs ~10 dB deeper;
+        // the +30 ms settle is the gain recovery acting on the
+        // iron's decaying offset, so it grows with depth
+        // (measured 0.0135 under the 1.1.0 law -> 0.0205 now).
+        // Bound relaxed 0.020 -> 0.022 (-33.2 dBFS); the
+        // no-ring substance is unchanged — still exactly 0 by
+        // +150 ms. See docs/build-report-v40.md.
+        check(settlePeak < 0.022f && gonePeak < 0.0005f,
+              "E2b no ring: LF settle < -33 dBFS by +30 ms, gone by +150 ms", d);
     }
     {
         // E3: THD vs the published anchors (family sheet:
@@ -551,8 +563,13 @@ int main() {
         double corr = sLR / std::sqrt(sLL * sRR);
         double width = std::sqrt(sSide / sMid);
         std::snprintf(d, sizeof d, "mono feed: L/R corr %.2f, side/mid %.2f", corr, width);
-        check(corr < 0.65, "F2a mono source decorrelates (widens)", d);
-        check(width > 0.45, "F2b mono source gains real side energy", d);
+        // v1.1.1 pin moves (ADT deck trim x2/3, Nathan):
+        // less deck in the mix decorrelates less by design —
+        // corr 0.62 -> 0.79, side/mid 0.49 -> 0.35 measured.
+        // The pins still require real widening (dry mono
+        // corr is 1.00, side/mid 0). See build-report-v40.md.
+        check(corr < 0.85, "F2a mono source decorrelates (widens)", d);
+        check(width > 0.30, "F2b mono source gains real side energy", d);
     }
     {
         // F3: STEREO feed also widens vs its dry correlation.
@@ -581,7 +598,9 @@ int main() {
         };
         double dry = widthOf(false), wet = widthOf(true);
         std::snprintf(d, sizeof d, "stereo corr dry %.2f -> wet %.2f", dry, wet);
-        check(wet < dry - 0.15, "F3 stereo programme decorrelates under ADT", d);
+        // v1.1.1 pin move (ADT trim): wet corr 0.55 -> 0.66
+        // measured; margin relaxed 0.15 -> 0.08.
+        check(wet < dry - 0.08, "F3 stereo programme decorrelates under ADT", d);
     }
     {
         // F4: pitch swing on a steady tone, measured in the

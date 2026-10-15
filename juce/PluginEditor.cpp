@@ -1537,14 +1537,28 @@ void drawDisplayFrame(juce::Graphics& g, juce::Rectangle<float> outer)
 // build-report-v39.md (straight-line fit, the
 // one-green-bar count, monotone fractions, the
 // edges-first GR erosion).
-juce::Image Osc72Editor::buildGrFieldImage(float lit)
+//
+// v40 (Nathan, on 1.1.0) — MOTION ONLY: this builder no
+// longer takes a lit fraction. Through v39 it rebuilt
+// the field per quantised lit value, folding the
+// coverage into every column — so as GR changed, the
+// bow tie RESCALED and the green visibly moved against
+// the black. Nathan: "it should be the black section
+// that moves in to reveal green... the green should
+// not be moving against the black, it should be the
+// black moving against the green." The builder now
+// renders the ONE static full-width artwork (this exact
+// v39 bow tie); drawGrDisplay draws it whole and lets
+// two black masks close over it. Verified pixel-exact
+// in build-report-v40.md (the 25 dB centre strip is the
+// 0 dB artwork's centre columns, untouched).
+juce::Image Osc72Editor::buildGrFieldImage()
 {
     // Field geometry — must match drawGrDisplay's.
     const juce::Rectangle<float> frame(124.0f, 41.0f, 192.0f, 70.0f);
     const auto field = frame.reduced(6.5f).reduced(5.0f, 5.0f);
     const float fx = field.getX(), fy = field.getY();
     const float fw = field.getWidth(), fh = field.getHeight();
-    const float fcx = frame.getCentreX();
 
     const int S = 4;                                   // supersample
     const int W = (int)std::lround(fw * (float)S);
@@ -1556,9 +1570,6 @@ juce::Image Osc72Editor::buildGrFieldImage(float lit)
     const int   ribs    = 26;
     const float finStr  = 0.26f;   // fin shadow strength in the inner field (v37's value)
     const float strFrom = 0.22f;   // strength ramp: h where the shadow starts deepening past finStr
-
-    const float ribW = fw / (float)ribs;
-    const float litW = fw * lit;
 
     auto ss = [](float a, float b, float x) {
         const float t = osc72::clampf((x - a) / (b - a), 0.0f, 1.0f);
@@ -1584,9 +1595,13 @@ juce::Image Osc72Editor::buildGrFieldImage(float lit)
     };
 
     // Per-column quantities (constant down each column):
-    // the rib louver shading, the lit coverage, and the
-    // column's fin edges (top/bottom of its sail fin).
-    std::vector<float> colRib(W), colCov(W), colTop(W), colBot(W), colU(W), colStr(W);
+    // the rib louver shading and the column's fin edges
+    // (top/bottom of its sail fin). v40: NO lit coverage
+    // here — the artwork is the full field at rest, in
+    // absolute field coordinates; the converging darkness
+    // is two black masks drawn over it in drawGrDisplay,
+    // so the green itself never moves or rescales.
+    std::vector<float> colRib(W), colTop(W), colBot(W), colU(W), colStr(W);
     for (int ix = 0; ix < W; ++ix) {
         const float vx = fx + ((float)ix + 0.5f) / (float)S;
         const float u = (vx - fx) / fw;
@@ -1600,9 +1615,6 @@ juce::Image Osc72Editor::buildGrFieldImage(float lit)
         const float grooveD = std::min(ph, 1.0f - ph);
         const float groove = std::exp(-std::pow(grooveD / 0.11f, 2.0f));
         colRib[ix] = 0.62f + 0.42f * ridge - 0.20f * groove;
-        // Lit coverage, feathered across ~one rib at each front.
-        const float d = std::abs(vx - fcx);
-        colCov[ix] = osc72::clampf((litW * 0.5f - d) / (ribW * 0.85f) + 0.5f, 0.0f, 1.0f);
         // v39 (Nathan's law): the dark span h is ZERO across
         // exactly the central rib's width (halfBar each side
         // of u = 1/2) and grows LINEARLY with distance beyond
@@ -1664,12 +1676,11 @@ juce::Image Osc72Editor::buildGrFieldImage(float lit)
             L += 0.40f * std::max(armV, armH) * (1.0f - F);
             float r, g, b;
             ramp(L, r, g, b);
-            const float cov = colCov[ix];
             juce::PixelARGB px;
             px.setARGB(0xff,
-                       (juce::uint8)(3.0f + (r - 3.0f) * cov + 0.5f),
-                       (juce::uint8)(16.0f + (g - 16.0f) * cov + 0.5f),
-                       (juce::uint8)(7.0f + (b - 7.0f) * cov + 0.5f));
+                       (juce::uint8)(r + 0.5f),
+                       (juce::uint8)(g + 0.5f),
+                       (juce::uint8)(b + 0.5f));
             *reinterpret_cast<juce::PixelARGB*>(line + ix * 4) = px;
         }
     }
@@ -1781,6 +1792,16 @@ void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
     // render had ~3 horizontal lines through the field and
     // they had to go). The dead state draws no image — just
     // the dark window glass above.
+    // v40 (Nathan, on 1.1.0): the artwork is STATIC — built
+    // once at full width and drawn whole at every GR. The
+    // converging darkness is two BLACK MASKS that close in
+    // from the left/right edges over the fixed artwork (the
+    // black moves; the green never does — through v39 the
+    // field image was rebuilt per lit fraction, rescaling
+    // the bow tie so the green visibly moved). The visible
+    // strip at any GR is the unscaled centre of the same
+    // artwork. Mask edges feather across ~one rib, the
+    // width the old per-column coverage feather used.
     {
         g.saveState();
         juce::Path clip;
@@ -1788,13 +1809,50 @@ void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
         g.reduceClipRegion(clip);
 
         if (!dark) {
-            const int key = (int)std::lround(lit * 512.0f);
-            if (key != grFieldKey_ || grFieldCache_.isNull()) {
-                grFieldCache_ = buildGrFieldImage(lit);
-                grFieldKey_ = key;
-            }
+            if (grFieldCache_.isNull())
+                grFieldCache_ = buildGrFieldImage();
             g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
             g.drawImage(grFieldCache_, field);
+
+            if (lit < 0.999f) {
+                const auto maskCol = juce::Colour(3, 16, 7);   // the dead-glass floor the old coverage blended to
+                const float fL = field.getX(), fR = field.getRight();
+                const float fCx = field.getCentreX();
+                const float fTop = field.getY(), fBot = field.getBottom();
+                const float feather = (field.getWidth() / 26.0f) * 0.85f;
+                const float halfLit = field.getWidth() * lit * 0.5f;
+                const float frontL = fCx - halfLit, frontR = fCx + halfLit;
+                // When the fronts nearly meet, an opaque
+                // centre underlay keeps 28 dB+ fully dark
+                // (the two feathers alone sum to 75% there).
+                if (halfLit < feather * 0.5f) {
+                    g.setColour(maskCol);
+                    g.fillRect(juce::Rectangle<float>(frontL, fTop, frontR - frontL, fBot - fTop));
+                }
+                // Left mask: solid, then a one-rib feather
+                // down to clear at the front.
+                if (frontL - feather * 0.5f > fL) {
+                    g.setColour(maskCol);
+                    g.fillRect(juce::Rectangle<float>(fL, fTop, frontL - feather * 0.5f - fL, fBot - fTop));
+                }
+                {
+                    juce::ColourGradient grad(maskCol, frontL - feather * 0.5f, fTop,
+                                              maskCol.withAlpha(0.0f), frontL + feather * 0.5f, fTop, false);
+                    g.setGradientFill(grad);
+                    g.fillRect(juce::Rectangle<float>(frontL - feather * 0.5f, fTop, feather, fBot - fTop));
+                }
+                // Right mask, mirrored.
+                if (frontR + feather * 0.5f < fR) {
+                    g.setColour(maskCol);
+                    g.fillRect(juce::Rectangle<float>(frontR + feather * 0.5f, fTop, fR - (frontR + feather * 0.5f), fBot - fTop));
+                }
+                {
+                    juce::ColourGradient grad(maskCol.withAlpha(0.0f), frontR - feather * 0.5f, fTop,
+                                              maskCol, frontR + feather * 0.5f, fTop, false);
+                    g.setGradientFill(grad);
+                    g.fillRect(juce::Rectangle<float>(frontR - feather * 0.5f, fTop, feather, fBot - fTop));
+                }
+            }
         }
 
         // Glass reflection (skipped when dead — no glint on a

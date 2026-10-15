@@ -149,7 +149,10 @@ int main() {
         DiffMeas m = runPair(0, 5.0f);
         std::snprintf(b, sizeof b, "mono: bit-exact=%d, diff=%.2f dB, side/out RMS=%.3f (v3 design: 0.000)",
                       (int)m.bitExact, m.diffDb, m.sideRatio);
-        check(!m.bitExact && m.diffDb > -8.0 && m.sideRatio > 0.25,
+        // v1.1.1 pin move (ADT deck trim x2/3, Nathan):
+        // mono side/out measured 0.446 -> 0.238; threshold
+        // relaxed 0.25 -> 0.20. See build-report-v40.md.
+        check(!m.bitExact && m.diffDb > -8.0 && m.sideRatio > 0.20,
               "P2 proc MOD: MONO material — widens (side energy appears)", b);
     }
 
@@ -247,7 +250,13 @@ int main() {
         };
         float pkFast = burstPeak(true), pkSlow = burstPeak(false);
         std::snprintf(b, sizeof b, "burst first-10ms peak: FAST %.3f vs SLOW %.3f", pkFast, pkSlow);
-        check(pkSlow > pkFast * 1.08f, "P6b proc: SLOW attack lets the transient through", b);
+        // v1.1.1 pin move (drive law): at this depth both
+        // bursts ride the make-up peak ceiling, compressing
+        // the FAST/SLOW peak margin (measured x1.133 under
+        // the 1.1.0 law -> x1.024 now: 1.361 vs 1.393). The
+        // direction — SLOW passes more transient — is what
+        // the pin asserts. See build-report-v40.md.
+        check(pkSlow > pkFast * 1.015f, "P6b proc: SLOW attack lets the transient through", b);
 
         // End-to-end release: after a loud passage ends, the
         // GR readout (the display feed) falls fast on SINGLE

@@ -840,6 +840,25 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.1.1 / GUI v40 (Nathan's ear-verdict fixes on 1.1.0,
+all measured in docs/build-report-v40.md):
+(1) INPUT DIGS IN — the drive law steepens from
+−3 + 3k + 12k² (top +12 dB) to −3 + 9k + 45k²
+(top +51 dB); knob 0 unchanged. Programme mean GR
+at max 9.9 → 31.5 dB; tone GR at centre 5.7 →
+12.3 dB; programme RMS still rises at every step;
+slam peaks still bounded at exactly 1.600.
+(2) ADT DOWN A THIRD — deck returns ×2/3 (0.82 →
+0.5467) against the untouched SRC path; mono
+side/out 0.446 → 0.238 at processor level.
+(3) METER MOTION — the field artwork is built
+ONCE, static, and GR moves only two black masks
+closing over it (the black moves; the green never
+does); the 25 dB centre strip is byte-identical
+to the 0 dB artwork's centre. Suites: DSP 32/32,
+processor 18/18 (pins moved deliberately, listed
+in the report). Shipped as release 1.1.1.
+
 GUI v39 (two changes on the v4 engine tree, both
 Nathan's: (1) THE BOW TIE GOES RULER-STRAIGHT — the
 v38 span law (t^1.2, sail inside the span) read as

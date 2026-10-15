@@ -402,8 +402,13 @@ private:
     // louver + vertical phosphor profile + the woven diamond
     // band emerging from neighbouring columns' stop
     // positions), so no stroke, seam or band edge can draw a
-    // horizontal line. Cached on the quantised lit fraction.
-    juce::Image buildGrFieldImage(float lit);
+    // horizontal line.
+    // v40 (Nathan, on 1.1.0): the artwork is built ONCE, at
+    // full width, and never rebuilt — GR moves only the two
+    // black masks in drawGrDisplay. "The green should not be
+    // moving against the black; it should be the black
+    // moving against the green."
+    juce::Image buildGrFieldImage();
 
     Osc72Processor& proc_;
     OscKnobLookAndFeel laf_;
@@ -451,11 +456,10 @@ private:
     float displayedGrDb_ = 0.0f;   // ballistics-smoothed eye value
     float lastFlangeProp_ = -1.0f; // v10: knob pos at last flange repaint
     juce::Rectangle<int> eyeArea_; // repaint region for the eye
-    // v36: the per-pixel GR field image cache (see
-    // buildGrFieldImage) — rebuilt only when the quantised
-    // lit fraction changes.
+    // v36/v40: the per-pixel GR field image cache (see
+    // buildGrFieldImage) — the static full-width artwork,
+    // built once on first use and never rebuilt.
     juce::Image grFieldCache_;
-    int grFieldKey_ = -1;
     // v15: the LIMIT/MOD/POWER jewels are editor paint, so their
     // areas need a repaint when a toggle state flips.
     bool lastLimitState_ = true;

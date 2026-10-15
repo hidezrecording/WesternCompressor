@@ -139,11 +139,21 @@ inline constexpr float kBa6aGrCapDb     = 46.0f;
 // Drive law (design §3.1): the box runs hot by design (its
 // ~54 dB of gain normalised so nominal programme lives near
 // the limiting verge, as a programme limiter at a transmitter
-// does); the knob — the INPUT attenuator — trims -3..+12 dB
-// around that working point, on a gentle quadratic taper.
+// does); the knob — the INPUT attenuator — trims around that
+// working point on a quadratic taper.
+// v1.1.1 (Nathan's ear verdict on 1.1.0: "the input pot does
+// not dig into the compression nearly enough — we need to be
+// able to hit the input of the compressor much harder"): the
+// taper steepens from -3 + 3k + 12k^2 (top +12 dB; programme
+// mean GR at max measured 9.9 dB, tone centre 5.7 dB) to
+// -3 + 9k + 45k^2 (top +51 dB). Knob 0 is UNCHANGED (-3 dB:
+// hot box, near-unity, GR only on hot peaks). Measured with
+// the new law: programme mean GR at max 31.5 dB, tone GR at
+// centre (k=0.5, -10 dBFS 1 kHz) 12.3 dB — see
+// docs/build-report-v40.md.
 inline float ba6aDriveDb(float knob01) {
     const float k = clampf(knob01, 0.0f, 1.0f);
-    return -3.0f + 3.0f * k + 12.0f * k * k;
+    return -3.0f + 9.0f * k + 45.0f * k * k;
 }
 // Detector sense: the 6H6 is fed from its own winding/tap,
 // scaled ~+7 dB over the output-terminal level (detector
@@ -268,7 +278,13 @@ inline constexpr float kAdtLfo2Ms      = 8.0f;
 inline constexpr float kAdtWowMs       = 0.22f;
 inline constexpr float kAdtFlutterMs   = 0.035f;
 inline constexpr float kAdtMotorTauSec = 0.180f;
-inline constexpr float kAdtDeckGain    = 0.82f;
+// Deck return level. 1.1.0 shipped 0.82; v1.1.1 (Nathan's
+// ear verdict: the ADT "should be mixed in more like 60%...
+// drop the mix between the compressed and the ADT signal by
+// about a third") trims the two deck returns by a third —
+// x(2/3) — against the untouched SRC/direct path. Timing,
+// LFOs and deck machinery are unchanged.
+inline constexpr float kAdtDeckGain    = 0.82f * (2.0f / 3.0f);
 inline constexpr float kAdtFadeSec     = 0.030f;
 inline constexpr float kAdtMinDelayMs  = 3.0f;
 
