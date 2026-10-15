@@ -840,6 +840,25 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.1.5 — STAGING RE-CENTRE + ATTACKS DOUBLED
+(v46; report docs/build-report-v46.md). Nathan's ear
+verdict on 1.1.4: the box "is still digging in way too
+hard" — at INPUT 5 a regular signal should be "just
+barely kissing the compressor"; that was happening at ~0,
+and by 5 the signal was "absolutely squashed". The drive
+law is re-centred as a logistic taper (-5 dB at knob 0 to
+the SAME +51 dB at knob 10 — the 1.1.1 depth brief
+stands; it was the centre that was wrong): knob 5 tones
+-20/-14 dBFS now draw 0.1/1.8 dB GR (was 5.8/9.3),
+programme mean GR at max 31.2 dB (was 31.4). Both attack
+times doubled by the same verdict (constants scaled per
+seat, FAST x2.8 / SLOW x2.65, calibrated so the MEASURED
+t90 doubles at the new staging): FAST t90 0.188 ->
+0.375 ms, SLOW 3.90 -> 7.83 ms; releases untouched.
+Suites: DSP 42/42, processor 31/31; moved pins B2a
+(staging pin), C1/C2 bands, C5/H stimulus knobs follow
+the depth — all listed in the report.
+
 v1.1.4 — BALLISTICS RE-VOICE
 (v45; research docs/ballistics-refs.md, report
 docs/build-report-v45.md). The four toggle ballistics

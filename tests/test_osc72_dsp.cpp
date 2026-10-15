@@ -281,8 +281,14 @@ int main() {
         float riseLo = pre10 - pre20, riseHi = pre0 - pre10; // per +10 dB in
         std::snprintf(d, sizeof d, "GR %.1f/%.1f/%.1f dB; pre-makeup rises %.1f then %.1f dB per +10 dB",
                       m20.meanGr, m10.meanGr, m0.meanGr, riseLo, riseHi);
-        check(m20.meanGr > 1.0f && m10.meanGr > m20.meanGr + 3.0f && m0.meanGr > m10.meanGr + 4.0f,
-              "B2a GR grows steeply with level (vari-mu)", d);
+        // v46 (v1.1.5 staging, Nathan): knob 5 is now the
+        // kissing point — the -20 dBFS tone must sit in the
+        // 0-2 dB band here (measured 0.1), so the old
+        // "> 1 dB at -20" clause is replaced by the staging
+        // pin itself; the growth clauses carry the vari-mu
+        // substance (measured 0.1 / 3.4 / 8.8).
+        check(m20.meanGr < 2.0f && m10.meanGr > m20.meanGr + 2.5f && m0.meanGr > m10.meanGr + 4.0f,
+              "B2a knob 5 kisses at -20 (0-2 dB), GR grows steeply with level (vari-mu)", d);
         check(riseLo < 7.5f && riseHi < riseLo,
               "B2b static ratio > 1.3:1 and RISING with depth", d);
     }
@@ -305,23 +311,24 @@ int main() {
     // o'clock); SLOW pair seated between the LA-3A and LA-2A
     // with the T4 family's shaped attack and memory release.
     {
-        // C1: attack FAST — 1176 at ~11 o'clock: adopted
-        // figure ~190 µs (honest range 100-500 µs over taper
-        // readings), mapped to GR t90.
+        // C1: attack FAST — the v45 1176-at-11-o'clock seat
+        // (GR t90 0.188 ms), DOUBLED by Nathan's v46 ear
+        // verdict: measured 0.375 ms.
         auto tr = grStep(true, false);
         float settled = tr.back();
         double t90 = -1;
         for (size_t i = 0; i < tr.size(); ++i)
             if (tr[i] >= 0.9f * settled) { t90 = (double)i / kFs * 1000.0; break; }
         std::snprintf(d, sizeof d, "settled GR %.1f dB, t90 %.3f ms", settled, t90);
-        check(t90 > 0.08 && t90 < 0.35, "C1 attack FAST: GR t90 0.08-0.35 ms (1176 @ 11 o'clock, v45)", d);
+        check(t90 > 0.30 && t90 < 0.46, "C1 attack FAST: GR t90 0.30-0.46 ms (1176 seat doubled, v46)", d);
     }
     {
         // C2: attack SLOW — the opto seat between the LA-3A
         // (<= 1.5 ms) and the LA-2A (10 ms): geometric seat
-        // ~3.9 ms on the standard step; T4-shaped, so a small
-        // step answers in-family too (C2b), not on the same
-        // single-tau curve.
+        // ~3.9 ms on the standard step in v45, DOUBLED by
+        // Nathan's v46 ear verdict to a measured 7.83 ms;
+        // T4-shaped, so a small step answers in-family too
+        // (C2b), not on the same single-tau curve.
         auto trF = grStep(true, false);
         auto trS = grStep(false, false);
         auto t90of = [&](const std::vector<float>& tr) {
@@ -332,8 +339,8 @@ int main() {
         };
         double tF = t90of(trF), tS = t90of(trS);
         std::snprintf(d, sizeof d, "t90 fast %.3f ms, slow %.2f ms", tF, tS);
-        check(tS > 3.0 && tS < 5.5 && tS >= 8.0 * tF,
-              "C2 attack SLOW: GR t90 3.0-5.5 ms (LA-3A/LA-2A between-seat, v45)", d);
+        check(tS > 6.5 && tS < 9.5 && tS >= 8.0 * tF,
+              "C2 attack SLOW: GR t90 6.5-9.5 ms (between-seat doubled, v46)", d);
         auto trSmall = grStep(false, false, 0.75f, 0.12f);
         double tSmall = t90of(trSmall);
         std::snprintf(d, sizeof d, "small-step (amp .12) t90 %.2f ms, settled GR %.1f dB",
@@ -382,9 +389,16 @@ int main() {
         // cell remembers sustained reduction). Bounded: even
         // the stressed tail stays inside the manuals' printed
         // 5 s complete-release envelope.
+        // v46: the stimulus knob moves 0.75 -> 0.85 — the
+        // test is authored at a ~25 dB working depth (the
+        // stress reference's home), and the v1.1.5 staging
+        // moved that depth up the knob (at 0.75 the hold now
+        // sits at ~17 dB and the measured memory contrast
+        // dilutes to 1.25x; at 0.85 it reads 1.53x, as
+        // authored). The mechanism is untouched.
         auto relAfter = [&](double holdSec) {
             osc72::Ba6aLimiter lim;
-            lim.prepare(kFs); lim.setKnob(0.75f);
+            lim.prepare(kFs); lim.setKnob(0.85f);
             lim.setAttackFast(true); lim.setReleaseFast(false); lim.reset();
             const int loud = (int)(holdSec * kFs);
             const int tail = (int)(8.0 * kFs);
@@ -794,6 +808,11 @@ int main() {
     // in the gaps — the shared-gain remix. 1.1.1 baseline on
     // this test: bloom +9.2 dB at knob 0.5 (GR 15.0 under the
     // hit, 6.0 in the gap); the glow pass must not reduce it.
+    // v46: the test follows the DEPTH, not the knob number —
+    // Nathan's re-centred staging moved the ~13-15 dB-hit
+    // working depth from knob 0.5 to knob 0.70 (at 0.5 the
+    // hits now only draw 5.4 dB GR: the kissing point).
+    // Measured at 0.70: bloom +7.86 dB (hit 12.8, gap 4.8).
     std::printf("\n=== H. TWO-ELEMENT REMIX ===\n");
     {
         auto goertzel = [](const std::vector<float>& x, int start, int len, double freq) {
@@ -804,7 +823,7 @@ int main() {
             return 2.0 * std::sqrt(re * re + im * im) / len;
         };
         osc72::Ba6aLimiter lim; lim.prepare(kFs); lim.reset();
-        lim.setKnob(0.5f); lim.setAttackFast(true); lim.setReleaseFast(false);
+        lim.setKnob(0.70f); lim.setAttackFast(true); lim.setReleaseFast(false);
         const int cyc = (int)(0.5 * kFs), total = cyc * 14;
         std::vector<float> out(total); std::vector<float> grv(total);
         double phq = 0;
@@ -828,7 +847,7 @@ int main() {
         double bloom = 20.0 * std::log10(gapMag) - 20.0 * std::log10(hitMag);
         char d[512];
         std::snprintf(d, sizeof d, "bloom %+.2f dB (hit %.1f dB GR, gap %.1f dB GR)", bloom, hitGr, gapGr);
-        check(bloom >= 7.0, "H1 remix bloom >= 7 dB at knob 0.5", d);
+        check(bloom >= 7.0, "H1 remix bloom >= 7 dB at the working depth (knob 0.7, v46)", d);
         check(gapGr >= 3.0 && gapGr <= hitGr - 5.0, "H2 gap GR held by recovery, well under hit GR", d);
     }
 

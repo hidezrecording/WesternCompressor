@@ -141,20 +141,30 @@ inline constexpr float kBa6aGrCapDb     = 46.0f;
 // ~54 dB of gain normalised so nominal programme lives near
 // the limiting verge, as a programme limiter at a transmitter
 // does); the knob — the INPUT attenuator — trims around that
-// working point on a quadratic taper.
-// v1.1.1 (Nathan's ear verdict on 1.1.0: "the input pot does
-// not dig into the compression nearly enough — we need to be
-// able to hit the input of the compressor much harder"): the
-// taper steepens from -3 + 3k + 12k^2 (top +12 dB; programme
-// mean GR at max measured 9.9 dB, tone centre 5.7 dB) to
-// -3 + 9k + 45k^2 (top +51 dB). Knob 0 is UNCHANGED (-3 dB:
-// hot box, near-unity, GR only on hot peaks). Measured with
-// the new law: programme mean GR at max 31.5 dB, tone GR at
-// centre (k=0.5, -10 dBFS 1 kHz) 12.3 dB — see
-// docs/build-report-v40.md.
+// working point.
+// v1.1.1 (Nathan's ear verdict on 1.1.0: the input "does not
+// dig into the compression nearly enough") steepened the
+// taper to -3 + 9k + 45k^2 (top +51 dB; programme mean GR at
+// max 31.5 dB) — see docs/build-report-v40.md.
+// v1.1.5 (Nathan's ear verdict on 1.1.4: "still digging in
+// way too hard... at five it should just be barely kissing
+// the compressor; right now that's happening at zero"):
+// the DEPTH was right but the CENTRE was wrong — the whole
+// onset sat ~half a knob too low. The law is re-centred as
+// a logistic (S) taper, -5 dB at knob 0 to the SAME +51 dB
+// at knob 10 (the top is bit-exact the 1.1.1 depth brief):
+// the bottom half stays in the colour region, knob 5 is the
+// kissing point, and the working range spreads across the
+// top half. Measured (1 kHz tones, mean settled GR): at
+// knob 0.5, -20 dBFS -> 0.1 dB and -14 dBFS -> 1.8 dB (was
+// 5.8 / 9.3); at knob 0, -20 -> 0.0 and -10 -> 2.2 (colour
+// and hot peaks only); programme mean GR 2.6 / 3.3 / 31.2 dB
+// at knob 0 / 0.5 / 1. Full table: docs/build-report-v46.md.
 inline float ba6aDriveDb(float knob01) {
     const float k = clampf(knob01, 0.0f, 1.0f);
-    return -3.0f + 9.0f * k + 45.0f * k * k;
+    auto sig = [](float x) { return 1.0f / (1.0f + std::exp(-9.5f * (x - 0.82f))); };
+    const float g = (sig(k) - sig(0.0f)) / (sig(1.0f) - sig(0.0f));
+    return -5.0f + 56.0f * g;
 }
 // Detector sense: the 6H6 is fed from its own winding/tap,
 // scaled ~+7 dB over the output-terminal level (detector
@@ -219,7 +229,21 @@ inline float ba6aVariMuDb(float envLin) {
 //   SLOW release = the same opto seat: both manuals print the
 //                  same release line (50 % ≈ 60 ms, complete
 //                  0.5–5 s); the T4 two-stage shape + memory.
-inline constexpr float kBa6aDetFastTauSec  = 0.00006f; // detector env charge, FAST
+// v1.1.5 (Nathan's ear verdict on 1.1.4: both attacks still
+// clamp too hard): BOTH attack times DOUBLED on top of the
+// v45 seats, releases untouched. The attack-side constants
+// are scaled by one factor per seat (FAST x2.8, SLOW x2.65)
+// — the factors are calibrated, not nominal: the GR
+// trajectory lives in the dB domain over the toe law, so it
+// does not time-scale linearly with tau once the settled
+// depth moves (the v1.1.5 drive law moved the C-test
+// operating point from 25.6 to ~17 dB settled). Measured
+// GR t90 after: FAST 0.188 -> 0.375 ms, SLOW full step
+// 3.90 -> 7.83 ms; the SLOW small step lands at 9.33 ms
+// (was 3.06) — more than double, because the T4 dim-panel
+// shape answers a small demand at the new, quieter staging
+// with a lazier charge. See docs/build-report-v46.md.
+inline constexpr float kBa6aDetFastTauSec  = 0.000168f; // detector env charge, FAST (v45: 60 µs x2.8, v46)
 inline constexpr float kBa6aDetDecayTauSec = 0.030f;   // detector env decay
 // SLOW detector charge is SHAPED, not a single tau — the T4
 // behaviours the manuals document: the EL panel burns brighter
@@ -228,8 +252,8 @@ inline constexpr float kBa6aDetDecayTauSec = 0.030f;   // detector env decay
 // (creep), and a small demand (dim panel) slows the whole
 // response. tau = lerp(grab, creep, approach)
 //                 x (1 + dim x (1 - demand)).
-inline constexpr float kBa6aDetSlowGrabTauSec  = 0.0009f;
-inline constexpr float kBa6aDetSlowCreepTauSec = 0.0030f;
+inline constexpr float kBa6aDetSlowGrabTauSec  = 0.002385f; // v45: 0.9 ms x2.65 (v46)
+inline constexpr float kBa6aDetSlowCreepTauSec = 0.00795f;  // v45: 3.0 ms x2.65 (v46)
 inline constexpr float kBa6aDetSlowDim         = 2.6f;   // dim-panel slowdown factor
 inline float ba6aDetSlowTau(float peak, float env) {
     const float demand = clampf(ba6aVariMuDb(peak) / 25.0f, 0.0f, 1.0f);
@@ -238,8 +262,8 @@ inline float ba6aDetSlowTau(float peak, float env) {
         + (kBa6aDetSlowCreepTauSec - kBa6aDetSlowGrabTauSec) * approach;
     return base * (1.0f + kBa6aDetSlowDim * (1.0f - demand));
 }
-inline constexpr float kBa6aAttFastTauSec  = 0.00009f; // control attack pole, FAST
-inline constexpr float kBa6aAttSlowTauSec  = 0.0018f;  // control attack pole, SLOW
+inline constexpr float kBa6aAttFastTauSec  = 0.000252f; // control attack pole, FAST (v45: 90 µs x2.8, v46)
+inline constexpr float kBa6aAttSlowTauSec  = 0.00477f;  // control attack pole, SLOW (v45: 1.8 ms x2.65, v46)
 inline constexpr float kBa6aRelSingleTauSec = 0.014f;  // FAST release (1176 seat)
 inline constexpr float kBa6aRelDualFastTauSec = 0.022f;
 inline constexpr float kBa6aRelDualSlowTauSec = 0.900f; // unstressed tail pole
