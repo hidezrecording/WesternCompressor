@@ -1,12 +1,15 @@
-# Hotdog
+# Western Compressor
 
 A one-knob stereo parallel FET limiter for macOS/Windows
 (VST3 / AU / Standalone), built by Sabatino Audio. Internal project
-name: OSC-72 (directory and code identifiers unchanged).
+name: OSC-72 (code identifiers unchanged); project directory:
+western-compressor.
 
-**Name:** renamed **Hotdog** by Nathan on 2026-10-13 (it shipped
-briefly under the working title OSC-72 for GUI v1). The name nods to
-the prototype's studio nickname — the band's joke about the unit was
+**Name:** renamed **Western Compressor** by Nathan on 2026-10-14 —
+the official product name. It shipped as **Hotdog** (v1.0.0) earlier
+the same day; Nathan had renamed it Hotdog on 2026-10-13, and it
+began under the working title OSC-72. The Hotdog name nodded to the
+prototype's studio nickname — the band's joke about the unit was
 the hot-dog one: big thing in one end, little sausage out the other.
 
 ## GUI v18 — hardware grown ~x1.75, gloss black with scratched edges, sharp corners (352x253)
@@ -526,6 +529,54 @@ top cluster bands — the knob column, mid panel,
 strip and wordmark bands are pixel-identical.
 Full notes in `docs/build-report-v31.md`.
 
+**v32 (2026-10-14): the switches come back down —
+a second build, same audio.** Nathan, on the
+shipped v31: "let's immediately start another one
+with the same audio build where we put the limit
+and mod switches back down where they were near
+the bottom of the unit… just a little higher than
+where they had been previously" — then his
+placement correction, which supersedes the
+"a little higher": **the toggle CENTRES line up
+with the BOTTOM EDGE of the input pot** — the
+horizontal line through the flange's lowest point
+(knob centre 300 + flange R 100 = **y 400**) — at
+the v29 bottom flank positions, centres **(86,
+400)** and **(354, 400)**, clusters as whole
+assemblies with their internal geometry unchanged
+(word = centre −37, IN/OUT −3/+15, jewel centre
+∓/± 38 on the outer flank). The corrected line
+lands exactly on the v29 bottom geometry (the
+v29 rise had already set the centres at y 400),
+so the v32 stills are **pixel-identical to
+v29's** (max diff 0 on A, B and OFF) — the
+flanking trial leaves no trace on this build.
+Measured on the render: toggle-centre line at
+still y 440; flange silhouette fit centre
+(241.5, 330), R 109 → bottom 439 (drawn circle:
+440.5); the lit LIMIT jewel's warm centroid at
+(52.6, 439.7) — the toggle line and the flange's
+bottom edge agree to **≤ ~1 still px**. Overlap
+audit re-run on the v32 render, passing: word
+ink → flange rim **15.5 (L) / 17.7 (R)** device
+px circle-exact, IN ink 15.8/15.4, OUT ink
+19.0/18.5; OUT ink → WESTERN COMPRESSOR ink
+**12.5 device px**; toggle plate bottoms →
+wordmark ink **5.0 device px**; switch component
+bottoms **18 device px** off the panel's bottom
+edge; jewels ~11 device px above the bottom
+screw heads. The strip does not move — POWER
+stays on the eye-hub line, OUTPUT on the
+knob-centre line — and the eye, caption, knob
+stack and both bottom wordmarks are exactly as
+v31. DSP untouched; suite still 49/49. With
+this build the plugin is renamed **WESTERN
+COMPRESSOR** (Nathan, official — the faceplate
+has read it since v24); the code/repo/installer
+rename is the separate release step, not part of
+this GUI pass. Full notes in
+`docs/build-report-v32.md`.
+
 - The **strip** is a panel in **gloss black** (v18: the
   brushed metal is gone — a smooth near-black gloss with
   one soft sheen raking across the whole unit), its wear
@@ -626,7 +677,10 @@ Full notes in `docs/build-report-v31.md`.
   also moves both clusters up and outward off the bottom
   edge; v30, experimental, moves them again — up to
   flank the magic eye on its hub line; v31 nudges
-  the flanking pair 15 virtual px outward each.)
+  the flanking pair 15 virtual px outward each;
+  v32 returns both clusters to the bottom corners,
+  toggle centres on the flange's bottom-edge line
+  (y 400).)
   Each lever has a small **amber indicator jewel**
   on its outer flank (left of LIMIT, right of MOD —
   locations confirmed by Nathan), drawn with the POWER
@@ -779,12 +833,40 @@ pot + beaten case, `warble` = mod in, `limitout` = limit
 out, `poweroff` = the v19 power-off state):
 
 ```
-xvfb-run ../build/OscSnapshot ../docs/gui-v31-a.png
-xvfb-run ../build/OscSnapshot ../docs/gui-v31-b.png warble
-xvfb-run ../build/OscSnapshot ../docs/gui-v31-off.png poweroff
+xvfb-run ../build/OscSnapshot ../docs/gui-v32-a.png
+xvfb-run ../build/OscSnapshot ../docs/gui-v32-b.png warble
+xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 ```
 
 ## Status
+
+GUI v32 (the LIMIT/MOD clusters return to the
+module's bottom corners as whole assemblies —
+toggle centres at virtual (86, 400) and (354,
+400), ON THE FLANGE'S BOTTOM-EDGE LINE (knob
+centre 300 + flange R 100 = y 400; measured on
+the render: toggle-centre line still y 440,
+flange silhouette bottom 439, drawn circle
+440.5 — delta ≤ ~1 still px; the lit LIMIT
+jewel's warm centroid sits at (52.6, 439.7));
+section jewels back at (48, 400) / (392, 400)
+on the toggles' outer flanks; overlap audit
+re-run on the v32 render and passing — word /
+IN / OUT ink 15.4–19.0 device px circle-exact
+off the flange rim, OUT ink 12.5 device px
+above the WESTERN COMPRESSOR ink, toggle plate
+bottoms 5.0 device px above the wordmark ink,
+switch bottoms 18 device px off the panel edge;
+the strip does not move (POWER on the eye-hub
+line, OUTPUT on the knob-centre line); the
+stills are pixel-identical to v29's, whose
+bottom geometry this restores; everything else
+as v31; DSP suite still 49/49) — **stopped at
+Nathan's screenshot gate.** The Mac variant
+build follows separately, after approval. (This
+build is the first under the plugin's new
+official name, WESTERN COMPRESSOR; the code and
+repo rename rides with that release step.)
 
 GUI v31 (the v30 flanking pair nudges OUTWARD a
 little — LIMIT left, MOD right, 15 virtual px each

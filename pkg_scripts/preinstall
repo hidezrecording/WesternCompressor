@@ -1,14 +1,18 @@
 #!/bin/bash
-# Hotdog installer preinstall: wipe all previous versions
+# Western Compressor installer preinstall: wipe all previous versions,
+# including the retired Hotdog 1.0.0 bundles (the product was renamed
+# from Hotdog to Western Compressor on 2026-10-14).
 
-# System library
-rm -rf "/Library/Audio/Plug-Ins/VST3/Hotdog.vst3"
-rm -rf "/Library/Audio/Plug-Ins/Components/Hotdog.component"
-rm -rf "/Applications/Hotdog.app"
+for NAME in "Western Compressor" "Hotdog"; do
+  # System library
+  rm -rf "/Library/Audio/Plug-Ins/VST3/$NAME.vst3"
+  rm -rf "/Library/Audio/Plug-Ins/Components/$NAME.component"
+  rm -rf "/Applications/$NAME.app"
 
-# User library (for each user - $HOME is the installing user)
-rm -rf "$HOME/Library/Audio/Plug-Ins/VST3/Hotdog.vst3"
-rm -rf "$HOME/Library/Audio/Plug-Ins/Components/Hotdog.component"
+  # User library (for each user - $HOME is the installing user)
+  rm -rf "$HOME/Library/Audio/Plug-Ins/VST3/$NAME.vst3"
+  rm -rf "$HOME/Library/Audio/Plug-Ins/Components/$NAME.component"
+done
 
 # Clear AU cache to force rescan
 rm -rf "$HOME/Library/Caches/com.apple.audiounits.cache"

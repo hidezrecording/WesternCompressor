@@ -183,6 +183,13 @@
 // toggle centres (93, 76) / (347, 76), section jewels
 // at (55, 76) / (385, 76), same height, still on the
 // eye-hub line. Everything else as v30.
+// v32 shots: gui-v32-a.png / gui-v32-b.png ("warble") /
+// gui-v32-off.png ("poweroff"), same tokens. The
+// LIMIT/MOD clusters return to the module's bottom
+// corners: toggle centres (86, 400) / (354, 400) —
+// on the line through the flange's bottom edge —
+// section jewels at (48, 400) / (392, 400). The
+// strip does not move. Everything else as v31.
 // The knob is parked at 7.0 for the screenshot — the documented
 // session endpoint where the crushed path equals the dry path.
 #include <juce_gui_basics/juce_gui_basics.h>

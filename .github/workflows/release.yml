@@ -1,26 +1,26 @@
 # Attaches a built installer PKG to an existing GitHub Release.
 #
-# Manual dispatch: give it the Build Hotdog run ID whose installer
-# artifact you want, the artifact name from that run, and the
-# release tag. The upload happens entirely inside GitHub
+# Manual dispatch: give it the Build Western Compressor run ID whose
+# installer artifact you want, the artifact name from that run, and
+# the release tag. The upload happens entirely inside GitHub
 # (GITHUB_TOKEN), so no local credentials are involved.
 
-name: Release Hotdog
+name: Release Western Compressor
 
 on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: "Build Hotdog run ID to take the installer artifact from"
+        description: "Build Western Compressor run ID to take the installer artifact from"
         required: true
       artifact:
         description: "Installer artifact name from that run"
         required: true
-        default: "Hotdog-Installer-macOS-1"
+        default: "WesternCompressor-Installer-macOS-1"
       tag:
         description: "Release tag to upload the installer to"
         required: true
-        default: "v1.0.0"
+        default: "v1.0.1"
 
 jobs:
   release:
@@ -40,5 +40,5 @@ jobs:
       - name: Upload installer to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ inputs.tag }}" Hotdog-1.0.0-macOS.pkg
+        run: gh release upload "${{ inputs.tag }}" WesternCompressor-1.0.1-macOS.pkg
              --clobber --repo "${{ github.repository }}"

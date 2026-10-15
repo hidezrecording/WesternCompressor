@@ -1677,11 +1677,11 @@ void Osc72Editor::timerCallback()
     const bool mod = modToggle_.getToggleState();
     if (lim != lastLimitState_) {
         lastLimitState_ = lim;
-        repaint(juce::Rectangle<int>(12, 24, 38, 37));    // LIMIT jewel, centre device (31, 42) — v31: out with its cluster (v30: (20, 24, 38, 37); v19-v29: (6, 206, 40, 39))
+        repaint(juce::Rectangle<int>(7, 201, 38, 37));    // LIMIT jewel, centre device (26, 220) — v32: back down with its cluster to the flange-bottom line (v31: (12, 24, 38, 37), centre (31, 42))
     }
     if (mod != lastModState_) {
         lastModState_ = mod;
-        repaint(juce::Rectangle<int>(193, 24, 38, 37));   // MOD jewel, centre device (212, 42) — v31: out with its cluster (v30: (185, 24, 38, 37); v19-v29: (196, 206, 40, 39))
+        repaint(juce::Rectangle<int>(197, 201, 38, 37));   // MOD jewel, centre device (216, 220) — v32: back down with its cluster to the flange-bottom line (v31: (193, 24, 38, 37), centre (212, 42))
     }
     // v10: the flange numerals rotate with the knob, but the
     // flange is editor paint — the Slider only repaints its own
@@ -1747,9 +1747,18 @@ void Osc72Editor::resized()
     // -> (40,27)/(180,27); centres stay on the y-42 row,
     // so the one-line alignment with POWER and the eye
     // hub is untouched.
+    // v32 (Nathan): a SECOND build with the same audio —
+    // the LIMIT/MOD toggle components come back DOWN to
+    // the bottom of the module, on the line through the
+    // FLANGE'S BOTTOM EDGE (toggle centres at virtual
+    // y 400 = knob centre 300 + flange R 100 — the v29
+    // bottom height, at the v29 flank x positions), so
+    // bounds y 27 -> 205 (the v29 values) and x re-centres
+    // on 86/354. The strip does not move: POWER stays on
+    // the eye-hub line, OUTPUT on the knob-centre line.
     knob_.setBounds(74, 119, 94, 94);               // centre (121, 166) = virtual (220, 302)
-    limitToggle_.setBounds(40, 27, 22, 30);         // centre (51, 42) = virtual (93, 76) — v31: nudged out (v30: (59, 42) = virtual (107, 76))
-    modToggle_.setBounds(180, 27, 22, 30);          // centre (191, 42) = virtual (347, 76) — v31: nudged out (v30: (183, 42) = virtual (333, 76))
+    limitToggle_.setBounds(36, 205, 22, 30);        // centre (47, 220) = virtual (85, 400) — v32: back down to the flange-bottom line (v31: (51, 42) = virtual (93, 76))
+    modToggle_.setBounds(184, 205, 22, 30);         // centre (195, 220) = virtual (355, 400) — v32: back down to the flange-bottom line (v31: (191, 42) = virtual (347, 76))
     powerToggle_.setBounds(286, 27, 22, 30);        // centre (297, 42) = virtual (540, 76) — on the eye-hub line (76)
     outLevelL_.setBounds(259, 152, 27, 27);         // centre (272.5, 165.5) = virtual (495, 301) — on the knob-centre line
     outLevelR_.setBounds(308, 152, 27, 27);         // centre (321.5, 165.5) = virtual (584, 301) — on the knob-centre line
@@ -2143,18 +2152,34 @@ void Osc72Editor::paint(juce::Graphics& g)
     // centres land at (93, 76) and (347, 76), still
     // mirrored about the module centre (d = 127) and
     // still on the eye-hub line; only the span widens.
+    // v32 (Nathan): the clusters come back DOWN to the
+    // module's bottom corners — a second build, same
+    // audio (the plugin is renamed WESTERN COMPRESSOR
+    // with this build). Placement, corrected by Nathan
+    // mid-brief: the toggle CENTRES line up with the
+    // BOTTOM EDGE of the input pot — the horizontal
+    // line through the flange's lowest point (knob
+    // centre 300 + flange R 100 = y 400) — at the v29
+    // bottom flank x positions (centres 86 / 354,
+    // mirrored about the module centre). Internal
+    // geometry unchanged (word baseline = centre -37,
+    // IN/OUT at -3/+15 on the module-centre side at
+    // centre +/- 28, jewel centre -/+ 38 on the outer
+    // flank): word baselines 363, IN/OUT 397/415,
+    // jewels (48, 400) / (392, 400) — the corrected
+    // line lands exactly on the v29 bottom geometry.
     drawTrackedText(g, "LIMIT", capsFont(14.5f), 0.6f,
-                    93.0f, 39.0f, Anchor::centre);
+                    86.0f, 363.0f, Anchor::centre);
     drawTrackedText(g, "MOD", capsFont(14.5f), 0.6f,
-                    347.0f, 39.0f, Anchor::centre);
+                    354.0f, 363.0f, Anchor::centre);
     drawTrackedText(g, "IN", capsFont(14.0f), 0.4f,
-                    121.0f, 73.0f, Anchor::left);
+                    114.0f, 397.0f, Anchor::left);
     drawTrackedText(g, "OUT", capsFont(14.0f), 0.4f,
-                    121.0f, 91.0f, Anchor::left);
+                    114.0f, 415.0f, Anchor::left);
     drawTrackedText(g, "IN", capsFont(14.0f), 0.4f,
-                    319.0f, 73.0f, Anchor::right);
+                    326.0f, 397.0f, Anchor::right);
     drawTrackedText(g, "OUT", capsFont(14.0f), 0.4f,
-                    319.0f, 91.0f, Anchor::right);
+                    326.0f, 415.0f, Anchor::right);
 
     // ── Module: section indicator jewels (v15, Nathan) ──────────
     // A small amber jewel on each toggle's OUTER flank — left of
@@ -2174,8 +2199,11 @@ void Osc72Editor::paint(juce::Graphics& g)
     // on the one horizontal line y 76 with the eye hub.
     // v31: out with the clusters — (70, 76) -> (55, 76)
     // and (370, 76) -> (385, 76), still centre -/+ 38.
-    drawPowerJewel(g, 55.0f, 76.0f, powerOn && limitToggle_.getToggleState(), 1.0f);
-    drawPowerJewel(g, 385.0f, 76.0f, powerOn && modToggle_.getToggleState(), 1.0f);
+    // v32: back down with their clusters to the
+    // flange-bottom line — (48, 400) and (392, 400),
+    // the v29 bottom positions, still centre -/+ 38.
+    drawPowerJewel(g, 48.0f, 400.0f, powerOn && limitToggle_.getToggleState(), 1.0f);
+    drawPowerJewel(g, 392.0f, 400.0f, powerOn && modToggle_.getToggleState(), 1.0f);
 
     // ── Module wordmark (v29, Nathan): 'WESTERN
     //    COMPRESSOR' at the very BOTTOM of the module,

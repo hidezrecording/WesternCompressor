@@ -1,11 +1,14 @@
-# Builds Hotdog on every push and uploads downloadable plugins.
+# Builds Western Compressor on every push and uploads downloadable plugins.
 #
 # Mirrors the DN1000 pipeline: Actions tab -> pick a run -> download
-# the Hotdog-macOS / Hotdog-Installer-macOS artifacts (VST3/AU/pkg).
+# the WesternCompressor-macOS / WesternCompressor-Installer-macOS
+# artifacts (VST3/AU/pkg).
 #
 # NOTE: macOS run is the deliverable (Nathan's Mac).
+# (Renamed from Hotdog on 2026-10-14; this pipeline shipped Hotdog
+# 1.0.0 the same day.)
 
-name: Build Hotdog
+name: Build Western Compressor
 
 on:
   push:
@@ -41,26 +44,26 @@ jobs:
           mkdir -p "$PKGROOT/Library/Audio/Plug-Ins/VST3"
           mkdir -p "$PKGROOT/Library/Audio/Plug-Ins/Components"
           mkdir -p "$PKGROOT/Applications"
-          cp -R "build/OSC72_artefacts/Release/VST3/Hotdog.vst3" "$PKGROOT/Library/Audio/Plug-Ins/VST3/"
-          cp -R "build/OSC72_artefacts/Release/AU/Hotdog.component" "$PKGROOT/Library/Audio/Plug-Ins/Components/"
-          if [ -d "build/OSC72_artefacts/Release/Standalone/Hotdog.app" ]; then
-            cp -R "build/OSC72_artefacts/Release/Standalone/Hotdog.app" "$PKGROOT/Applications/"
+          cp -R "build/OSC72_artefacts/Release/VST3/Western Compressor.vst3" "$PKGROOT/Library/Audio/Plug-Ins/VST3/"
+          cp -R "build/OSC72_artefacts/Release/AU/Western Compressor.component" "$PKGROOT/Library/Audio/Plug-Ins/Components/"
+          if [ -d "build/OSC72_artefacts/Release/Standalone/Western Compressor.app" ]; then
+            cp -R "build/OSC72_artefacts/Release/Standalone/Western Compressor.app" "$PKGROOT/Applications/"
           fi
           pkgbuild --root "$PKGROOT" \
-            --identifier com.sabatinoaudio.hotdog \
-            --version 1.0.0 \
+            --identifier com.sabatinoaudio.westerncompressor \
+            --version 1.0.1 \
             --install-location / \
             --scripts pkg_scripts \
-            Hotdog-1.0.0-macOS.pkg
+            WesternCompressor-1.0.1-macOS.pkg
 
       - name: Upload plugins
         uses: actions/upload-artifact@v4
         with:
-          name: Hotdog-macOS-${{ github.run_number }}
+          name: WesternCompressor-macOS-${{ github.run_number }}
           path: build/OSC72_artefacts/Release/
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: Hotdog-Installer-macOS-${{ github.run_number }}
-          path: Hotdog-1.0.0-macOS.pkg
+          name: WesternCompressor-Installer-macOS-${{ github.run_number }}
+          path: WesternCompressor-1.0.1-macOS.pkg

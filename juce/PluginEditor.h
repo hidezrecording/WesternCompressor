@@ -189,6 +189,17 @@
 // (347, 76), span d 112 -> 127, still mirrored about
 // the module centre and still on the eye-hub line.
 // Everything else as v30.
+// v32 (Nathan, 2026-10-14): a SECOND build with the
+// same audio (the plugin is renamed WESTERN
+// COMPRESSOR with this build) — the LIMIT/MOD
+// clusters return to the BOTTOM of the module at
+// the v29 flank x positions (centres 86 / 354),
+// with the toggle CENTRES on the line through the
+// FLANGE'S BOTTOM EDGE (knob centre 300 + flange
+// R 100 = y 400 — the v29 bottom height, internal
+// cluster geometry unchanged). The strip does not
+// move: POWER stays on the eye-hub line, OUTPUT on
+// the knob-centre line. Everything else as v31.
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <cmath>
@@ -255,7 +266,9 @@ private:
 // Bat toggle (v8; restyled v9; recoloured v15): vertical
 // throw, UP = in, DOWN = out. (Placement: the plate's bottom
 // corners through v29; v30 moves the LIMIT/MOD pair up to
-// flank the magic eye — see the v30 note above.) v9
+// flank the magic eye — see the v30 note above; v32 returns
+// the pair to the bottom corners, toggle centres on the
+// flange's bottom-edge line — see the v32 note above.) v9
 // renders it as the reference photo's switch: a heavy lever
 // with a rounded teardrop tip on a small black escutcheon
 // plate. v15 (Nathan): the black levers read "a little too

@@ -12,7 +12,7 @@
 # NOTE: JUCE 8 is AGPLv3-or-commercial. DSP core has no JUCE dependency.
 
 cmake_minimum_required(VERSION 3.22)
-project(OSC72 VERSION 1.0.0)
+project(OSC72 VERSION 1.0.1)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -30,12 +30,12 @@ add_subdirectory("${JUCE_DIR}" juce EXCLUDE_FROM_ALL)
 
 juce_add_plugin(OSC72
     COMPANY_NAME "Sabatino Audio"
-    PLUGIN_NAME "Hotdog"
+    PLUGIN_NAME "Western Compressor"
     DESCRIPTION "One-knob stereo parallel FET limiter: a crushed limiter path blended under the dry signal, with a magic-eye gain-reduction display."
     PLUGIN_MANUFACTURER_CODE SabA
     PLUGIN_CODE OS72
     FORMATS VST3 AU Standalone
-    PRODUCT_NAME "Hotdog"
+    PRODUCT_NAME "Western Compressor"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
     COPY_PLUGIN_AFTER_BUILD TRUE
