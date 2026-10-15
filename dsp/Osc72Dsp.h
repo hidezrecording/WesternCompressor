@@ -58,28 +58,56 @@ inline float clampf(float v, float lo, float hi) {
 
 // ─────────────────────────────────────────────────────────────────────
 // Fixed internal time constants — RECONSTRUCTION (see header),
-// RETUNED in audio v2 (Nathan's ear verdict on the shipped 1.0.0:
-// "almost flat… barely hear it"). The v1 ballistics (0.2 ms attack,
-// 120→336 ms release, 50 ms detector hang) grabbed transients
-// before they existed and then parked the gain crushed — measured
-// release t63 of 471 ms at max. The v2 ballistics invert that feel:
-//   * GR ATTACK is slow-to-medium (20 ms, easing to 10 ms at max)
-//     so transients punch through BEFORE the clamp — the gain
-//     ballistics live in the GR smoother; the detector itself
-//     still peak-catches at 50 µs (documented feed-forward FET
-//     behaviour).
-//   * GR RELEASE is super quick (50 ms, speeding to 25 ms at max)
-//     so the gain rides back between hits — pumping, not parking.
-//   * The DETECTOR HANG drops 50 ms -> 12 ms: at 50 ms it, not the
-//     release pole, owned the recovery on falling signals (the
-//     level stays over threshold for ~200+ ms after a hit ends).
-// See docs/audio-v2-retune.md for the before/after measurements.
+// RETUNED in audio v2, then RE-TUNED AGAIN in audio v3 (Nathan's
+// ear verdicts on the shipped 1.0.2: the release was "way too
+// slow — it needs to be like five times quicker at least to
+// pump", the gain action on continuous material was "lost", and
+// he asked for auto makeup that CRANKS with the push). v2
+// measured release t63 of 68 ms (centre) / 78 ms (max); v3
+// targets the low teens. The v3 ballistics:
+//   * GR ATTACK stays slow-to-medium (20 ms, easing to 10 ms at
+//     max) so transients punch through BEFORE the clamp — the
+//     gain ballistics live in the GR smoother; the detector
+//     itself still peak-catches at 50 µs (documented feed-
+//     forward FET behaviour).
+//   * GR RELEASE is ~8x faster than v2 at the pole: a 6 ms pole
+//     (3.8 ms at max), so the gain surges back BETWEEN hits even
+//     at mix density — pumping as a trajectory, not a posture.
+//     Measured step-release t63 (the number includes bleeding
+//     the detector envelope down through the over-range, which
+//     is deeper at max): 19 ms centre / 27 ms max, vs v2's
+//     68 / 78 ms.
+//   * PROGRAMME-DEPENDENT RELEASE (v3, the vari-mu / Sta-Level
+//     principle — see docs/audio-v3-diagnosis.md): a slow
+//     "stress" memory of sustained GR stretches the release up
+//     to ~1.9x while the box is being held down continuously,
+//     so isolated hits recover at full speed but a passage that
+//     is being slammed non-stop doesn't chatter.
+//   * The DETECTOR HANG drops 12 ms -> 3 ms base, stretched x4
+//     by a programme-PRESENCE state while anything is actually
+//     playing (so the envelope cannot collapse inside an LF
+//     cycle and ride the gain — the fast-release LF-distortion
+//     mechanism) and collapsing the moment programme stops
+//     (with a 2 ms true-silence cut), so perceived recovery
+//     matches the release number instead of a hang owning it.
+//   * The DETECTOR feed is high-passed (~75 Hz, detector only —
+//     the audio path is untouched): sustained bass no longer
+//     parks the gain computer. Measured on the diagnosis drum
+//     loop, a continuous 55 Hz line alone held ~15 dB of GR
+//     floor under v2, squeezing all hit movement into a ~9 dB
+//     band on top of it. (The Distressor's detector HP filter
+//     exists for exactly this; see the diagnosis doc.)
+// See docs/audio-v2-retune.md (v2) and docs/audio-v3-diagnosis.md
+// (v3) for the before/after measurements.
 // ─────────────────────────────────────────────────────────────────────
 inline constexpr float kAttackTauSec   = 0.020f;   // 20 ms GR attack (base)
-inline constexpr float kReleaseTauSec  = 0.050f;   // 50 ms GR release (base)
+inline constexpr float kReleaseTauSec  = 0.006f;   // 6 ms GR release base (v3: v2 was 50 ms)
 inline constexpr float kDetectAttackTauSec  = 0.00005f; // 50 µs peak catch
-inline constexpr float kDetectReleaseTauSec = 0.012f;   // 12 ms detector hang (v2)
+inline constexpr float kDetectReleaseTauSec = 0.003f;   // 3 ms detector hang base (v3; presence-stretched x4 while programme plays)
 inline constexpr float kMakeupTauSec   = 0.300f;   // slow average-GR makeup
+inline constexpr float kDetectHpTauSec = 0.00212f; // ~75 Hz detector sidechain HPF
+inline constexpr float kStressTauSec   = 1.5f;     // programme memory for the release law
+inline constexpr float kStressStretch  = 0.9f;     // max release stretch at full stress
 
 // ─────────────────────────────────────────────────────────────────────
 // Knob law — RECONSTRUCTION, v9 (Nathan, 2026-10-14). The one knob
@@ -137,13 +165,38 @@ inline float attackTauForKnob(float k) {
     return kAttackTauSec * (1.0f - 0.5f * topFactorForKnob(k));
 }
 inline float releaseTauForKnob(float k) {
-    return kReleaseTauSec * (1.0f - 0.5f * topFactorForKnob(k));
+    // v3: past centre the release is faster still (6 -> 3.8 ms);
+    // the programme-stress stretch is applied on top of this in
+    // the gain computer (see StereoLimiter::process).
+    return kReleaseTauSec * (1.0f - 0.36f * topFactorForKnob(k));
 }
 inline float grCapForKnob(float k) {
     return 50.0f + 14.0f * topFactorForKnob(k);
 }
 inline float makeupCapForKnob(float k) {
-    return 34.0f + 14.0f * topFactorForKnob(k);
+    // v3: the cap must clear full average-GR compensation PLUS
+    // the knob crank (below): at max that is ~64 + 8.
+    return 44.0f + 30.0f * topFactorForKnob(k);
+}
+// AUTO MAKEUP, v3 form (Nathan, on 1.0.2: "add an auto makeup
+// gain so that as you push the signal, the input starts cranking
+// with the compressed signal"). Two terms:
+//   1. FULL compensation of the slow-average GR (factor 1.0, was
+//      0.8 in v1/v2): the wet path's average loudness is restored,
+//      so what the knob adds is DENSITY at level — and because
+//      the average can't follow hit-rate movement, the pumping
+//      trajectory passes at full depth instead of being levelled
+//      away. (Measured v2 failure: net gain on a drum loop sat
+//      at −1.8 dB at centre and FELL to −7.4 dB at max — the
+//      harder you pushed, the quieter the crush got.)
+//   2. A knob-tied CRANK: extra makeup that exists purely
+//      because the knob is up — +2 dB at the bottom of the
+//      travel rising to +8 dB at max — so pushing the knob
+//      audibly turns the crushed signal UP, as asked. (At knob
+//      0 the wet weight is 0, so the crank can never disturb
+//      the bit-exact dry guarantee.)
+inline float makeupCrankDbForKnob(float k) {
+    return 2.0f * clampf(k, 0.0f, 1.0f) + 6.0f * topFactorForKnob(k);
 }
 inline float satDriveForKnob(float k) {
     const float t = topFactorForKnob(k);
@@ -298,6 +351,10 @@ public:
 
     // Introspection (meters / tests)
     float gainReductionDb() const { return grDb_; }
+    // Currently applied auto makeup (slow average GR + knob
+    // crank, capped) — the other half of the net-gain readout
+    // the tests use to prove the pumping trajectory.
+    float appliedMakeupDb() const { return makeupDb_; }
     float wetWeight() const { return wetWeightForKnob(knobS_); }
     float knob() const { return knobS_; }
     // Current transient-designer gain (1 = no cut) and cut in dB.
@@ -319,8 +376,30 @@ private:
     float posEnvL_ = 0.0f, negEnvL_ = 0.0f;
     float posEnvR_ = 0.0f, negEnvR_ = 0.0f;
 
+    // v3: detector sidechain high-pass states (one low-pass state
+    // per channel; the detector reads signal − lowpass ≈ the
+    // signal above ~75 Hz). Detector only — the audio path never
+    // sees this filter.
+    float detLpL_ = 0.0f, detLpR_ = 0.0f;
+    // v3: programme-presence state for the detector hang (see
+    // process()): while programme is actually present at the
+    // detector the hang stretches (the envelope cannot collapse
+    // between LF cycles and ride the gain — the fast-release LF
+    // distortion mechanism); the moment programme stops, the
+    // hang collapses and the envelope bleeds at full speed —
+    // programme-dependent ballistics, not one fixed compromise.
+    float detPresence_ = 0.0f;
+    int detQuietRun_ = 0;   // consecutive near-silent samples
+    // v3: peak envelope of the pre-TD wet-path signal — the
+    // overshoot ceiling's basis (an envelope, not the raw
+    // instantaneous sample, so the ceiling cannot waveshape
+    // steady tones within a cycle).
+    float pkEnv_ = 0.0f;
+
     float grDb_ = 0.0f;       // smoothed gain reduction (dB, >= 0)
-    float makeupDb_ = 0.0f;   // slow average-GR makeup (dB)
+    float makeupDb_ = 0.0f;   // derived makeup actually applied (dB)
+    float makeupAvgDb_ = 0.0f; // v3: slow average of the PROGRAMME GR (curve output, pre-guard)
+    float stressDb_ = 0.0f;   // v3: slow memory of sustained GR (programme-dependent release)
 
     // v9 wet-path stages: input transformers (per channel — real
     // iron is per-channel) and the linked transient designer.
@@ -329,7 +408,7 @@ private:
     float tdFast_ = 0.0f, tdSlow_ = 0.0f;  // linked envelopes
     float tdGain_ = 1.0f;
 
-    float envStep(float env, float target) const;
+    float envStep(float env, float target, float relTauSec) const;
     float tdEnvStep(float env, float target, bool fast) const;
 };
 
@@ -355,31 +434,46 @@ private:
 // cents figures (see the research note).
 //
 // When OFF the chain is fully out of the path: process() copies
-// input to output bit-exactly and does no other work. Engaging runs
-// a 30 ms crossfade (the delay line is cleared on engage, so no
-// stale audio can burst out). Reported latency: 0 when off; the
-// base delay (12 ms) when on — the instantaneous delay wobbles up
-// to ~±10 ms around that figure (v2 depths), which is the effect
+// input to output bit-exactly. (v3: the transport still runs
+// silently underneath — lines fed, modulation advancing — so
+// engaging crossfades into a live transport over 30 ms with no
+// fill transient.) Reported latency: 0 when off; the base delay
+// (12 ms) when on — the instantaneous delay wobbles up to
+// ~±10 ms around that figure (v2 depths), which is the effect
 // itself.
 //
 // MID/SIDE TOPOLOGY (v10 MOD revision, Nathan 2026-10-14: "the mod
 // function should be hard left right warble so it sounds really
 // wide, and the center should remain the dry signal"). The insert
-// works in mid/side: the MID (centre) component passes through
-// completely DRY — no warble, no bandwidth limit, no gain change —
-// while the SIDE component alone rides the modulated-delay
-// transport above. Delaying the side by +d is precisely antiphase
-// L/R warble (L reads the side at −d, R at +d), so the image swings
-// hard left/right and sounds very wide, while everything centred
-// stays anchored and untouched. Strong consequence: a mono input
-// (side ≡ 0) passes through the engaged insert bit-exactly. The
-// encode is the exactly-invertible (L+R)/2, (L−R)/2 pair, and the
-// engage crossfade is applied as in + g·(wet − in), which is exact
-// whenever wet == in — so the centre stays numerically untouched at
-// every fade position, not just at the extremes. This SUPERSEDES
-// the v8 "degraded width" behaviour (independent per-channel drift
-// offsets + gentle width narrowing): both are removed — nothing in
-// this insert narrows the image any more.
+// works in mid/side: the SIDE component rides the modulated-delay
+// transport above — delaying the side is precisely antiphase L/R
+// warble, so the image swings hard left/right — and originally the
+// MID passed through completely DRY. Strong consequence of that
+// design: a mono input (side ≡ 0) passed through the engaged
+// insert bit-exactly, and everything centred in a stereo mix was
+// numerically untouched.
+//
+// v3 SUPERSESSION (Nathan, on the shipped 1.0.2: "I'm not hearing
+// the mod have any effect whatsoever"): processor-level
+// measurement proved the side warble is enormous on wide material
+// (−0.43 dB difference-vs-output) and clearly present on typical
+// stereo (−9 dB) — but on mono and centre-anchored material there
+// is, by the v10 design, literally NOTHING to hear: the sounds a
+// listener anchors on never move. The least invasive correction
+// that keeps the architecture: the MID now takes a HALF-DEPTH
+// share of the SAME transport (same delay line timing, same
+// 2.6 kHz lo-fi bandwidth, blended 50/50 with the dry mid), so
+// centred content sways coherently with the sides instead of
+// sitting outside the effect — the centre stays anchored in
+// level and image (it is a blend, never a replacement, and both
+// components share one transport so they cannot tear apart),
+// while the side keeps the full-depth hard L/R warble. THE
+// TRADE-OFF, stated plainly: the v10 guarantees "mono passes
+// bit-exactly" and "the centre is numerically untouched" are
+// RETIRED. With MOD in, mono material now warbles audibly (that
+// is the point of the change), and the centre of stereo material
+// moves at half depth. MOD out remains bit-exact end to end.
+// See docs/audio-v3-diagnosis.md, Issue 1.
 // ─────────────────────────────────────────────────────────────────────
 inline constexpr float kWarbleBaseDelayMs = 12.0f;
 // v2 depths (Nathan, on the shipped 1.0.0: the warble was "almost
@@ -407,6 +501,7 @@ inline constexpr float kWarbleHighpassHz  = 100.0f;
 inline constexpr float kWarbleFadeSec     = 0.030f;
 inline constexpr float kWarbleMinDelayMs  = 2.0f;    // hard safety floor (v2)
 inline constexpr float kWarbleMaxDelayMs  = 24.0f;   // hard safety ceiling
+inline constexpr float kWarbleMidDepth    = 0.4f;    // v3: mid blend depth on the same transport (see topology note)
 
 // Minimal RBJ biquad (the warble path's bandwidth limit).
 struct Biquad {
@@ -451,9 +546,15 @@ private:
     float fadeGain_ = 0.0f;
     int latency_ = 0;
 
-    // One ring carrying the SIDE signal only (v10 M/S topology);
-    // the mid never enters the delay line at all.
+    // Two rings on ONE shared transport (v3): the SIDE at full
+    // depth (v10 M/S topology) and the MID at half depth (v3 —
+    // see the topology note above the constants). Both lines are
+    // fed continuously, even while the insert is off, so engaging
+    // crossfades into a live, coherent transport — no fill
+    // transient, no stale burst. (Off still returns the input
+    // bit-exactly; the lines just stay warm.)
     std::vector<float> ringS_;
+    std::vector<float> ringM_;
     int ringSize_ = 0;      // power of two
     int ringMask_ = 0;
     int writePos_ = 0;
@@ -461,6 +562,9 @@ private:
     Biquad lpInS_;   // into the delay (record-side limit)
     Biquad lpOutS_;  // out of the delay (playback-side limit)
     Biquad hpOutS_;  // low-end tidy
+    Biquad lpInM_;   // the mid line wears the same lo-fi limits
+    Biquad lpOutM_;
+    Biquad hpOutM_;
 
     float wowPhase_ = 0.0f, vibPhase_ = 0.0f, fltPhase_ = 0.0f;
     float drift_ = 0.0f, driftTarget_ = 0.0f;
@@ -494,7 +598,7 @@ private:
 //    and its depth is 0 at knob 0 with mod out, so the knob-0
 //    transparency also holds end to end through the chain.
 // ─────────────────────────────────────────────────────────────────────
-inline constexpr float kLimitFadeSec = 0.030f;
+inline constexpr float kLimitFadeSec = 0.045f;
 
 class Chain {
 public:

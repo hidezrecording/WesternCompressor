@@ -190,8 +190,23 @@
 // on the line through the flange's bottom edge —
 // section jewels at (48, 400) / (392, 400). The
 // strip does not move. Everything else as v31.
-// The knob is parked at 7.0 for the screenshot — the documented
-// session endpoint where the crushed path equals the dry path.
+// v33 shots (audio v3 verification): two new tokens —
+//   knob=<0..10>  park the knob at an exact value (default 7.0,
+//                 the documented session endpoint where the
+//                 crushed path equals the dry path). The knob
+//                 series knob=0/2.5/5/7.5/10 proves the v3 flange
+//                 fix: numerals ascend CLOCKWISE and the numeral
+//                 under the fixed index equals the value.
+//   gr=<dB>       magic-eye display override in dB (default 0 —
+//                 the standard A/B/off set keeps the 0 dB rest
+//                 override per Nathan's standing instruction).
+//                 The eye series gr=0/10/25 proves the v3 eye
+//                 fix: the whole disc dims uniformly with GR —
+//                 no wedge/sector at any value.
+// v33 shots: docs/gui-v33-knob-{0,2.5,5,7.5,10}.png,
+// docs/gui-v33-eye-{0,10,25}.png, plus the standard
+// gui-v33-a.png / gui-v33-b.png ("warble") /
+// gui-v33-off.png ("poweroff") set.
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
@@ -204,9 +219,15 @@ int main(int argc, char* argv[]) {
     bool warbleOn = false;
     bool limitIn = true;
     bool powerOn = true;
+    float knobVal = 7.0f;      // v33: knob=<0..10> token
+    float grOverride = 0.0f;   // v33: gr=<dB> token
     for (int i = 2; i < argc; ++i) {
         const juce::String v(argv[i]);
-        if (v == "yellow") {
+        if (v.startsWith("knob=")) {
+            knobVal = v.substring(5).getFloatValue();
+        } else if (v.startsWith("gr=")) {
+            grOverride = v.substring(3).getFloatValue();
+        } else if (v == "yellow") {
             osc72gui::setKnobColour(osc72gui::KnobColour::yellow);
             osc72gui::setBeatenUp(true);
         } else if (v == "green") {
@@ -227,7 +248,7 @@ int main(int argc, char* argv[]) {
     Osc72Processor proc;
     proc.prepareToPlay(48000.0, 512);
     if (auto* p = proc.apvts.getParameter("allTheWay"))
-        p->setValueNotifyingHost(0.7f);
+        p->setValueNotifyingHost(knobVal / 10.0f);
     if (auto* p = proc.apvts.getParameter("warble"))
         p->setValueNotifyingHost(warbleOn ? 1.0f : 0.0f);
     if (auto* p = proc.apvts.getParameter("limit"))
@@ -255,7 +276,9 @@ int main(int argc, char* argv[]) {
     // green against the gold and the lettering. Set BEFORE the
     // editor is created so the editor initialises from it.
     // (v1–v14 stills used a 21 dB override for a part-closed eye.)
-    proc.setGainReductionDisplayOverride(0.0f);
+    // v33: the override value comes from the gr=<dB> token
+    // (default 0 dB — the standard set keeps the rest override).
+    proc.setGainReductionDisplayOverride(grOverride);
 
     std::unique_ptr<juce::AudioProcessorEditor> ed(proc.createEditor());
     ed->setVisible(true);

@@ -13,21 +13,29 @@ void StereoLimiter::prepare(double sampleRate) {
 void StereoLimiter::reset() {
     knobS_ = knobTarget_;
     posEnvL_ = negEnvL_ = posEnvR_ = negEnvR_ = 0.0f;
+    detLpL_ = detLpR_ = 0.0f;
+    detPresence_ = 0.0f;
+    detQuietRun_ = 0;
+    pkEnv_ = 0.0f;
     grDb_ = 0.0f;
     makeupDb_ = 0.0f;
+    makeupAvgDb_ = 0.0f;
+    stressDb_ = 0.0f;
     xfmrInL_.reset(); xfmrInR_.reset();
     tdFast_ = tdSlow_ = 0.0f;
     tdGain_ = 1.0f;
 }
 
-// One detector pole: fast attack, slower hang. The target is the
-// current half-wave excursion (positive part or negative part), so
-// positive and negative peaks are controlled separately — the
-// documented reason the design holds together on asymmetric material
-// and preserves the stereo centre under heavy reduction.
-float StereoLimiter::envStep(float env, float target) const {
+// One detector pole: fast attack, slower hang (the hang tau is
+// supplied per sample — v3 makes it LF-adaptive, see process()).
+// The target is the current half-wave excursion (positive part or
+// negative part), so positive and negative peaks are controlled
+// separately — the documented reason the design holds together on
+// asymmetric material and preserves the stereo centre under heavy
+// reduction.
+float StereoLimiter::envStep(float env, float target, float relTauSec) const {
     const float c = (target > env) ? tauCoef(kDetectAttackTauSec, fs_)
-                                   : tauCoef(kDetectReleaseTauSec, fs_);
+                                   : tauCoef(relTauSec, fs_);
     env += (target - env) * c;
     return env < 1.0e-15f ? 0.0f : env; // denormal flush
 }
@@ -86,10 +94,51 @@ void StereoLimiter::process(float inL, float inR, float& outL, float& outR) {
     // The control signal is derived from the wet-path INPUT (post
     // transformer, post TD), before the gain cell (documented
     // feed-forward topology) — not from the output.
-    posEnvL_ = envStep(posEnvL_, wetInL > 0.0f ? wetInL : 0.0f);
-    negEnvL_ = envStep(negEnvL_, wetInL < 0.0f ? -wetInL : 0.0f);
-    posEnvR_ = envStep(posEnvR_, wetInR > 0.0f ? wetInR : 0.0f);
-    negEnvR_ = envStep(negEnvR_, wetInR < 0.0f ? -wetInR : 0.0f);
+    // v3: the detector feed is high-passed (~75 Hz one-pole,
+    // detector only) so sustained bass cannot park the gain
+    // computer — see the constants block in the header.
+    const float hpC = tauCoef(kDetectHpTauSec, fs_);
+    detLpL_ += (wetInL - detLpL_) * hpC;
+    detLpR_ += (wetInR - detLpR_) * hpC;
+    const float detL = wetInL - detLpL_;
+    const float detR = wetInR - detLpR_;
+    // Presence-keyed hang (v3): the hang stretches to ~12 ms
+    // while programme is present at the detector (within ~14 dB
+    // of the running envelope — sustained tones and hits alike,
+    // so the envelope cannot collapse inside an LF cycle), and
+    // collapses to the 3 ms base the moment programme stops
+    // (presence decays with a 15 ms tau), so the release the
+    // step test — and a listener between hits — hears stays at
+    // full speed. (An LF-content-keyed version was tried first:
+    // its share estimate saturated during decays and slowed the
+    // step release to 63 ms. Presence is the honest
+    // discriminator: it asks "is anything still playing?", not
+    // "what is playing?".)
+    float pkNow = detL < 0.0f ? -detL : detL;
+    { const float aR = detR < 0.0f ? -detR : detR; if (aR > pkNow) pkNow = aR; }
+    {
+        float envPk = posEnvL_;
+        if (negEnvL_ > envPk) envPk = negEnvL_;
+        if (posEnvR_ > envPk) envPk = posEnvR_;
+        if (negEnvR_ > envPk) envPk = negEnvR_;
+        if (pkNow > 0.2f * envPk) { detPresence_ = 1.0f; detQuietRun_ = 0; }
+        else {
+            detPresence_ += (0.0f - detPresence_) * tauCoef(0.006f, fs_);
+            // True-silence cut: programme never sits below 1% of
+            // its own envelope for 2 ms straight (even a 60 Hz
+            // tone crosses that band for only ~0.1 ms at a time),
+            // but a stopped programme does — drop presence at
+            // once so the release bleed runs at full speed.
+            if (pkNow < 0.01f * envPk) {
+                if (++detQuietRun_ > 96) detPresence_ = 0.0f;
+            } else detQuietRun_ = 0;
+        }
+    }
+    const float hangTau = kDetectReleaseTauSec * (1.0f + 3.0f * detPresence_);
+    posEnvL_ = envStep(posEnvL_, detL > 0.0f ? detL : 0.0f, hangTau);
+    negEnvL_ = envStep(negEnvL_, detL < 0.0f ? -detL : 0.0f, hangTau);
+    posEnvR_ = envStep(posEnvR_, detR > 0.0f ? detR : 0.0f, hangTau);
+    negEnvR_ = envStep(negEnvR_, detR < 0.0f ? -detR : 0.0f, hangTau);
 
     // Linked stereo: ONE level for both channels (max of all four
     // half-wave envelopes) -> one gain -> centre image cannot wander.
@@ -99,73 +148,123 @@ void StereoLimiter::process(float inL, float inR, float& outL, float& outR) {
     if (negEnvR_ > level) level = negEnvR_;
 
     // ── Dynamic-ratio gain computer (no ratio control, by design) ─
-    // v2 ballistics: the smoothing pole IS the compressor's attack
-    // and release (slow-to-medium attack — transients punch before
-    // the clamp; super-quick release — the gain rides back between
-    // hits and pumps). Past centre both quicken and the GR ceiling
-    // rises (the Level-Loc lean).
+    // The smoothing pole IS the compressor's attack and release.
+    // v3 ballistics (Nathan: release "five times quicker at
+    // least"): release pole 11 ms (7 ms at max) — see the header
+    // constants — with the vari-mu programme dependence on top:
+    // the stress memory (a ~1.5 s average of the GR itself)
+    // stretches the release up to ~2.6x while the box is being
+    // held down continuously, so (a) isolated hits still recover
+    // at full speed, (b) non-stop slamming doesn't chatter, and
+    // (c) sustained-LF waveform riding at the fast release is
+    // contained. The attack side is untouched by stress.
     const float overDb = linearToDb(level) - thresholdDbForKnob(k);
     const float grTarget = dynamicGainReductionDb(overDb, grCapForKnob(k));
 
+    stressDb_ += (grDb_ - stressDb_) * tauCoef(kStressTauSec, fs_);
+    const float stress01 = clampf(stressDb_ / 50.0f, 0.0f, 1.0f);
+    const float relTau = releaseTauForKnob(k) * (1.0f + kStressStretch * stress01);
+
     const float gc = (grTarget > grDb_) ? tauCoef(attackTauForKnob(k), fs_)
-                                        : tauCoef(releaseTauForKnob(k), fs_);
+                                        : tauCoef(relTau, fs_);
     grDb_ += (grTarget - grDb_) * gc;
     if (grDb_ < 1.0e-9f) grDb_ = 0.0f;
 
-    // ── Overshoot guard (v2) ─────────────────────────────────────
+    // ── Overshoot ceiling (v2 guard, v3 form) ────────────────────
     // The slow attack's price: for the first ~10-20 ms of a loud
-    // hit the programme GR has not yet arrived, and the raw wet
-    // peak would sail past full scale — a flat-top disaster the
-    // v1 build's 0.2 ms attack never allowed. The dangerous case
-    // is a hit after a gap: the fast release has let the GR fall
-    // to ~0 while the slow makeup (300 ms relax) is still tens of
-    // dB up, so the hit enters at a large NET positive gain
-    // (measured without the guard: peak 1.58 on a pre-charged
-    // unit). The detector is feed-forward, so the would-be peak
-    // is known exactly — including the makeup term: require
-    // grDb >= makeupDb + 20*log10(peak x drive) so the net
-    // saturator input can never exceed the clean ceiling (1.0).
-    // The shortfall is pulled in fast (0.3 ms pole). The guard is
-    // silent in steady state (settled GR exceeds the requirement
-    // by tens of dB) and releases through the normal release pole
-    // above, so it cannot chatter on its own. (makeupDb_ here is
-    // last sample's value — it updates below; 1-sample lag is
-    // immaterial at a 300 ms time constant.)
+    // hit the programme GR has not yet arrived, and if the makeup
+    // is still tens of dB up from before a gap, the hit enters at
+    // a large NET positive gain. v3 makes this state NORMAL (auto
+    // makeup = average GR + crank, and the release is now fast
+    // enough that GR sits near 0 in every gap), so the v2 guard's
+    // mechanism — pulling the GR state up with a 0.3 ms pole —
+    // is too slow by two orders of magnitude: measured on the
+    // pre-charged gap scenario, the net gain reached 711x in the
+    // first samples and the output peaked at 1.58 while the pole
+    // was still closing a ~57 dB gap (v2 only passed because its
+    // slow release kept GR parked high through the gap).
+    // v3 form: the ceiling is an INSTANTANEOUS feed-forward cap
+    // on the applied gain, computed at the gain stage below from
+    // THIS sample's pre-TD peak: effGrDb = max(grDb, makeupDb +
+    // 20*log10(peak x drive)), so the saturator input can never
+    // exceed the clean ceiling (1.0) on any sample, however the
+    // states are arranged. The GR state itself is untouched (the
+    // display and the release law see the honest programme GR);
+    // the cap is active only while the programme GR is below the
+    // ceiling requirement — the transient window, plus loud
+    // steady material at high crank, where it acts as the
+    // brickwall a Level-Loc-style box is expected to be.
     // The peak is read PRE-TD (the transformer outputs xinL/xinR),
     // not from wetIn: after a gap the TD's fast envelope needs
     // ~2 ms to climb back, and in that window wetIn is ducked by
     // ~20 dB while the net gain is at its highest — a wetIn-based
-    // guard wakes up late and the ducked residue, amplified by
-    // the full net gain, still overshoots (measured: 1.58). The
-    // TD only ever cuts (gain <= 1), so the pre-TD peak is the
-    // conservative, correct basis: it is the level the gain cell
-    // will see the moment the TD lets go.
+    // ceiling wakes up late. The TD only ever cuts (gain <= 1),
+    // so the pre-TD peak is the conservative, correct basis.
     const float satD = satDriveForKnob(k);
+    // Ceiling basis: a PEAK HOLD of the pre-TD signal —
+    // instantaneous up, 25 ms release — not the raw sample and
+    // not a pole envelope. The first v3 cut used the raw sample
+    // and the ceiling then modulated the gain within every cycle
+    // of a steady tone (gain proportional to 1/|x| — measured
+    // 36% THD on a 60 Hz tone at max). A 50 µs attack pole was
+    // tried next: it lagged a rising transient edge by ~17%
+    // (1.8 dB), enough to let a cold hit reach 1.054. The peak
+    // hold is exact on both sides of the problem: on a rising
+    // edge it IS the max-so-far (the value a peak ceiling must
+    // answer to), and on a steady tone it stays pinned at the
+    // cycle peak across the whole cycle, so steady tones are
+    // limited, not reshaped.
     {
         const float pkL = xinL < 0.0f ? -xinL : xinL;
         const float pkR = xinR < 0.0f ? -xinR : xinR;
-        const float pk = (pkL > pkR ? pkL : pkR) * satD;
-        if (pk > 0.05f) {
-            const float guardDb = makeupDb_ + linearToDb(pk);
-            if (guardDb > grDb_)
-                grDb_ += (guardDb - grDb_) * tauCoef(0.0003f, fs_);
+        const float pkIn = pkL > pkR ? pkL : pkR;
+        if (pkIn > pkEnv_) pkEnv_ = pkIn;
+        else {
+            pkEnv_ += (pkIn - pkEnv_) * tauCoef(0.025f, fs_);
+            if (pkEnv_ < 1.0e-15f) pkEnv_ = 0.0f;
         }
     }
+    const float pkSat = pkEnv_ * satD;
 
-    // Makeup follows the SLOW average of the gain reduction, so the
-    // crushed path stays hot and dense without chasing peaks (which
-    // would undo the peak control). 0.8 factor, capped (cap rises
-    // slightly in the top half of the knob with the deeper squash).
-    // The makeup ENGAGES with a 120 ms rise and relaxes with the
-    // documented 300 ms tau: settled density is unchanged, but a
-    // burst after silence blooms back within ~100 ms instead of
-    // staying ducked while a 300 ms average fills.
+    // AUTO MAKEUP (v3 form — Nathan's explicit ask on 1.0.2).
+    // makeupAvgDb_ is a slow average (120 ms rise / 300 ms relax)
+    // of the PROGRAMME GR — the gain computer's curve output
+    // grTarget, BEFORE the overshoot guard's additions. The
+    // applied makeup is that average (FULL compensation, factor
+    // 1.0 — v1/v2 used 0.8 of the lagged total) PLUS the knob-tied
+    // crank (makeupCrankDbForKnob), capped. It tracks grTarget
+    // rather than the smoothed grDb_ because the smoother's slow
+    // attack / fast release biases its time-average LOW on
+    // exactly the rhythmic material that pumps (the state spends
+    // the gaps near zero), which would under-compensate where it
+    // matters; the curve output's average is the honest settled
+    // depth. (An earlier v3 cut tracked the instantaneous total
+    // and, through the old pole guard, ratcheted to 78 dB — the
+    // failure that forced the ceiling's instantaneous form.)
+    // Because the makeup moves only at average speed, the
+    // hit-rate pumping trajectory passes at full depth — the
+    // makeup sets the loudness the pumping plays around, and
+    // that loudness now RISES with the knob instead of falling
+    // (v2 measured net −1.8 dB at centre falling to −7.4 dB at
+    // max on program; see docs/audio-v3-diagnosis.md). The
+    // ceiling below checks peaks against this full cranked
+    // makeup on every sample.
+    const float mkAvgTau = (grTarget > makeupAvgDb_) ? 0.120f : kMakeupTauSec;
+    makeupAvgDb_ += (grTarget - makeupAvgDb_) * tauCoef(mkAvgTau, fs_);
+    makeupDb_ = makeupAvgDb_ + makeupCrankDbForKnob(k);
     const float mkCap = makeupCapForKnob(k);
-    const float mkTarget = grDb_ * 0.8f > mkCap ? mkCap : grDb_ * 0.8f;
-    const float mkTau = (mkTarget > makeupDb_) ? 0.120f : kMakeupTauSec;
-    makeupDb_ += (mkTarget - makeupDb_) * tauCoef(mkTau, fs_);
+    if (makeupDb_ > mkCap) makeupDb_ = mkCap;
 
-    const float gainLin = dbToLinear(-grDb_ + makeupDb_);
+    // Applied gain: programme GR, raised instantaneously to the
+    // overshoot ceiling's requirement whenever that is higher
+    // (see the ceiling note above). pkSat <= ~0.001 needs no cap
+    // (the requirement is far below any real GR there).
+    float effGrDb = grDb_;
+    if (pkSat > 0.001f) {
+        const float ceilGrDb = makeupDb_ + linearToDb(pkSat);
+        if (ceilGrDb > effGrDb) effGrDb = ceilGrDb;
+    }
+    const float gainLin = dbToLinear(-effGrDb + makeupDb_);
 
     // ── Parallel blend — the knob IS the mix (v9 law) ──────────────
     // Dry path passes untouched. Wet path = transformed, TD'd,
@@ -221,12 +320,16 @@ void WarbleChain::prepare(double sampleRate) {
     ringSize_ = sz;
     ringMask_ = sz - 1;
     ringS_.assign((size_t)sz, 0.0f);
+    ringM_.assign((size_t)sz, 0.0f);
     latency_ = (int)std::lround((double)kWarbleBaseDelayMs * 0.001 * fs_);
 
     const float q = 0.7071f; // two of these in series = 4th-order rolloff
     lpInS_.setLowpass(fs_, kWarbleLowpassHz, q);
     lpOutS_.setLowpass(fs_, kWarbleLowpassHz, q);
     hpOutS_.setHighpass(fs_, kWarbleHighpassHz, q);
+    lpInM_.setLowpass(fs_, kWarbleLowpassHz, q);
+    lpOutM_.setLowpass(fs_, kWarbleLowpassHz, q);
+    hpOutM_.setHighpass(fs_, kWarbleHighpassHz, q);
     reset();
 }
 
@@ -239,10 +342,14 @@ void WarbleChain::reset() {
 
 void WarbleChain::resetChainState() {
     std::fill(ringS_.begin(), ringS_.end(), 0.0f);
+    std::fill(ringM_.begin(), ringM_.end(), 0.0f);
     writePos_ = 0;
     lpInS_.reset();
     lpOutS_.reset();
     hpOutS_.reset();
+    lpInM_.reset();
+    lpOutM_.reset();
+    hpOutM_.reset();
     wowPhase_ = vibPhase_ = fltPhase_ = 0.0f;
     drift_ = driftTarget_ = 0.0f;
     driftHold_ = 0;
@@ -254,12 +361,13 @@ void WarbleChain::setEnabled(bool on) {
     if (on == target_) return;
     target_ = on;
     if (on) {
-        if (state_ == State::off) {
-            // Fresh engage: clear the line so nothing stale can
-            // burst out; the 30 ms crossfade covers the fill time.
-            resetChainState();
+        // v3: the lines are fed continuously while off (see
+        // process()), so the transport is already live and
+        // coherent — engaging just crossfades into it. (v1/v2
+        // cleared the line here; with warm lines there is
+        // nothing stale to clear.)
+        if (state_ == State::off)
             fadeGain_ = 0.0f;
-        }
         state_ = State::fadingIn;
     } else {
         if (state_ == State::on || state_ == State::fadingIn)
@@ -313,20 +421,13 @@ float WarbleChain::readDelay(const float* ring, float delaySamples) const {
 }
 
 void WarbleChain::process(float inL, float inR, float& outL, float& outR) {
-    if (state_ == State::off) {
-        // Fully out of the path: bit-exact copy, no other work.
-        outL = inL;
-        outR = inR;
-        return;
-    }
-
-    // ── Mid/side (v10): centre dry, side takes the transport ──────
+    // ── Mid/side (v10 topology, v3 mid share) ─────────────────────
     // The (L+R)/2, (L−R)/2 encode is exactly invertible, so nothing
-    // is lost by working here. The mid is NEVER written into the
-    // delay line and never filtered: the wet signal is the untouched
-    // mid plus/minus the warbled side. For a mono input the side is
-    // exactly 0, the delay line and filters process exact zeros, and
-    // the wet signal equals the input sample for sample.
+    // is lost by working here. The SIDE rides the transport at full
+    // depth; the MID takes a half-depth share of the SAME transport
+    // (v3 — see the header topology note for why the v10 dry-centre
+    // guarantee was retired). Both lines are written on EVERY call,
+    // including while off, so the transport is always live.
     const float mid  = (inL + inR) * 0.5f;
     const float side = (inL - inR) * 0.5f;
 
@@ -339,12 +440,24 @@ void WarbleChain::process(float inL, float inR, float& outL, float& outR) {
     }
 
     ringS_[(size_t)writePos_] = lpInS_.process(side);
+    ringM_[(size_t)writePos_] = lpInM_.process(mid);
     const float wetSide = hpOutS_.process(
         lpOutS_.process(readDelay(ringS_.data(), delaySamples)));
+    const float wetMidLine = hpOutM_.process(
+        lpOutM_.process(readDelay(ringM_.data(), delaySamples)));
     writePos_ = (writePos_ + 1) & ringMask_;
 
-    const float wetL = mid + wetSide;
-    const float wetR = mid - wetSide;
+    if (state_ == State::off) {
+        // Fully out of the path: bit-exact copy. (The transport
+        // above still ran, so a later engage is click-free.)
+        outL = inL;
+        outR = inR;
+        return;
+    }
+
+    const float midBlend = mid + kWarbleMidDepth * (wetMidLine - mid);
+    const float wetL = midBlend + wetSide;
+    const float wetR = midBlend - wetSide;
 
     // Crossfade bookkeeping (30 ms linear ramp).
     const float step = 1.0f / (kWarbleFadeSec * (float)fs_);
@@ -355,9 +468,12 @@ void WarbleChain::process(float inL, float inR, float& outL, float& outR) {
         fadeGain_ -= step;
         if (fadeGain_ <= 0.0f) { fadeGain_ = 0.0f; state_ = State::off; }
     }
-    // Subtractive blend form: out = in + g·(wet − in) is exact
-    // whenever wet == in (mono input, centre content), at ANY fade
-    // position — the dry centre cannot be perturbed by the fade.
+    // Subtractive blend form: out = in + g·(wet − in). (In v10
+    // this was also exact for mono/centre content at any fade
+    // position; with the v3 mid share the wet path genuinely
+    // differs from the input there too — the 30 ms ramp is what
+    // keeps the engage click-free now, and the warm lines keep
+    // the wet signal coherent from the first faded sample.)
     const float g = fadeGain_;
     outL = inL + (wetL - inL) * g;
     outR = inR + (wetR - inR) * g;

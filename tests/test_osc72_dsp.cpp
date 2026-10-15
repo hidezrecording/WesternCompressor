@@ -254,7 +254,13 @@ int main() {
     {
         Meas m = runStereo(1.0f, 0.99f, 0.99f, 200.0f);
         std::snprintf(b, sizeof b, "peak out=%.3f (in 0.99), meanGR=%.1f dB", m.peakL, m.meanGr);
-        check(m.peakL < 0.85f, "knob10 peak controlled, no flat-top blowout", b);
+        // v3 re-pin (was < 0.85): with the auto makeup CRANKING
+        // (Nathan's ask), loud steady material at max sits ON the
+        // overshoot ceiling by design — the wet path runs at the
+        // saturator's clean ceiling (sat(1.0) = 0.909) instead of
+        // under the old v1/v2 makeup regime. The pin is now the
+        // ceiling itself: never above ~0.95, still clearly hot.
+        check(m.peakL < 0.95f, "knob10 peak controlled at the ceiling, no blowout", b);
         check(m.peakL > 0.2f, "knob10 still hot (makeup working)", b);
     }
 
@@ -289,7 +295,18 @@ int main() {
         const float ratioR = m.rmsR / (0.009f / (float)std::sqrt(2.0));
         std::snprintf(b, sizeof b, "gain L=%.4f R=%.4f (diff %.2f%%)",
                       ratioL, ratioR, 100.0 * std::fabs(ratioL - ratioR) / ratioL);
-        check(std::fabs(ratioL - ratioR) / ratioL < 0.05f, "linked GR: equal gain L/R", b);
+        // The GR itself is a single linked state (one gainLin is
+        // applied to both channels — see StereoLimiter::process);
+        // what differs per channel is the per-channel transformer
+        // colour around it (the loud channel's core is driven
+        // harder, so its harmonic RMS share differs). That spread
+        // was 0.40% at v1 levels, 2.19% at v9 depth, ~5% at v2 —
+        // and grows again in v3 because the cranked makeup runs
+        // the wet path ~8 dB hotter into the same colour stages
+        // (measured 8.4-11.0% across the v3 tuning rounds). The
+        // pin allows the colour spread while still catching any
+        // real linkage break (which would read as tens of %).
+        check(std::fabs(ratioL - ratioR) / ratioL < 0.12f, "linked GR: equal gain L/R", b);
     }
 
     // ── 6. Mix law (v9): the knob IS the mix ────────────────────────
@@ -542,44 +559,65 @@ int main() {
               "limit OUT: eye GR = 0 while limiter still computes GR", b);
         check(chain.latencySamples() == 0, "limit OUT + mod OUT: zero latency", b);
 
-        // Toggling limit mid-tone must be click-free (30 ms fade).
+        // Toggling limit mid-tone must be click-free (45 ms fade).
+        // v3 measurement note: the raw max-step metric this check
+        // used to pin (< 0.05 across the whole feed) conflates the
+        // PROCESSED WAVEFORM's own slope with toggle clicks — at
+        // knob 0.85 with v3's cranked makeup the steady limited
+        // tone's own max sample step is ~0.070 with NO toggling at
+        // all (measured directly, settle phase). The honest check
+        // is relative: the steps inside the fade windows may not
+        // exceed the no-toggle baseline by more than a small
+        // margin (a click is a step ABOVE the waveform's slope).
         osc72::Chain chain2;
         chain2.prepare(kFs); chain2.setKnob(0.85f);
-        float maxStep = 0.0f, prevOut = 0.0f;
-        auto feed2 = [&](int n) {
+        float prevOut = 0.0f;
+        auto feed2 = [&](int n, float& mx) {
             for (int i = 0; i < n; ++i) {
                 float s = 0.5f * (float)std::sin(2.0 * kPi * 440.0 * i / kFs);
                 float a, c; chain2.process(s, s, a, c);
-                float st = std::fabs(a - prevOut); if (st > maxStep) maxStep = st;
+                float st = std::fabs(a - prevOut); if (st > mx) mx = st;
                 prevOut = a;
             }
         };
-        feed2(24000);              // settle, limit in
+        float stepSettle = 0.0f, stepFade = 0.0f;
+        feed2(24000, stepSettle);  // settle, limit in (baseline)
         chain2.setLimitIn(false);
-        feed2(24000);              // fade out mid-tone
+        feed2(24000, stepFade);    // fade out mid-tone
         chain2.setLimitIn(true);
-        feed2(24000);              // fade back in mid-tone
-        std::snprintf(b, sizeof b, "max sample step across limit toggles=%.4f", maxStep);
-        check(maxStep < 0.05f, "limit: engage/disengage click-free", b);
+        feed2(24000, stepFade);    // fade back in mid-tone
+        std::snprintf(b, sizeof b, "max step: settle(baseline)=%.4f fade windows=%.4f",
+                      stepSettle, stepFade);
+        check(stepFade < stepSettle + 0.02f, "limit: engage/disengage click-free", b);
     }
 
-    // ── 15. Mod v10: hard L/R warble, centre stays DRY (mid/side) ──
-    // Supersedes the v8 "degraded width" checks above all recognition:
-    // Nathan's note (2026-10-14) reverses that brief. The insert now
-    // warbles the SIDE component only; the MID passes dry. Width
-    // narrowing and the mono-correlation-drop target are GONE — on a
-    // mono feed mod in must now be indistinguishable from mod out.
+    // ── 15. Mod: hard L/R warble (v10 mid/side; v3 mid tap) ────────
+    // v10 (Nathan, 2026-10-14): the insert warbles the SIDE only;
+    // the MID passed dry — and on the shipped 1.0.2 Nathan heard
+    // NO effect whatsoever, because on mono/centre-anchored
+    // material there was literally nothing to hear (mono through
+    // MOD was bit-exact BY DESIGN). v3 supersedes the "mid passes
+    // dry" guarantee: the mid now rides the SAME transport as a
+    // 0.4-depth blend (see the topology note in Osc72Dsp.h), so
+    // mono and centre content warble audibly, while the side
+    // keeps the full-depth hard L/R swing. The trade-off is
+    // documented in docs/audio-v3-diagnosis.md, Issue 1.
     {
-        // (a) Centre stays dry, end to end: a mono feed through the
-        // full Chain is BIT-EXACT with mod in vs mod out, limiter
-        // genuinely engaged at centre. Both chains settle identically
-        // (mod out, 1 s); one then flips mod in — every following
-        // sample, including across the 30 ms engage fade, must match.
+        // (a) Mono now warbles, end to end, through the full
+        // Chain. Both chains settle identically (mod out, 1 s —
+        // asserted bit-exact over the last half-second before the
+        // flip, so the control is proven); one then flips mod in.
+        // After the engage fade settles, the in-vs-out DIFFERENCE
+        // on a mono feed must be a substantial fraction of the
+        // signal itself (v10 measured exactly 0.000 — the bug
+        // Nathan heard). The limiter is genuinely engaged at
+        // centre throughout, so this is the real product path.
         osc72::Chain cOff, cOn;
         cOff.prepare(kFs); cOn.prepare(kFs);
         cOff.setKnob(0.5f); cOn.setKnob(0.5f); // CENTRE
-        bool exact = true;
+        bool exactBefore = true;
         double grSum = 0; int grN = 0;
+        double diffSq = 0, sigSq = 0;
         for (int i = 0; i < (int)(3.0 * kFs); ++i) {
             if (i == (int)(1.0 * kFs)) cOn.setModIn(true);
             const float s = 0.65f * (float)std::sin(2.0 * kPi * 220.0 * i / kFs)
@@ -588,15 +626,22 @@ int main() {
             float aL, aR, bL, bR;
             cOff.process(s, s, aL, aR);
             cOn.process(s, s, bL, bR);
-            if (i >= (int)(1.0 * kFs)) {
-                if (aL != bL || aR != bR) exact = false; // exact equality
+            if (i >= (int)(0.5 * kFs) && i < (int)(1.0 * kFs)) {
+                if (aL != bL || aR != bR) exactBefore = false;
+            }
+            if (i >= (int)(1.5 * kFs)) {
+                const double d = (double)bL - aL;
+                diffSq += d * d; sigSq += (double)aL * aL;
                 grSum += cOn.limiter().gainReductionDb(); ++grN;
             }
         }
         const float meanGrMono = (float)(grSum / grN);
-        std::snprintf(b, sizeof b, "mean limiter GR during check=%.2f dB", meanGrMono);
-        check(exact, "mod v10: mono through Chain bit-exact (centre dry)", b);
-        check(meanGrMono > 5.0f, "mod v10: limiter genuinely engaged at centre", b);
+        const double diffRatio = std::sqrt(diffSq / sigSq);
+        std::snprintf(b, sizeof b, "mono diff/signal RMS=%.3f (v10: 0.000), mean limiter GR=%.2f dB",
+                      diffRatio, meanGrMono);
+        check(exactBefore, "mod v3: control chains bit-exact before the flip", b);
+        check(diffRatio > 0.15, "mod v3: MONO now audibly warbled through the Chain", b);
+        check(meanGrMono > 5.0f, "mod v3: limiter genuinely engaged at centre", b);
 
         // (b) Width, at the insert itself: a stereo feed built as
         // mid + side tones. MOD out passes it bit-exactly (side == in,
@@ -674,8 +719,17 @@ int main() {
         std::snprintf(b, sizeof b, "mid RMS out/in: off=%.4f on=%.4f (in %.4f)",
                       wOff.midRmsOut / wOff.midRmsIn, wOn.midRmsOut / wOn.midRmsIn,
                       wOn.midRmsIn);
-        check(std::fabs(wOn.midRmsOut - wOn.midRmsIn) / wOn.midRmsIn < 0.001,
-              "mod v10: MID untouched by the warble (RMS < 0.1% off)", b);
+        // v3 re-pin (v10 demanded the mid RMS within 0.1% — the
+        // dry-mid guarantee, now retired). The mid rides the
+        // transport as a 0.6 dry + 0.4 delayed blend; on a
+        // sustained tone the dry/delayed pair combs, and the
+        // long-run RMS of the blend is sqrt(0.6^2 + 0.4^2) = 0.72
+        // of dry by construction (measured 0.747). The pin keeps
+        // the mid PRESENT and bounded (never gutted, never
+        // boosted) — the centre stays the anchor of the image in
+        // level terms while audibly moving in time.
+        check(wOn.midRmsOut / wOn.midRmsIn > 0.65 && wOn.midRmsOut / wOn.midRmsIn < 1.05,
+              "mod v3: MID rides the transport (comb-bounded, still anchored)", b);
         std::snprintf(b, sizeof b, "side swing std: off=%.4f on=%.4f; side RMS CV on=%.3f",
                       wOff.swingStd, wOn.swingStd, wOn.sideCv);
         // v2 note: this correlation-std metric SATURATES once the
@@ -688,10 +742,10 @@ int main() {
         // depth itself is pinned directly by the delay-span check
         // below and by group 9's pitch swing.
         check(wOn.swingStd > 0.15 && wOn.swingStd > 5.0 * wOff.swingStd,
-              "mod v10: side swings hard in time (wide L/R warble)", b);
+              "mod v3: side swings hard in time (wide L/R warble)", b);
         std::snprintf(b, sizeof b, "side RMS ratio on=%.3f", wOn.sideRmsRatio);
         check(wOn.sideRmsRatio > 0.7 && wOn.sideRmsRatio < 1.3,
-              "mod v10: side survives the transport (level sane)", b);
+              "mod v3: side survives the transport (level sane)", b);
         // v2: the arrival-time swing itself, read off the running
         // delay over 6 s of pure-side feed. v1 depth spanned
         // 9.46..14.67 ms (5.2 ms); v2 must span several-fold more.
@@ -739,21 +793,23 @@ int main() {
         std::snprintf(b, sizeof b,
                       "tail energy vs knob 0: 0.25:%+.1f dB  0.5:%+.1f dB  1.0:%+.1f dB",
                       d25, d50, d100);
-        // v2 re-pin (was: strict monotonic fall of output tail
-        // energy). The TD's own cut is unchanged and still pinned
-        // below (mean tail cut 2.8 / 6.8 / 16.6 dB at 0.25/0.5/1.0,
-        // monotonic, 0.00 dB during the burst). What changed is
-        // the limiter behind it: at centre the v2 depth (27 dB GR
-        // + slow makeup) legitimately forces the dried tail back
-        // UP to ~the dry energy — that refill is the design
-        // ("dry the ambience out, then the compressor forces the
-        // sustain back, flattened"), so at 0.25/0.5 the net tail
-        // energy now lands within ~0.5 dB of dry instead of below
-        // it. Pin exactly that, and keep the max-travel proof
-        // that the TD wins outright at knob 1.0.
-        check(d25 < 0.5 && d50 < 0.5 && d100 < d50,
-              "TD: tail energy dried or refilled-flat, never bloated", b);
-        check(d100 < -6.0, "TD: sustain cut substantial at max", b);
+        // v3 re-pin (v2 pinned "refilled-flat, never bloated",
+        // with the TD winning outright at max). What changed is
+        // the limiter behind the TD: v3's AUTO MAKEUP cranks —
+        // full average-GR compensation PLUS a knob-tied crank —
+        // so the dried tail is now deliberately forced back UP,
+        // swelling past dry at the top of the travel (measured
+        // −0.3 / +1.6 / +6.8 dB at 0.25 / 0.5 / 1.0). That swell
+        // IS Nathan's requested behaviour ("as you push, the
+        // crushed signal comes UP"), so the pin now reads: low
+        // travel stays near-flat, the swell is present and
+        // bounded at max, and it grows with the knob. The TD's
+        // own cut is unchanged and still pinned below (mean tail
+        // cut 2.8 / 6.8 / 16.6 dB, monotonic, 0.00 dB during the
+        // burst) — the drying still happens; the makeup then
+        // re-presents the dried tail louder, flattened.
+        check(d25 < 1.0 && d50 < 2.5 && d100 > 3.0 && d100 < 12.0 && d100 > d50,
+              "TD: tail dried by the TD, then cranked back UP by the auto makeup", b);
         check(m25.meanTailCutDb < m50.meanTailCutDb && m50.meanTailCutDb < m100.meanTailCutDb
               && m100.meanTailCutDb > 12.0f,
               "TD: own sustain cut grows monotonically with knob", b);
@@ -880,7 +936,7 @@ int main() {
     // pin the law's shape; the numbers print for the report.
     {
         const float ks[5] = { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f };
-        std::printf("  law table (mix = v9 law; squash = v2 retune): knob | wet%% | meanGR(std) | TD tail cut\n");
+        std::printf("  law table (mix = v9 law; squash = v3 retune): knob | wet%% | meanGR(std) | TD tail cut\n");
         float prevGr = -1.0f;
         bool mono = true;
         for (int i = 0; i < 5; ++i) {
@@ -895,16 +951,18 @@ int main() {
         check(mono, "law table: GR monotonic across the full travel", "");
     }
 
-    // ── 20. v2 ballistics + PUMPING PROOF ───────────────────────────
-    // Nathan's verdict on the shipped 1.0.0 (audio v1): the limiter
-    // "feels almost flat… barely hear it". Measured v1 ballistics
-    // on the protocols below: attack t63 0.7 ms (centre) / 0.4 ms
-    // (max); release t63 170 / 471 ms; pump recovery at max only
-    // 24.0 dB of a 47.1 dB depth (the gain parked crushed between
-    // hits). v2 must measure: slow-to-medium attack, super-quick
-    // release, and near-total inter-hit recovery — the pump is
-    // proven here in dB, not asserted. Full before/after table in
-    // docs/audio-v2-retune.md.
+    // ── 20. Ballistics + PUMPING PROOF (v3 pins) ────────────────────
+    // History: v1 measured attack t63 0.7/0.4 ms and release t63
+    // 170/471 ms (centre/max) — "feels almost flat". v2 retuned to
+    // release t63 68/78 ms. Nathan on 1.0.2 (v2): the release is
+    // "way too slow — it needs to be like five times quicker at
+    // least to pump", and the pumping on continuous material was
+    // "lost". v3 pins: release t63 in the teens at centre and the
+    // twenties at max on this step protocol (the step number
+    // includes bleeding the detector envelope down through the
+    // settled over-range, which is ~2.4x deeper at max — the
+    // PROGRAMME release, proven by the burst test below and the
+    // loop test in group 21, recovers fully between hits).
     {
         StepMeas sC = runStep(0.5f);
         StepMeas sM = runStep(1.0f);
@@ -912,16 +970,16 @@ int main() {
                       "centre: settled %.1f dB, atk t63 %.1f ms, rel t63 %.1f ms t90 %.1f ms",
                       sC.settledGr, sC.atk63, sC.rel63, sC.rel90);
         check(sC.atk63 > 10.0f && sC.atk63 < 35.0f,
-              "v2 attack: slow-to-medium at centre (transients punch)", b);
-        check(sC.rel63 > 30.0f && sC.rel63 < 120.0f && sC.rel90 < 200.0f,
-              "v2 release: super-quick recovery at centre", b);
+              "v3 attack: slow-to-medium at centre (transients punch)", b);
+        check(sC.rel63 > 8.0f && sC.rel63 < 25.0f && sC.rel90 < 45.0f,
+              "v3 release: ~5x faster than v2 at centre (was 68/133 ms)", b);
         std::snprintf(b, sizeof b,
                       "max: settled %.1f dB, atk t63 %.1f ms, rel t63 %.1f ms t90 %.1f ms",
                       sM.settledGr, sM.atk63, sM.rel63, sM.rel90);
         check(sM.atk63 > 5.0f && sM.atk63 < 20.0f,
-              "v2 attack: slow-to-medium at max", b);
-        check(sM.rel63 > 30.0f && sM.rel63 < 130.0f && sM.rel90 < 200.0f,
-              "v2 release: super-quick recovery at max (was 471/909 ms)", b);
+              "v3 attack: slow-to-medium at max", b);
+        check(sM.rel63 > 12.0f && sM.rel63 < 40.0f && sM.rel90 < 60.0f,
+              "v3 release: ~3-4x faster than v2 at max (was 78/111 ms)", b);
 
         PumpMeas pC = runPump(0.5f);
         PumpMeas pM = runPump(1.0f);
@@ -930,15 +988,15 @@ int main() {
                       pC.depth, pC.residual, pC.recovery,
                       pC.depth > 0 ? 100.0 * pC.recovery / pC.depth : 0.0, pC.onsetPeak);
         check(pC.depth > 20.0f && pC.recovery > 15.0f && pC.recovery > 0.7f * pC.depth,
-              "v2 PUMP: centre hits deep, gain surges back between hits", b);
+              "v3 PUMP: centre hits deep, gain surges back between hits", b);
         std::snprintf(b, sizeof b,
                       "max: depth %.1f dB, residual %.2f dB, recovery %.1f dB (%.0f%%), burst-period peak %.3f",
                       pM.depth, pM.residual, pM.recovery,
                       pM.depth > 0 ? 100.0 * pM.recovery / pM.depth : 0.0, pM.onsetPeak);
         check(pM.depth > 55.0f && pM.recovery > 40.0f && pM.recovery > 0.7f * pM.depth,
-              "v2 PUMP: max slams and fully recovers between hits", b);
+              "v3 PUMP: max slams and fully recovers between hits", b);
         check(pC.onsetPeak < 0.95f && pM.onsetPeak < 0.95f,
-              "v2 pump: no overshoot disaster inside the pump pattern", b);
+              "v3 pump: no overshoot disaster inside the pump pattern", b);
 
         // Slow-attack overshoot guard: pre-charged limiter, gap,
         // full-scale hit (see runOvershoot). Unguarded this peaked
@@ -953,7 +1011,143 @@ int main() {
                       "hit peaks: cold %.3f, max+100 ms gap %.3f, max+380 ms gap %.3f, centre+100 ms gap %.3f",
                       oCold, oG100, oG380, oC100);
         check(oCold < 0.95f && oG100 < 0.95f && oG380 < 0.95f && oC100 < 0.95f,
-              "v2 guard: full-scale hits after gaps stay under the ceiling", b);
+              "v3 guard: full-scale hits after gaps stay under the ceiling", b);
+    }
+
+    // ── 21. CONTINUOUS-MATERIAL PUMP (v3 — the "lost" test) ─────────
+    // The burst test (group 20) has silence between hits; Nathan's
+    // "lost" verdict was about CONTINUOUS material, where v2's GR
+    // sat on a bass-held floor and the slow makeup levelled what
+    // movement remained. This is the diagnosis loop, formalised:
+    // 120 BPM — kick on quarters (pitch-dropping thump + 2 ms
+    // broadband click), snare on 2 & 4 (noise burst + 190 Hz
+    // body), hats on 8ths alternating pan, a CONTINUOUS 55 Hz
+    // bass line under everything. 8 s per knob; 10 ms windowed
+    // envelopes; steady state (first 2 s dropped). Metrics: GR
+    // trajectory range (p95-p5 of per-block GR) and the NET gain
+    // trajectory (-GR + makeup, from the limiter's own reports)
+    // — range, and the net MEAN (the auto-makeup crank must make
+    // it RISE with the knob; v2 measured -1.8 dB at centre
+    // FALLING to -7.4 dB at max on this material).
+    {
+        auto loopRun = [](float knob, float& grRange, float& grMean,
+                          float& netRange, float& netMean, float& wetPeak) {
+            osc72::StereoLimiter lim; lim.prepare(kFs); lim.setKnob(knob);
+            const int beat = (int)(0.5 * kFs);
+            std::vector<float> grs, nets;
+            float pk = 0.0f;
+            long long rng = 12345;
+            auto noise = [&]() {
+                rng = (rng * 1103515245LL + 12345LL) & 0x7fffffffLL;
+                return (float)(rng / (double)0x40000000 - 1.0);
+            };
+            double phase = 0.0;
+            for (int bar = 0; bar < 16; ++bar) {
+                for (int b8 = 0; b8 < 8; ++b8) {
+                    const int n8 = beat / 2;
+                    for (int i = 0; i < n8; ++i) {
+                        const long long t = (long long)bar * beat * 2 + (long long)b8 * n8 + i;
+                        const double tt = t / kFs;
+                        const double inBeat = (t % beat) / kFs;
+                        const double in8 = i / kFs;
+                        double kick = 0, snare = 0, hat = 0;
+                        const double fKick = 120.0 - 70.0 * std::min(1.0, inBeat / 0.09);
+                        if (inBeat < 0.25)
+                            kick = 0.95 * std::sin(2.0 * kPi * fKick * inBeat)
+                                 * std::exp(-inBeat / 0.055);
+                        if (inBeat < 0.002) kick += 0.5 * noise(); // onset click
+                        if ((b8 % 4) == 2 && in8 < 0.18)
+                            snare = (0.55 * noise() * std::exp(-in8 / 0.05)
+                                   + 0.45 * std::sin(2.0 * kPi * 190.0 * in8)
+                                     * std::exp(-in8 / 0.06));
+                        if (in8 < 0.05)
+                            hat = 0.30 * noise() * std::exp(-in8 / 0.015);
+                        phase += 2.0 * kPi * 55.0 / kFs;
+                        const double bass = 0.55 * std::sin(phase);
+                        const double mono = kick + snare + bass;
+                        const float inL = (float)(mono + ((b8 % 2) ? hat : hat * 0.35));
+                        const float inR = (float)(mono + ((b8 % 2) ? hat * 0.35 : hat));
+                        float oL, oR; lim.process(inL, inR, oL, oR);
+                        // Peak in STEADY STATE only (t >= 2 s, the
+                        // stats window): at t=0 the knob slew is
+                        // still near zero and the raw input (kick +
+                        // click + bass, peaking ~1.5+) passes at
+                        // near-dry weight — that is the input's own
+                        // peak, not a ceiling failure.
+                        if (t >= (long long)(2.0 * kFs)) {
+                            const float aL = std::fabs(oL), aR = std::fabs(oR);
+                            if (aL > pk) pk = aL; if (aR > pk) pk = aR;
+                        }
+                        (void)tt;
+                        if (t >= (long long)(2.0 * kFs) && (t % 480) == 0) {
+                            grs.push_back(lim.gainReductionDb());
+                            nets.push_back(lim.appliedMakeupDb() - lim.gainReductionDb());
+                        }
+                    }
+                }
+            }
+            auto pct = [](std::vector<float> v, double p, double& mean) {
+                std::sort(v.begin(), v.end());
+                double s = 0; for (float x : v) s += x; mean = s / (double)v.size();
+                auto at = [&](double q) { return (double)v[(size_t)(q * (v.size() - 1))]; };
+                return (float)(at(0.95) - at(0.05));
+            };
+            double m1, m2;
+            grRange = pct(grs, 0.95, m1); grMean = (float)m1;
+            netRange = pct(nets, 0.95, m2); netMean = (float)m2;
+            wetPeak = pk;
+        };
+        float grR05, grM05, netR05, netM05, pk05;
+        float grR10, grM10, netR10, netM10, pk10;
+        loopRun(0.5f, grR05, grM05, netR05, netM05, pk05);
+        loopRun(1.0f, grR10, grM10, netR10, netM10, pk10);
+        std::snprintf(b, sizeof b,
+                      "centre: GR mean %.1f range %.1f dB | NET mean %+.1f range %.1f dB | out peak %.2f (v2: GR range 9.0, NET mean -1.8 range 2.3)",
+                      grM05, grR05, netM05, netR05, pk05);
+        check(grR05 > 10.0f, "v3 LOOP: GR trajectory rides on continuous material (centre)", b);
+        check(netR05 > 3.5f, "v3 LOOP: net gain pumps, not auto-levelled flat (centre)", b);
+        check(netM05 > -1.0f, "v3 LOOP: auto makeup holds level at centre", b);
+        std::snprintf(b, sizeof b,
+                      "max: GR mean %.1f range %.1f dB | NET mean %+.1f range %.1f dB | wet peak %.2f (v2: NET mean -7.4)",
+                      grM10, grR10, netM10, netR10, pk10);
+        check(netM10 > 2.0f, "v3 LOOP: pushing the knob CRANKS the crushed signal up", b);
+        check(pk10 < 0.95f, "v3 LOOP: wet path stays under the ceiling at max", b);
+    }
+
+    // ── 22. LF DISTORTION AT THE NEW BALLISTICS (v3) ────────────────
+    // The price list for a ~5x faster release is LF waveform
+    // riding; the studied units balance it, so v3 must show its
+    // numbers, not hide them. Sustained 0.8-amp tones through the
+    // limiter (worst case for gain riding — real bass lines move
+    // and read far cleaner), THD at 60/100 Hz, centre and max.
+    // v2 measured 0.57/1.13% (60 Hz, centre/max) with its slow
+    // release; v3's balance (presence-stretched detector hang +
+    // peak-hold ceiling basis + programme-dependent release)
+    // lands at ~2.3% centre / ~6% max — Level-Loc-family grit at
+    // max, near-clean at centre. Pins sit above the measured
+    // values with headroom for tuning drift, far below the 36%
+    // the first fast cut produced.
+    {
+        auto toneThd = [](float knob, float freq) {
+            osc72::StereoLimiter lim; lim.prepare(kFs); lim.setKnob(knob);
+            std::vector<float> out;
+            const int total = (int)(4.0 * kFs);
+            for (int i = 0; i < total; ++i) {
+                float s = 0.8f * (float)std::sin(2.0 * kPi * freq * i / kFs);
+                float a, c; lim.process(s, s, a, c);
+                if (i >= total / 2) out.push_back(a);
+            }
+            const double f1 = goertzel(out, freq, kFs);
+            double harm = 0;
+            for (int h = 2; h <= 5; ++h) harm += std::pow(goertzel(out, freq * h, kFs), 2);
+            return std::sqrt(harm) / f1 * 100.0;
+        };
+        const double t60c = toneThd(0.5f, 60.0f), t60m = toneThd(1.0f, 60.0f);
+        const double t100c = toneThd(0.5f, 100.0f), t100m = toneThd(1.0f, 100.0f);
+        std::snprintf(b, sizeof b, "60 Hz THD centre=%.2f%% max=%.2f%%; 100 Hz centre=%.2f%% max=%.2f%% (v2 60 Hz: 0.57/1.13%%)",
+                      t60c, t60m, t100c, t100m);
+        check(t60c < 4.0 && t100c < 4.0, "v3 LF: centre stays near-clean at the fast release", b);
+        check(t60m < 10.0 && t100m < 10.0, "v3 LF: max-knob LF grit bounded (fast-release balance)", b);
     }
 
     std::printf("%s (%d checks, %d failures)\n",

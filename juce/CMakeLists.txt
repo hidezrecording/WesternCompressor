@@ -12,7 +12,7 @@
 # NOTE: JUCE 8 is AGPLv3-or-commercial. DSP core has no JUCE dependency.
 
 cmake_minimum_required(VERSION 3.22)
-project(OSC72 VERSION 1.0.2)
+project(OSC72 VERSION 1.0.3)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -171,6 +171,34 @@ target_link_libraries(OscSnapshot PRIVATE
     juce::juce_gui_basics
 )
 target_compile_definitions(OscSnapshot PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_STANDALONE_APPLICATION=1
+)
+
+# ─────────────────────────────────────────────────────────────────────
+# Processor-level tests (dev verification only, not shipped).
+# Drives Osc72Processor::processBlock (the full APVTS -> processor
+# -> Chain path) — added in the v3 diagnosis round, when the DSP
+# suite alone could not see whether the shipped wrapper delivers
+# the MOD warble. Produces build/OscProcessorTest; run headless:
+#   ./build/OscProcessorTest
+# ─────────────────────────────────────────────────────────────────────
+add_executable(OscProcessorTest
+    ../tests/test_processor.cpp
+    PluginProcessor.cpp
+    PluginEditor.cpp
+    ../dsp/Osc72Dsp.cpp
+)
+target_include_directories(OscProcessorTest PRIVATE ../dsp ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(OscProcessorTest PRIVATE
+    Osc72Assets
+    juce::juce_audio_processors
+    juce::juce_audio_utils
+    juce::juce_gui_basics
+)
+target_compile_definitions(OscProcessorTest PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0

@@ -612,19 +612,9 @@ juce::Point<float> polar(float cx, float cy, float r, float degFromTop)
     return { cx + r * std::sin(a), cy - r * std::cos(a) };
 }
 
-// Fan-shaped path: apex at centre, arc spanning the bottom of the
-// circle with half-angle hsDeg either side of 6 o'clock.
-juce::Path bottomFanPath(float cx, float cy, float r, float hsDeg)
-{
-    juce::Path p;
-    p.startNewSubPath(cx, cy);
-    for (float a = 180.0f - hsDeg; a <= 180.0f + hsDeg; a += 3.0f) {
-        const auto pt = polar(cx, cy, r, a);
-        p.lineTo(pt.x, pt.y);
-    }
-    p.closeSubPath();
-    return p;
-}
+// (The fan-shaped sector path that used to live here — the magic
+// eye's shrinking green wedge — was deleted in v3 with the sector
+// rendering itself; see drawMagicEye.)
 
 // Deterministic pseudo-random source for the panel wear, so
 // the finish is identical on every repaint (fixed seed LCG).
@@ -1450,13 +1440,27 @@ void drawEyeBezel(juce::Graphics& g, float cx, float cy,
 
 // ─────────────────────────────────────────────────────────────────────
 // Magic eye — live gain reduction, drawn like a real 1629 tube.
-//   0 dB GR  -> the whole disc glows phosphor green around a small
-//               dark round centre hub (see the lit CT-1 reference).
-//   GR builds-> black eats into the green from the top, as if the
-//               green were being pulled out of the eye: the lit
-//               region shrinks back toward 6 o'clock.
-//   ~24 dB   -> nearly all black; only a thin green sliver and the
-//               dark hub remain.
+//   v3 (Nathan, on 1.0.2): "it's acting more like a VU meter… it
+//   should light up like a real magic eye where there isn't this
+//   wedge shape at all — more of a ring effect of brightness,
+//   where the whole magic eye lights up and dims in response,
+//   not one little sliver." The v6–v32 sector rendering — black
+//   blades eating the green back to a shrinking bottom sliver —
+//   is DELETED. The full green disc is whole at all times; gain
+//   reduction now modulates the phosphor's overall BRIGHTNESS:
+//     0 dB GR  -> full bright glow, whole disc lit around the
+//                 dark centre hub (the lit CT-1 rest state).
+//     GR builds-> the whole disc dims uniformly (like the real
+//                 target going dark as the shadow angle closes
+//                 over it) — no wedge, no sliver, no blades.
+//     ~32 dB+  -> deeply dimmed green (a real eye never goes
+//                 fully black while the tube is powered), hub
+//                 and gold bezel unchanged.
+//   Brightness law: t = clamp(grDb / 32); the phosphor's colour
+//   stops are interpolated toward their deep-dim endpoints by
+//   up to 82% and the layer opacity falls to 0.30 at t = 1, so
+//   the perceived luminance swings widely across the working
+//   GR range (the loop runs 15–55 dB of GR on program now).
 // ─────────────────────────────────────────────────────────────────────
 void Osc72Editor::drawMagicEye(juce::Graphics& g, juce::Rectangle<float> bounds,
                                float grDb, bool dark)
@@ -1467,25 +1471,26 @@ void Osc72Editor::drawMagicEye(juce::Graphics& g, juce::Rectangle<float> bounds,
     const float glassR = ringR - 6.0f;   // bezel inset (eye is 70 px across at v16)
 
     // v19: POWER off — a dead tube. No phosphor glow, no green,
-    // no blade edges, no glass glint: just the dead black, the
-    // gold bezel (v20; hardware doesn't go anywhere) and the
-    // hub. The draws below are skipped by
-    // forcing the lit fraction to zero AND gating the green
-    // sector/glow/reflection blocks on !dark (at grDb alone the
-    // eye can never be fully dark — 0 dB is full green).
-    const float t = dark ? 1.0f : juce::jlimit(0.0f, 1.0f, grDb / 24.0f);
-    // Half-angle of the remaining green, about 6 o'clock. Eased so a
-    // clear bite is gone by ~10 dB and a sector is all that's left
-    // by ~21 dB.
-    const float greenHalf = juce::jmax(4.0f, 175.0f * std::pow(1.0f - t, 0.85f));
-    const float greenFrac = greenHalf / 175.0f;        // for glow/dim
+    // no glass glint: just the dead black, the gold bezel (v20;
+    // hardware doesn't go anywhere) and the hub. The phosphor
+    // block below is gated on !dark (at grDb alone the eye can
+    // never be fully dark on power — 0 dB is full green).
+    const float t = dark ? 1.0f : juce::jlimit(0.0f, 1.0f, grDb / 32.0f);
+    // Overall phosphor brightness, 1 = full glow. Eased so the
+    // dimming is already clearly under way by ~8–10 dB of GR
+    // and keeps deepening through the v3 working range.
+    const float bright = 1.0f - 0.82f * std::pow(t, 0.8f);
+    auto shade = [](juce::Colour lit, juce::Colour dim, float te) {
+        return lit.interpolatedWith(dim, te);
+    };
+    const float dimMix = 1.0f - bright;   // 0 at rest -> 0.82 deep
 
-    // Phosphor glow spilling onto the panel — dies away as the
-    // green is pulled out of the eye. (Skipped when dark: a
-    // dead tube spills nothing.)
+    // Phosphor glow spilling onto the panel — scales with the
+    // disc's brightness. (Skipped when dark: a dead tube
+    // spills nothing.)
     if (!dark) {
         const auto glowCol = juce::Colour(0x4646ff7d)
-                                 .withAlpha(0.30f * greenFrac);
+                                 .withAlpha(0.30f * bright);
         juce::ColourGradient glow(glowCol, cx, cy,
                                   juce::Colour(0x0046ff7d), cx, cy + ringR * 1.35f, true);
         g.setGradientFill(glow);
@@ -1506,33 +1511,29 @@ void Osc72Editor::drawMagicEye(juce::Graphics& g, juce::Rectangle<float> bounds,
         g.setGradientFill(dead);
         g.fillRect(bounds);
     }
-    // The surviving green, clipped to the shrinking bottom sector.
-    // (Skipped when dark — no green at all in a dead tube.)
+    // The phosphor: the WHOLE disc, always (v3 — no sector clip,
+    // no blade edges). Its gradient stops are dimmed toward
+    // deep green-black by dimMix and the layer's opacity falls
+    // with brightness, so the entire eye breathes bright<->dim
+    // with the gain action. (Skipped when dark — no green at
+    // all in a dead tube.)
     if (!dark) {
-        g.saveState();
-        g.reduceClipRegion(bottomFanPath(cx, cy, glassR + 2.0f, greenHalf));
-        juce::ColourGradient phos(juce::Colour(0xff86ffa6), cx, cy + glassR * 0.30f,
-                                  juce::Colour(0xff0d9c3c), cx, cy - glassR * 1.15f, true);
-        phos.addColour(0.42, juce::Colour(juce::Colour(0xff3bea66)));
-        // The phosphor also dims a little as it is pulled out.
+        juce::ColourGradient phos(
+            shade(juce::Colour(0xff86ffa6), juce::Colour(0xff123d1e), dimMix),
+            cx, cy + glassR * 0.30f,
+            shade(juce::Colour(0xff0d9c3c), juce::Colour(0xff031f0a), dimMix),
+            cx, cy - glassR * 1.15f, true);
+        phos.addColour(0.42, shade(juce::Colour(0xff3bea66),
+                                   juce::Colour(0xff082f12), dimMix));
         g.setGradientFill(phos);
-        g.setOpacity(1.0f - 0.22f * t);
+        g.setOpacity(0.30f + 0.70f * bright);
         g.fillRect(bounds);
         g.setOpacity(1.0f);
-        // Faint radial phosphor rays inside the lit region
-        g.setColour(juce::Colour(0x10ffffff));
+        // Faint radial phosphor rays across the whole disc
+        g.setColour(juce::Colour(0x10ffffff).withAlpha(0.06f * bright));
         for (int i = 0; i < 24; ++i) {
             const auto pt = polar(cx, cy, glassR, (float)i * 15.0f);
             g.drawLine(cx, cy, pt.x, pt.y, 1.0f);
-        }
-        g.restoreState();
-    }
-    // Soft bright edges where the black blades cut into the green
-    if (!dark && greenHalf > 6.0f && greenHalf < 172.0f) {
-        g.setColour(juce::Colour(0x70c9ffd9));
-        for (float sgn : { -1.0f, 1.0f }) {
-            const auto pt = polar(cx, cy, glassR, 180.0f + sgn * greenHalf);
-            g.drawLine(cx, cy, pt.x, pt.y, 1.6f);
         }
     }
     g.restoreState();
@@ -1636,7 +1637,7 @@ Osc72Editor::Osc72Editor(Osc72Processor& p) : AudioProcessorEditor(&p), proc_(p)
         proc_.apvts, "outLevelL", outLevelL_);
     outAttR_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         proc_.apvts, "outLevelR", outLevelR_);
-    startTimerHz(30);
+    startTimerHz(60);   // v3: 30 -> 60 Hz — the eye's display ballistics (below) now track the limiter's GR envelope instead of sweeping lazily (Nathan: the old motion read like a VU)
 }
 
 Osc72Editor::~Osc72Editor()
@@ -1651,8 +1652,15 @@ void Osc72Editor::timerCallback()
 {
     const float target = proc_.currentGainReductionDb();
     const float cur = displayedGrDb_;
-    // Analog-feeling ballistics: fast attack (~40 ms), slower release.
-    const float coef = target > cur ? 0.55f : 0.10f;
+    // Display ballistics (v3): the eye must TRACK the limiter's
+    // GR envelope, not glide behind it. The v1–v32 constants
+    // (30 Hz timer, release coef 0.10) were a ~316 ms release
+    // pole — a lazy VU-like sweep that hid the action (and
+    // would lag the v3 limiter's ~14 ms release twenty-fold).
+    // Now: 60 Hz timer, attack coef 0.65 (tau ~16 ms), release
+    // coef 0.35 (tau ~39 ms) — fast enough to read the pumping,
+    // just smooth enough not to shimmer per-tick.
+    const float coef = target > cur ? 0.65f : 0.35f;
     displayedGrDb_ = cur + (target - cur) * coef;
     if (std::abs(displayedGrDb_ - cur) > 0.02f)
         repaint(eyeArea_);
@@ -1996,10 +2004,22 @@ void Osc72Editor::paint(juce::Graphics& g)
         // Numerals 0–10: pure white (v16), each rotated so its
         // head points outward along its radius, centred on the
         // flange band — and the whole set rotates with the knob.
-        // Numeral v's local angle is 225° + 27°·v; the flange
-        // rotation is the negative of the control's sweep angle
-        // (225° + 270°·pos), so the numeral equal to the current
-        // value lands at 12 o'clock under the fixed mark.
+        // v3 (Nathan, on 1.0.2: the knob action "feels
+        // backwards… maybe the numbers are reversed"): he was
+        // right. The v10–v32 geometry rotated the flange by the
+        // NEGATIVE of the control's sweep — as the value rose
+        // (and the knob's own centre screw turned clockwise,
+        // JUCE convention) the numeral ring visibly ran
+        // COUNTERclockwise, higher numerals arriving at the
+        // index from the right. The ring now rotates WITH the
+        // control: flange rotation = the sweep itself
+        // (−225° + 270°·pos), and the numerals are mirrored on
+        // the flange (local angle 225° − 27°·v) so the numeral
+        // equal to the current value still lands at 12 o'clock
+        // under the fixed mark — but now it arrives from the
+        // LEFT as you turn up, like a numbered wheel should,
+        // and higher numerals park counterclockwise of the
+        // index at any fixed setting.
         // v19 (Nathan): at the v18 size the numerals FLOAT OUT
         // past the flange's edge — the ring shrinks (R 88 -> 87)
         // and the face comes down (17 -> 15.5) so every glyph
@@ -2046,9 +2066,9 @@ void Osc72Editor::paint(juce::Graphics& g)
         // ring are unchanged from v25.
         const float knobProp =
             (float)knob_.valueToProportionOfLength(knob_.getValue());
-        const float flangeRot = -(225.0f + 270.0f * knobProp);
+        const float flangeRot = -225.0f + 270.0f * knobProp;   // v3: WITH the sweep (was: negated)
         for (int v = 0; v <= 10; ++v) {
-            const float aDeg = 225.0f + 27.0f * (float)v + flangeRot;
+            const float aDeg = 225.0f - 27.0f * (float)v + flangeRot;   // v3: mirrored ring (was: + 27°·v)
             const auto pt = polar(knobC.x, knobC.y, 90.0f, aDeg);
             const juce::Rectangle<float> nrect(pt.x - 20.0f, pt.y - 12.0f,
                                                40.0f, 24.0f);
