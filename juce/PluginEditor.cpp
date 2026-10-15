@@ -1602,7 +1602,7 @@ void Osc72Editor::drawMagicEye(juce::Graphics& g, juce::Rectangle<float> bounds,
 // ─────────────────────────────────────────────────────────────────────
 Osc72Editor::Osc72Editor(Osc72Processor& p) : AudioProcessorEditor(&p), proc_(p)
 {
-    setSize(352, 253);    // v18: v17's 320x230 + ~10% (Nathan); controls/markings grow x1.5-2 on top of that
+    setSize(704, 506);    // audio v2 (Nathan, on 1.0.0 in Luna): the window was "a very small box" — default size DOUBLED from v18's 352x253; same artwork, the paint scale below goes 0.55 -> 1.10
     displayedGrDb_ = proc_.currentGainReductionDb();
     knob_.setLookAndFeel(&laf_);
     knob_.setSliderStyle(juce::Slider::RotaryVerticalDrag);
@@ -1677,11 +1677,11 @@ void Osc72Editor::timerCallback()
     const bool mod = modToggle_.getToggleState();
     if (lim != lastLimitState_) {
         lastLimitState_ = lim;
-        repaint(juce::Rectangle<int>(7, 201, 38, 37));    // LIMIT jewel, centre device (26, 220) — v32: back down with its cluster to the flange-bottom line (v31: (12, 24, 38, 37), centre (31, 42))
+        repaint(juce::Rectangle<int>(14, 402, 76, 74));   // LIMIT jewel, centre device (52, 439) — v32: back down with its cluster to the flange-bottom line; x2 in audio v2
     }
     if (mod != lastModState_) {
         lastModState_ = mod;
-        repaint(juce::Rectangle<int>(197, 201, 38, 37));   // MOD jewel, centre device (216, 220) — v32: back down with its cluster to the flange-bottom line (v31: (193, 24, 38, 37), centre (212, 42))
+        repaint(juce::Rectangle<int>(394, 402, 76, 74));  // MOD jewel, centre device (432, 439) — v32: back down with its cluster to the flange-bottom line; x2 in audio v2
     }
     // v10: the flange numerals rotate with the knob, but the
     // flange is editor paint — the Slider only repaints its own
@@ -1690,14 +1690,15 @@ void Osc72Editor::timerCallback()
         (float)knob_.valueToProportionOfLength(knob_.getValue());
     if (std::abs(prop - lastFlangeProp_) > 0.0005f) {
         lastFlangeProp_ = prop;
-        repaint(juce::Rectangle<int>(60, 104, 122, 128)); // dial area (flange + index mark) — v25: knob down, flange R 100
+        repaint(juce::Rectangle<int>(120, 208, 244, 256)); // dial area (flange + index mark) — v25: knob down, flange R 100; x2 in audio v2
     }
 }
 
 void Osc72Editor::resized()
 {
     // v19 rack layout (device px; the panel paint is authored
-    // in the 640x460 virtual space under a 0.55 transform —
+    // in the 640x460 virtual space under the paint transform
+    // (0.55 through v32; 1.10 from audio v2 — window doubled) —
     // see paint()). v19 moves the LIMIT/MOD clusters up and
     // outward off the bottom edge (LIMIT up+left, MOD
     // up+right) and adds the POWER toggle on the strip, a
@@ -1756,27 +1757,32 @@ void Osc72Editor::resized()
     // bounds y 27 -> 205 (the v29 values) and x re-centres
     // on 86/354. The strip does not move: POWER stays on
     // the eye-hub line, OUTPUT on the knob-centre line.
-    knob_.setBounds(74, 119, 94, 94);               // centre (121, 166) = virtual (220, 302)
-    limitToggle_.setBounds(36, 205, 22, 30);        // centre (47, 220) = virtual (85, 400) — v32: back down to the flange-bottom line (v31: (51, 42) = virtual (93, 76))
-    modToggle_.setBounds(184, 205, 22, 30);         // centre (195, 220) = virtual (355, 400) — v32: back down to the flange-bottom line (v31: (191, 42) = virtual (347, 76))
-    powerToggle_.setBounds(286, 27, 22, 30);        // centre (297, 42) = virtual (540, 76) — on the eye-hub line (76)
-    outLevelL_.setBounds(259, 152, 27, 27);         // centre (272.5, 165.5) = virtual (495, 301) — on the knob-centre line
-    outLevelR_.setBounds(308, 152, 27, 27);         // centre (321.5, 165.5) = virtual (584, 301) — on the knob-centre line
-    eyeArea_ = juce::Rectangle<int>(74, 0, 96, 86);  // the eye + its glow, centre device (122, 43) — follows the eye (v29: up with the rise)
+    // audio v2: every bound doubled with the window (device px are
+    // virtual x 1.10 now, was x 0.55) — same virtual layout.
+    knob_.setBounds(148, 238, 188, 188);            // centre (242, 332) = virtual (220, 302)
+    limitToggle_.setBounds(72, 410, 44, 60);        // centre (94, 440) = virtual (85, 400) — v32: back down to the flange-bottom line (v31: virtual (93, 76))
+    modToggle_.setBounds(368, 410, 44, 60);         // centre (390, 440) = virtual (355, 400) — v32: back down to the flange-bottom line (v31: virtual (347, 76))
+    powerToggle_.setBounds(572, 54, 44, 60);        // centre (594, 84) = virtual (540, 76) — on the eye-hub line (76)
+    outLevelL_.setBounds(518, 304, 54, 54);         // centre (545, 331) = virtual (495, 301) — on the knob-centre line
+    outLevelR_.setBounds(616, 304, 54, 54);         // centre (643, 331) = virtual (584, 301) — on the knob-centre line
+    eyeArea_ = juce::Rectangle<int>(148, 0, 192, 172);  // the eye + its glow, centre device (244, 86) — follows the eye (v29: up with the rise); x2 in audio v2
 }
 
 void Osc72Editor::paint(juce::Graphics& g)
 {
     const auto b = getLocalBounds();
     // v18: the panel is still authored in the 640x460 virtual
-    // space, now drawn under a 0.55 scale transform — the
-    // window is 352x253 (v17 + ~10%). w/h are the VIRTUAL
+    // space, drawn under a scale transform. w/h are the VIRTUAL
     // dimensions. Within that space the v18 re-layout grows
     // every control and marking ~x1.5–2 over its v16 size, so
     // the hardware dominates the panel (see the sections
     // below for the new geometry).
-    g.addTransform(juce::AffineTransform::scale(0.55f));
-    const float w = (float)b.getWidth() / 0.55f, h = (float)b.getHeight() / 0.55f;
+    // audio v2: the scale is 1.10 (was 0.55) — the window
+    // doubled to 704x506 on Nathan's verdict that 352x253 was
+    // "a very small box" in Luna. NO artwork changed: the same
+    // virtual panel renders at exactly 2x.
+    g.addTransform(juce::AffineTransform::scale(1.10f));
+    const float w = (float)b.getWidth() / 1.10f, h = (float)b.getHeight() / 1.10f;
 
     // Edge-wear level for the gloss-black finish: the wear
     // lives at the plates' edges and corners only (the

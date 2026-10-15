@@ -99,6 +99,115 @@ static TdMeas runBurstTail(float knob) {
     return m;
 }
 
+// ── v2 ballistics helpers ───────────────────────────────────────
+// Step response of the GR itself: settle in silence, step to the
+// standard loud sine (settled GR = mean of the last 200 ms), then
+// drop to silence. t63/t90 in ms on the way in (attack) and out
+// (release). Release is measured on a full drop: that is the
+// pumping-relevant case (a hit ends, the gain must come back).
+struct StepMeas { float settledGr; float atk63, atk90, rel63, rel90; };
+static StepMeas runStep(float knob) {
+    osc72::StereoLimiter lim; lim.prepare(kFs); lim.setKnob(knob); lim.reset();
+    StepMeas r{}; r.atk63 = r.atk90 = r.rel63 = r.rel90 = -1.0f;
+    std::vector<float> gr;
+    auto run = [&](int n, float amp, bool collect) {
+        for (int i = 0; i < n; ++i) {
+            float in = amp * (float)std::sin(2.0 * kPi * 200.0 * i / kFs);
+            float a, c; lim.process(in, in, a, c);
+            if (collect) gr.push_back(lim.gainReductionDb());
+        }
+    };
+    run((int)(0.3 * kFs), 0.0f, false);
+    const int nLoud = (int)(1.5 * kFs);
+    run(nLoud, 0.8f, true);
+    double s = 0; int cnt = 0;
+    for (int i = nLoud - (int)(0.2 * kFs); i < nLoud; ++i) { s += gr[i]; ++cnt; }
+    r.settledGr = (float)(s / cnt);
+    for (int i = 0; i < nLoud; ++i) {
+        if (r.atk63 < 0 && gr[i] >= 0.632f * r.settledGr) r.atk63 = (float)(i / kFs * 1000.0);
+        if (r.atk90 < 0 && gr[i] >= 0.90f * r.settledGr)  r.atk90 = (float)(i / kFs * 1000.0);
+    }
+    const int base = (int)gr.size();
+    run((int)(1.5 * kFs), 0.0f, true);
+    for (int i = base; i < (int)gr.size(); ++i) {
+        const float frac = gr[i] / r.settledGr;
+        if (r.rel63 < 0 && frac <= 0.368f) r.rel63 = (float)((i - base) / kFs * 1000.0);
+        if (r.rel90 < 0 && frac <= 0.10f)  r.rel90 = (float)((i - base) / kFs * 1000.0);
+    }
+    return r;
+}
+
+// Pumping proof: 120 ms noise bursts every 500 ms. Per burst
+// (skipping the cold first one): GR depth at the burst's end,
+// residual GR at the gap's end, recovery = depth - residual.
+// Also the largest output peak across a burst's whole period.
+struct PumpMeas { float depth, residual, recovery, onsetPeak; };
+static PumpMeas runPump(float knob) {
+    osc72::StereoLimiter lim; lim.prepare(kFs); lim.setKnob(knob); lim.reset();
+    unsigned st = 777u;
+    auto noise = [&]() {
+        st = st * 1664525u + 1013904223u;
+        return (float)((st >> 9) & 0x7FFF) / 16384.0f - 1.0f;
+    };
+    const int period = (int)(0.5 * kFs), burst = (int)(0.12 * kFs), nBursts = 8;
+    const int win = (int)(0.02 * kFs);
+    std::vector<float> grH, outH;
+    for (int i = 0; i < period * nBursts; ++i) {
+        const int ph = i % period;
+        float in = 0.0f;
+        if (ph < burst) {
+            float edge = 1.0f;
+            if (ph < 240) edge = 0.5f - 0.5f * (float)std::cos(kPi * ph / 240.0);
+            if (ph > burst - 240) edge = 0.5f - 0.5f * (float)std::cos(kPi * (burst - ph) / 240.0);
+            in = 0.85f * noise() * edge;
+        }
+        float a, c; lim.process(in, in, a, c);
+        grH.push_back(lim.gainReductionDb());
+        outH.push_back(a);
+    }
+    PumpMeas p{}; p.onsetPeak = 0;
+    double dSum = 0, rSum = 0; int used = 0;
+    for (int bn = 1; bn < nBursts; ++bn) {
+        const int b0 = bn * period;
+        double d = 0, r = 0;
+        for (int j = burst - win; j < burst; ++j) d += grH[b0 + j];
+        for (int j = period - win; j < period; ++j) r += grH[b0 + j];
+        dSum += d / win; rSum += r / win; ++used;
+        for (int j = 0; j < period; ++j)
+            if (std::fabs(outH[b0 + j]) > p.onsetPeak) p.onsetPeak = std::fabs(outH[b0 + j]);
+    }
+    p.depth = (float)(dSum / used);
+    p.residual = (float)(rSum / used);
+    p.recovery = p.depth - p.residual;
+    return p;
+}
+
+// Overshoot probe: pre-charge the limiter with 1 s of loud sine
+// (GR and makeup fully settled), drop to silence for `gapMs`,
+// then land a single full-scale hit and return its peak over
+// 100 ms. This is the slow-attack danger case: fast release has
+// dropped the GR while the slow makeup is still tens of dB up.
+static float runOvershoot(float knob, double gapMs, bool precharge) {
+    osc72::StereoLimiter lim; lim.prepare(kFs); lim.setKnob(knob); lim.reset();
+    auto feed = [&](double seconds, float amp) {
+        const int n = (int)(seconds * kFs);
+        for (int i = 0; i < n; ++i) {
+            float in = amp * (float)std::sin(2.0 * kPi * 200.0 * i / kFs);
+            float a, c; lim.process(in, in, a, c);
+        }
+    };
+    if (precharge) feed(1.0, 0.9f);
+    feed(gapMs / 1000.0, 0.0f);
+    float pk = 0;
+    const int n = (int)(0.1 * kFs);
+    for (int i = 0; i < n; ++i) {
+        float in = 0.99f * (float)std::sin(2.0 * kPi * 200.0 * i / kFs);
+        float a, c; lim.process(in, in, a, c);
+        if (std::fabs(a) > pk) pk = std::fabs(a);
+    }
+    return pk;
+}
+
 // ── Chain helpers ─────────────────────────────────────────────────
 // The plugin's actual routing now lives in osc72::Chain (limiter
 // with 'limit' in/out -> warble insert with 'mod' in/out); tests
@@ -304,7 +413,10 @@ int main() {
         const double devPct = (maxP - minP) / (sumP / nP) * 100.0;
         std::snprintf(b, sizeof b, "mean f=%.1f Hz, period swing=%.1f%% over %d cycles",
                       meanFreq, devPct, nP);
-        check(devPct > 2.0, "warble ON: pitch measurably modulated", b);
+        // v2: depth multiplied several-fold on Nathan's verdict
+        // ("almost inaudible" at v1's 5.2% p-p). Pin the new
+        // region: measured 19.2% p-p.
+        check(devPct > 10.0, "warble ON: pitch measurably modulated", b);
         check(std::fabs(meanFreq - freq) / freq < 0.01, "warble ON: mean pitch preserved", b);
         check(sumSq / nAll > 0.05, "warble ON: signal present at healthy level", b);
     }
@@ -355,7 +467,10 @@ int main() {
         }
         std::snprintf(b, sizeof b, "delay range %.2f..%.2f ms, tail=%.2e", dMin, dMax, tail);
         check(finite, "warble: finite under slam + long silence", b);
-        check(dMin >= 4.0f && dMax <= 24.0f, "warble: delay always in safe band", b);
+        // v2: bounds pinned to the named safety constants (the
+        // floor dropped 4.0 -> 2.0 ms with the deeper modulation).
+        check(dMin >= osc72::kWarbleMinDelayMs && dMax <= osc72::kWarbleMaxDelayMs,
+              "warble: delay always in safe band", b);
         check(tail < 1.0e-5, "warble: silence tail drains", b);
     }
 
@@ -563,25 +678,52 @@ int main() {
               "mod v10: MID untouched by the warble (RMS < 0.1% off)", b);
         std::snprintf(b, sizeof b, "side swing std: off=%.4f on=%.4f; side RMS CV on=%.3f",
                       wOff.swingStd, wOn.swingStd, wOn.sideCv);
-        check(wOn.swingStd > 0.25 && wOn.swingStd > 5.0 * wOff.swingStd,
+        // v2 note: this correlation-std metric SATURATES once the
+        // delay swing exceeds a few periods of the side content
+        // (at 523 Hz, ±10 ms of swing sweeps ±5 correlation cycles
+        // per analysis window, so the correlation sits low almost
+        // all the time and its std no longer grows with depth —
+        // measured 0.49 at v1 depth, 0.26 at v2 depth). It still
+        // proves the side is being wrenched in time vs OFF; the
+        // depth itself is pinned directly by the delay-span check
+        // below and by group 9's pitch swing.
+        check(wOn.swingStd > 0.15 && wOn.swingStd > 5.0 * wOff.swingStd,
               "mod v10: side swings hard in time (wide L/R warble)", b);
         std::snprintf(b, sizeof b, "side RMS ratio on=%.3f", wOn.sideRmsRatio);
         check(wOn.sideRmsRatio > 0.7 && wOn.sideRmsRatio < 1.3,
               "mod v10: side survives the transport (level sane)", b);
+        // v2: the arrival-time swing itself, read off the running
+        // delay over 6 s of pure-side feed. v1 depth spanned
+        // 9.46..14.67 ms (5.2 ms); v2 must span several-fold more.
+        {
+            osc72::WarbleChain wb; wb.prepare(kFs); wb.setEnabled(true);
+            float dMin = 1e9f, dMax = 0.0f;
+            for (int i = 0; i < (int)(6.0 * kFs); ++i) {
+                float s = 0.5f * (float)std::sin(2.0 * kPi * 440.0 * i / kFs);
+                float oL, oR; wb.process(s, -s, oL, oR);
+                if (wb.currentDelayMs() < dMin) dMin = wb.currentDelayMs();
+                if (wb.currentDelayMs() > dMax) dMax = wb.currentDelayMs();
+            }
+            std::snprintf(b, sizeof b, "delay span over 6 s: %.2f..%.2f ms (span %.2f ms)",
+                          dMin, dMax, dMax - dMin);
+            check(dMax - dMin > 12.0f,
+                  "warble v2: arrival-time swing several-fold deeper (delay span)", b);
+        }
     }
 
-    // ── 16. Squash at CENTRE == the old law's 0.7 squash (v9) ───────
-    // The v9 threshold law re-anchors the travel so threshold(0.5)
-    // is exactly the pre-v9 threshold(0.7). On the standard hot
-    // signal the pre-v9 suite measured 23.00 dB mean GR — at knob
-    // 0.8 (its test points were 0.3/0.55/0.8/1.0); the same law and
-    // detector at 0.7 give ~17.7 dB (GR ≈ over-threshold × dynamic
-    // fraction: 19.5 dB over × 0.91). Centre must land on THAT.
+    // ── 16. Squash at CENTRE (v2 — supersedes the v9 anchor) ────────
+    // v9 pinned centre to the pre-v9 law's 0.7 operating point
+    // (17.69 dB mean GR on the standard signal). Nathan's ear
+    // verdict on the shipped 1.0.0 build — the limiter "feels
+    // almost flat… barely hear it" — superseded that anchor: the
+    // v2 retune drives centre decisively harder (threshold slope
+    // 42 -> 55, dynamic-curve divisor 8 -> 6.5). Measured centre
+    // is now 27.26 dB. See docs/audio-v2-retune.md.
     {
         Meas m = runStereo(0.5f, 0.8f, 0.8f, 200.0f);
-        std::snprintf(b, sizeof b, "mean GR at centre=%.2f dB (old 0.7 law value ~17.7 dB)", m.meanGr);
-        check(m.meanGr > 14.0f && m.meanGr < 21.0f,
-              "v9: centre squash == old 0.7 Raspberries squash", b);
+        std::snprintf(b, sizeof b, "mean GR at centre=%.2f dB (v9 anchor was 17.69 dB)", m.meanGr);
+        check(m.meanGr > 24.0f && m.meanGr < 31.0f,
+              "v2: centre squash decisively working (supersedes v9 anchor)", b);
     }
 
     // ── 17. Transient designer: sustain dries, attack survives ──────
@@ -597,9 +739,24 @@ int main() {
         std::snprintf(b, sizeof b,
                       "tail energy vs knob 0: 0.25:%+.1f dB  0.5:%+.1f dB  1.0:%+.1f dB",
                       d25, d50, d100);
-        check(d25 < 0.0 && d50 < d25 && d100 < d50,
-              "TD: tail/sustain energy falls monotonically with knob", b);
+        // v2 re-pin (was: strict monotonic fall of output tail
+        // energy). The TD's own cut is unchanged and still pinned
+        // below (mean tail cut 2.8 / 6.8 / 16.6 dB at 0.25/0.5/1.0,
+        // monotonic, 0.00 dB during the burst). What changed is
+        // the limiter behind it: at centre the v2 depth (27 dB GR
+        // + slow makeup) legitimately forces the dried tail back
+        // UP to ~the dry energy — that refill is the design
+        // ("dry the ambience out, then the compressor forces the
+        // sustain back, flattened"), so at 0.25/0.5 the net tail
+        // energy now lands within ~0.5 dB of dry instead of below
+        // it. Pin exactly that, and keep the max-travel proof
+        // that the TD wins outright at knob 1.0.
+        check(d25 < 0.5 && d50 < 0.5 && d100 < d50,
+              "TD: tail energy dried or refilled-flat, never bloated", b);
         check(d100 < -6.0, "TD: sustain cut substantial at max", b);
+        check(m25.meanTailCutDb < m50.meanTailCutDb && m50.meanTailCutDb < m100.meanTailCutDb
+              && m100.meanTailCutDb > 12.0f,
+              "TD: own sustain cut grows monotonically with knob", b);
         std::snprintf(b, sizeof b,
                       "deepest TD cut during burst=%.2f dB, mean tail cut @1.0=%.1f dB, burst peak out @1.0=%.3f (in 0.85)",
                       m100.maxAttackCutDb, m100.meanTailCutDb, m100.burstPeak);
@@ -723,7 +880,7 @@ int main() {
     // pin the law's shape; the numbers print for the report.
     {
         const float ks[5] = { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f };
-        std::printf("  v9 law: knob | wet%% | meanGR(std) | TD tail cut (burst+tail)\n");
+        std::printf("  law table (mix = v9 law; squash = v2 retune): knob | wet%% | meanGR(std) | TD tail cut\n");
         float prevGr = -1.0f;
         bool mono = true;
         for (int i = 0; i < 5; ++i) {
@@ -735,7 +892,68 @@ int main() {
             if (i > 0 && !(m.meanGr >= prevGr)) mono = false;
             prevGr = m.meanGr;
         }
-        check(mono, "v9 law: GR monotonic across the full travel", "");
+        check(mono, "law table: GR monotonic across the full travel", "");
+    }
+
+    // ── 20. v2 ballistics + PUMPING PROOF ───────────────────────────
+    // Nathan's verdict on the shipped 1.0.0 (audio v1): the limiter
+    // "feels almost flat… barely hear it". Measured v1 ballistics
+    // on the protocols below: attack t63 0.7 ms (centre) / 0.4 ms
+    // (max); release t63 170 / 471 ms; pump recovery at max only
+    // 24.0 dB of a 47.1 dB depth (the gain parked crushed between
+    // hits). v2 must measure: slow-to-medium attack, super-quick
+    // release, and near-total inter-hit recovery — the pump is
+    // proven here in dB, not asserted. Full before/after table in
+    // docs/audio-v2-retune.md.
+    {
+        StepMeas sC = runStep(0.5f);
+        StepMeas sM = runStep(1.0f);
+        std::snprintf(b, sizeof b,
+                      "centre: settled %.1f dB, atk t63 %.1f ms, rel t63 %.1f ms t90 %.1f ms",
+                      sC.settledGr, sC.atk63, sC.rel63, sC.rel90);
+        check(sC.atk63 > 10.0f && sC.atk63 < 35.0f,
+              "v2 attack: slow-to-medium at centre (transients punch)", b);
+        check(sC.rel63 > 30.0f && sC.rel63 < 120.0f && sC.rel90 < 200.0f,
+              "v2 release: super-quick recovery at centre", b);
+        std::snprintf(b, sizeof b,
+                      "max: settled %.1f dB, atk t63 %.1f ms, rel t63 %.1f ms t90 %.1f ms",
+                      sM.settledGr, sM.atk63, sM.rel63, sM.rel90);
+        check(sM.atk63 > 5.0f && sM.atk63 < 20.0f,
+              "v2 attack: slow-to-medium at max", b);
+        check(sM.rel63 > 30.0f && sM.rel63 < 130.0f && sM.rel90 < 200.0f,
+              "v2 release: super-quick recovery at max (was 471/909 ms)", b);
+
+        PumpMeas pC = runPump(0.5f);
+        PumpMeas pM = runPump(1.0f);
+        std::snprintf(b, sizeof b,
+                      "centre: depth %.1f dB, residual %.2f dB, recovery %.1f dB (%.0f%%), burst-period peak %.3f",
+                      pC.depth, pC.residual, pC.recovery,
+                      pC.depth > 0 ? 100.0 * pC.recovery / pC.depth : 0.0, pC.onsetPeak);
+        check(pC.depth > 20.0f && pC.recovery > 15.0f && pC.recovery > 0.7f * pC.depth,
+              "v2 PUMP: centre hits deep, gain surges back between hits", b);
+        std::snprintf(b, sizeof b,
+                      "max: depth %.1f dB, residual %.2f dB, recovery %.1f dB (%.0f%%), burst-period peak %.3f",
+                      pM.depth, pM.residual, pM.recovery,
+                      pM.depth > 0 ? 100.0 * pM.recovery / pM.depth : 0.0, pM.onsetPeak);
+        check(pM.depth > 55.0f && pM.recovery > 40.0f && pM.recovery > 0.7f * pM.depth,
+              "v2 PUMP: max slams and fully recovers between hits", b);
+        check(pC.onsetPeak < 0.95f && pM.onsetPeak < 0.95f,
+              "v2 pump: no overshoot disaster inside the pump pattern", b);
+
+        // Slow-attack overshoot guard: pre-charged limiter, gap,
+        // full-scale hit (see runOvershoot). Unguarded this peaked
+        // at 1.58; the guard (feed-forward ceiling, makeup-aware,
+        // pre-TD peak basis) must hold every scenario at/below the
+        // saturator's clean ceiling region.
+        const float oCold = runOvershoot(1.0f, 0.0, false);
+        const float oG100 = runOvershoot(1.0f, 100.0, true);
+        const float oG380 = runOvershoot(1.0f, 380.0, true);
+        const float oC100 = runOvershoot(0.5f, 100.0, true);
+        std::snprintf(b, sizeof b,
+                      "hit peaks: cold %.3f, max+100 ms gap %.3f, max+380 ms gap %.3f, centre+100 ms gap %.3f",
+                      oCold, oG100, oG380, oC100);
+        check(oCold < 0.95f && oG100 < 0.95f && oG380 < 0.95f && oC100 < 0.95f,
+              "v2 guard: full-scale hits after gaps stay under the ceiling", b);
     }
 
     std::printf("%s (%d checks, %d failures)\n",

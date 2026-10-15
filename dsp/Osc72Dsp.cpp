@@ -99,16 +99,58 @@ void StereoLimiter::process(float inL, float inR, float& outL, float& outR) {
     if (negEnvR_ > level) level = negEnvR_;
 
     // ── Dynamic-ratio gain computer (no ratio control, by design) ─
-    // v9: the GR ceiling and the release both stretch in the top
-    // half of the knob (the Level-Loc lean — deeper squash, longer
-    // pumping recovery past the Raspberries centre point).
+    // v2 ballistics: the smoothing pole IS the compressor's attack
+    // and release (slow-to-medium attack — transients punch before
+    // the clamp; super-quick release — the gain rides back between
+    // hits and pumps). Past centre both quicken and the GR ceiling
+    // rises (the Level-Loc lean).
     const float overDb = linearToDb(level) - thresholdDbForKnob(k);
     const float grTarget = dynamicGainReductionDb(overDb, grCapForKnob(k));
 
-    const float gc = (grTarget > grDb_) ? tauCoef(kAttackTauSec, fs_)
+    const float gc = (grTarget > grDb_) ? tauCoef(attackTauForKnob(k), fs_)
                                         : tauCoef(releaseTauForKnob(k), fs_);
     grDb_ += (grTarget - grDb_) * gc;
     if (grDb_ < 1.0e-9f) grDb_ = 0.0f;
+
+    // ── Overshoot guard (v2) ─────────────────────────────────────
+    // The slow attack's price: for the first ~10-20 ms of a loud
+    // hit the programme GR has not yet arrived, and the raw wet
+    // peak would sail past full scale — a flat-top disaster the
+    // v1 build's 0.2 ms attack never allowed. The dangerous case
+    // is a hit after a gap: the fast release has let the GR fall
+    // to ~0 while the slow makeup (300 ms relax) is still tens of
+    // dB up, so the hit enters at a large NET positive gain
+    // (measured without the guard: peak 1.58 on a pre-charged
+    // unit). The detector is feed-forward, so the would-be peak
+    // is known exactly — including the makeup term: require
+    // grDb >= makeupDb + 20*log10(peak x drive) so the net
+    // saturator input can never exceed the clean ceiling (1.0).
+    // The shortfall is pulled in fast (0.3 ms pole). The guard is
+    // silent in steady state (settled GR exceeds the requirement
+    // by tens of dB) and releases through the normal release pole
+    // above, so it cannot chatter on its own. (makeupDb_ here is
+    // last sample's value — it updates below; 1-sample lag is
+    // immaterial at a 300 ms time constant.)
+    // The peak is read PRE-TD (the transformer outputs xinL/xinR),
+    // not from wetIn: after a gap the TD's fast envelope needs
+    // ~2 ms to climb back, and in that window wetIn is ducked by
+    // ~20 dB while the net gain is at its highest — a wetIn-based
+    // guard wakes up late and the ducked residue, amplified by
+    // the full net gain, still overshoots (measured: 1.58). The
+    // TD only ever cuts (gain <= 1), so the pre-TD peak is the
+    // conservative, correct basis: it is the level the gain cell
+    // will see the moment the TD lets go.
+    const float satD = satDriveForKnob(k);
+    {
+        const float pkL = xinL < 0.0f ? -xinL : xinL;
+        const float pkR = xinR < 0.0f ? -xinR : xinR;
+        const float pk = (pkL > pkR ? pkL : pkR) * satD;
+        if (pk > 0.05f) {
+            const float guardDb = makeupDb_ + linearToDb(pk);
+            if (guardDb > grDb_)
+                grDb_ += (guardDb - grDb_) * tauCoef(0.0003f, fs_);
+        }
+    }
 
     // Makeup follows the SLOW average of the gain reduction, so the
     // crushed path stays hot and dense without chasing peaks (which
@@ -133,7 +175,7 @@ void StereoLimiter::process(float inL, float inR, float& outL, float& outR) {
     // the transformer depth is exactly 0: bit-transparent.
     const float w = wetWeightForKnob(k);
     const float d = 1.0f - w;
-    const float satD = satDriveForKnob(k);
+    // (satD computed earlier, at the overshoot guard.)
 
     const float wetL = classASaturate(wetInL * gainLin * satD);
     const float wetR = classASaturate(wetInR * gainLin * satD);

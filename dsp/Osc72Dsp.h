@@ -57,15 +57,28 @@ inline float clampf(float v, float lo, float hi) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Fixed internal time constants — RECONSTRUCTION (see header).
-// The detector is feed-forward and very fast (documented family
-// behaviour); the release sits in the fast-musical region so low end
-// audibly surges back into arrangement gaps (witness description).
+// Fixed internal time constants — RECONSTRUCTION (see header),
+// RETUNED in audio v2 (Nathan's ear verdict on the shipped 1.0.0:
+// "almost flat… barely hear it"). The v1 ballistics (0.2 ms attack,
+// 120→336 ms release, 50 ms detector hang) grabbed transients
+// before they existed and then parked the gain crushed — measured
+// release t63 of 471 ms at max. The v2 ballistics invert that feel:
+//   * GR ATTACK is slow-to-medium (20 ms, easing to 10 ms at max)
+//     so transients punch through BEFORE the clamp — the gain
+//     ballistics live in the GR smoother; the detector itself
+//     still peak-catches at 50 µs (documented feed-forward FET
+//     behaviour).
+//   * GR RELEASE is super quick (50 ms, speeding to 25 ms at max)
+//     so the gain rides back between hits — pumping, not parking.
+//   * The DETECTOR HANG drops 50 ms -> 12 ms: at 50 ms it, not the
+//     release pole, owned the recovery on falling signals (the
+//     level stays over threshold for ~200+ ms after a hit ends).
+// See docs/audio-v2-retune.md for the before/after measurements.
 // ─────────────────────────────────────────────────────────────────────
-inline constexpr float kAttackTauSec   = 0.00020f; // 0.2 ms GR attack
-inline constexpr float kReleaseTauSec  = 0.120f;   // 120 ms GR release
+inline constexpr float kAttackTauSec   = 0.020f;   // 20 ms GR attack (base)
+inline constexpr float kReleaseTauSec  = 0.050f;   // 50 ms GR release (base)
 inline constexpr float kDetectAttackTauSec  = 0.00005f; // 50 µs peak catch
-inline constexpr float kDetectReleaseTauSec = 0.050f;   // detector hang
+inline constexpr float kDetectReleaseTauSec = 0.012f;   // 12 ms detector hang (v2)
 inline constexpr float kMakeupTauSec   = 0.300f;   // slow average-GR makeup
 
 // ─────────────────────────────────────────────────────────────────────
@@ -73,7 +86,8 @@ inline constexpr float kMakeupTauSec   = 0.300f;   // slow average-GR makeup
 // gangs THREE things, all rising together:
 //   1. SQUASH — the limiter below (Mayer/Raspberries action; the top
 //      of the travel leans on the Shure Level-Loc's violent AGC:
-//      deeper GR cap and a longer, pumping release).
+//      deeper GR cap; audio v2: a FASTER, harder-pumping release
+//      and a slower attack — see the time-constant block below).
 //   2. TRANSIENT DESIGNER — before the limiter in the wet path,
 //      cutting natural sustain (drying ambience) increasingly.
 //   3. MIX — the knob IS the mix law: wet weight == knob value.
@@ -101,25 +115,35 @@ inline float topFactorForKnob(float k) {
     return k <= 0.5f ? 0.0f : (k - 0.5f) * 2.0f;
 }
 inline float thresholdDbForKnob(float k) {
-    return 6.0f - 42.0f * std::pow(squashU(k), 1.2f);
+    // v2: slope 42 -> 55 — substantially deeper squash across the
+    // whole travel (centre threshold ≈ −29.9 dBFS, was −21.4;
+    // max ≈ −65.9 dBFS, was −48.9). See docs/audio-v2-retune.md.
+    return 6.0f - 55.0f * std::pow(squashU(k), 1.2f);
 }
 inline float wetWeightForKnob(float k) {
     return clampf(k, 0.0f, 1.0f); // the knob IS the mix (v9 law)
 }
-// Level-Loc lean in the top half: the release stretches from the
-// fast-musical 120 ms (Raspberries region) toward a long, pumping
-// ~340 ms at max; the GR ceiling rises 42 -> 52 dB; makeup cap
-// rises so the deeper squash stays hot; the Class-A saturator is
+// Level-Loc lean in the top half, v2 form: past centre everything
+// gets MORE violent in the direction Nathan asked for on the 1.0.0
+// build — the release SPEEDS UP (50 -> 25 ms: fast recovery is the
+// pumping he wants; v1's stretch to ~340 ms was the opposite), the
+// attack quickens a little as the depth grows (20 -> 10 ms — a
+// full slow attack into 60 dB of GR would overshoot for tens of
+// ms), the GR ceiling rises 50 -> 64 dB, the makeup cap rises so
+// the deeper squash stays hot, and the Class-A saturator is
 // driven a touch harder (the Comptortion's grit — its compression
 // ran "to completely squashed", ~15:1 per period reviews).
+inline float attackTauForKnob(float k) {
+    return kAttackTauSec * (1.0f - 0.5f * topFactorForKnob(k));
+}
 inline float releaseTauForKnob(float k) {
-    return kReleaseTauSec * (1.0f + 1.8f * topFactorForKnob(k));
+    return kReleaseTauSec * (1.0f - 0.5f * topFactorForKnob(k));
 }
 inline float grCapForKnob(float k) {
-    return 42.0f + 10.0f * topFactorForKnob(k);
+    return 50.0f + 14.0f * topFactorForKnob(k);
 }
 inline float makeupCapForKnob(float k) {
-    return 30.0f + 6.0f * topFactorForKnob(k);
+    return 34.0f + 14.0f * topFactorForKnob(k);
 }
 inline float satDriveForKnob(float k) {
     const float t = topFactorForKnob(k);
@@ -136,9 +160,11 @@ inline float tdDepthForKnob(float k) {
 // excursion grows (gain reduction grows "exponentially" above
 // threshold in the manufacturer's own description). Returns GR in dB
 // (>= 0) for an over-threshold amount in dB (>= 0).
-inline float dynamicGainReductionDb(float overDb, float capDb = 42.0f) {
+inline float dynamicGainReductionDb(float overDb, float capDb = 50.0f) {
     if (overDb <= 0.0f) return 0.0f;
-    const float frac = 1.0f - std::exp(-overDb / 8.0f);
+    // v2: divisor 8 -> 6.5 — the removed fraction approaches 100%
+    // sooner, so the curve bites harder at moderate overdrive.
+    const float frac = 1.0f - std::exp(-overDb / 6.5f);
     float gr = overDb * frac;
     return gr > capDb ? capDb : gr;
 }
@@ -332,8 +358,9 @@ private:
 // input to output bit-exactly and does no other work. Engaging runs
 // a 30 ms crossfade (the delay line is cleared on engage, so no
 // stale audio can burst out). Reported latency: 0 when off; the
-// base delay (12 ms) when on — the instantaneous delay wobbles
-// ±~3.7 ms around that figure, which is the effect itself.
+// base delay (12 ms) when on — the instantaneous delay wobbles up
+// to ~±10 ms around that figure (v2 depths), which is the effect
+// itself.
 //
 // MID/SIDE TOPOLOGY (v10 MOD revision, Nathan 2026-10-14: "the mod
 // function should be hard left right warble so it sounds really
@@ -355,17 +382,30 @@ private:
 // this insert narrows the image any more.
 // ─────────────────────────────────────────────────────────────────────
 inline constexpr float kWarbleBaseDelayMs = 12.0f;
+// v2 depths (Nathan, on the shipped 1.0.0: the warble was "almost
+// inaudible… needs to be absolutely crazy"): every layer deepened
+// ~3-4x from v1 (wow 1.8, vib 0.55, flutter 0.12, drift 1.1 ms —
+// ~5.2% peak-to-peak pitch, chorus-subtle). The worst-case sum of
+// excursions is now ~10.05 ms around the unchanged 12 ms base, so
+// the safety floor drops 4.0 -> 2.0 ms to give the troughs room
+// (the read position still can never approach the write position:
+// the process() clamp keeps >= 2 samples). Base delay unchanged,
+// so the reported latency stays 576 samples @ 48 kHz. The 2.6 kHz
+// side bandwidth stays too: it is the pedal's published brick
+// wall, and the v1 inaudibility was depth, not dullness — pitch
+// wobble lives in timing and reads on any content that survives
+// 2.6 kHz. See docs/audio-v2-retune.md.
 inline constexpr float kWarbleWowHz       = 0.6f;
-inline constexpr float kWarbleWowMs       = 1.8f;
+inline constexpr float kWarbleWowMs       = 5.0f;
 inline constexpr float kWarbleVibHz       = 4.9f;   // triangle
-inline constexpr float kWarbleVibMs       = 0.55f;
+inline constexpr float kWarbleVibMs       = 2.4f;
 inline constexpr float kWarbleFlutterHz   = 9.3f;
-inline constexpr float kWarbleFlutterMs   = 0.12f;
-inline constexpr float kWarbleDriftMs     = 1.1f;   // random-walk depth
+inline constexpr float kWarbleFlutterMs   = 0.45f;
+inline constexpr float kWarbleDriftMs     = 2.2f;   // random-walk depth
 inline constexpr float kWarbleLowpassHz   = 2600.0f; // published pedal limit
 inline constexpr float kWarbleHighpassHz  = 100.0f;
 inline constexpr float kWarbleFadeSec     = 0.030f;
-inline constexpr float kWarbleMinDelayMs  = 4.0f;    // hard safety floor
+inline constexpr float kWarbleMinDelayMs  = 2.0f;    // hard safety floor (v2)
 inline constexpr float kWarbleMaxDelayMs  = 24.0f;   // hard safety ceiling
 
 // Minimal RBJ biquad (the warble path's bandwidth limit).

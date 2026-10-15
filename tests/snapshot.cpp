@@ -260,7 +260,7 @@ int main(int argc, char* argv[]) {
     std::unique_ptr<juce::AudioProcessorEditor> ed(proc.createEditor());
     ed->setVisible(true);
 
-    auto img = ed->createComponentSnapshot(ed->getLocalBounds(), false, 2.0f);   // v18: 2x of the 352x253 window
+    auto img = ed->createComponentSnapshot(ed->getLocalBounds(), false, 2.0f);   // 2x of the editor window (352x253 through v32; 704x506 from audio v2)
     juce::File f(argc > 1 ? argv[1] : "/tmp/osc72-gui.png");
     f.deleteFile();
     juce::FileOutputStream fos(f);
