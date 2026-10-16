@@ -840,6 +840,70 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.1.9 — OVERSAMPLED CORE + INPUT DEFAULT 5 +
+RATIO MODE SWITCH (diagnosis
+docs/harshness-diagnosis.md; report
+docs/build-report-v53.md). Nathan's ear verdict on
+1.1.8: the low end is better, but pushing INPUT hard
+gives a hard-clipping "breaking glass" at the limits.
+Diagnosis: the 1.600 ceiling is exonerated; the harsh
+energy is the vari-mu + 6V6 cascade compounding — at
+HF it is genuine aliasing (5 kHz / knob 1.0: 8.96%
+folded inharmonic vs 0.15% truth at 384 kHz); at
+997 Hz and on two-tone material it is ~96% true
+cascade harmonics/IMD at extreme depth (the model's
+limit character, not a defect). Fix (Nathan
+pre-approved the best recommendation): the whole
+limiter core runs at 2x the host rate behind a
+polyphase Blackman-Harris FIR pair — 5 kHz inharmonic
+8.96% -> 1.76%; colour-point THD identical (0.156%);
+statics/GR/RMS identical; the shipped ceiling law is
+re-applied once at the output rate to absorb
+decimation overshoot (slam peaks still bound at
+exactly 1.600). Costs stated plainly: CPU roughly
+doubles (suite G1 pin re-based 8% -> 12% with this
+cause) and reported latency rises exactly 32 host
+samples (32 / 992 with MOD), with the MIX blend
+re-verified sample-exact at the new latency. INPUT
+default: the plugin now opens at 5 (the 1.1.5
+staging's "barely kissing" point; opening GR on
+-14 dBFS measured 1.59 dB LIMIT / 1.58 dB COMP). The
+LIMIT IN/OUT switch is now a RATIO mode switch
+(header word RATIO; positions COMP / LIMIT, words
+only, no figures; the existing `limit` bool is
+repurposed — true = COMP, false = LIMIT, default
+LIMIT — so old sessions load without error, only the
+stored value's meaning moved: saved OUT now loads
+LIMIT-active, saved IN loads COMP). Both modes are
+the same vari-mu law family re-voiced gain-computer
+side only; measured ratios (perturbation, knob 0.75):
+COMP 1.40 / 1.75 / 2.24 / 2.89 / 3.04 and LIMIT 2.62 /
+2.93 / 3.45 / 4.30 / 5.01 at 1 / 3 / 6 / 12 / 18 dB GR
+— on Nathan's targets (COMP ~1.5:1 digging to ~3:1;
+LIMIT ~3:1 already shallow rising to ~4-5:1) within
+his ±10-15% voicing tolerance except LIMIT @ 1 dB
+(2.62, -13%, at the edge). Density: at knob 7.5 LIMIT
+delivers +2.7 dB more GR at identical loudness;
+flagged — at knob 10 LIMIT's programme RMS falls
+-2.3 dB vs shipped (the firmer law at the very top);
+COMP tracks the shipped density everywhere. Bloom:
+LIMIT +8.56 dB, COMP +7.36 dB. Ballistics: FAST
+attack constants bit-identical to 1.1.5-1.1.8
+(Nathan froze the seat — its suite step reading
+moves to 0.58-0.71 ms only because the test step is
+band-limited by the new resampler; base-rate bench of
+the same law reads 0.375 ms); SLOW attack constants
+x1.25 toward the LA-2A seat (full step 10.54 ms in
+COMP); FAST release and SLOW release verified against
+their references, untouched. GUI: v49 face + the
+RATIO cluster only (snapshot byte-identical to
+docs/gui-v50-a.png, the default opening state).
+Installer unchanged from 1.1.6 (relocation off;
+preinstall byte-compare passes). Suites: DSP 45/45,
+processor 31/31; moved pins ledgered with causes in
+the report (A1 deleted/replaced by design — the
+LIMIT bypass no longer exists).
+
 v1.1.8 — LF FLUX RELIEF (diagnosis
 docs/lf-blowout-diagnosis.md; report
 docs/build-report-v52.md). Nathan's ear verdict on

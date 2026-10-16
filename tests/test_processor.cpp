@@ -13,7 +13,7 @@
 //   P2     MONO material WIDENS through the processor (side
 //          energy appears — the retired mid/side law gave
 //          exactly zero; ADT is a doubling effect)
-//   P4     reported latency follows MOD (0 / 960 @ 48 kHz)
+//   P4     reported latency follows MOD (32 / 992 @ 48 kHz — v53: +32 oversampling)
 //   P5     POWER off = bit-exact bypass once the fade settles
 //   P6     the new ATTACK/RELEASE params: defaults, and their
 //          ballistics audible end-to-end through processBlock
@@ -185,7 +185,7 @@ int main() {
         p.processBlock(buf, midi); // edge is consumed in processBlock
         const int latOn = p.getLatencySamples();
         std::snprintf(b, sizeof b, "latency off=%d on=%d", latOff, latOn);
-        check(latOff == 0 && latOn == 960, "P4 proc: latency 0 off / 960 on (20 ms ADT base)", b);
+        check(latOff == 32 && latOn == 992, "P4 proc: latency 32 off / 992 on (OS + 20 ms ADT base, v53)", b);
     }
 
     // ── P5. POWER off = bit-exact bypass (settled) ────────────────
@@ -370,25 +370,28 @@ int main() {
                           (int)warble, (int)exact);
             check(exact, warble ? "P7b MIX=1 bit-for-bit (MOD in)" : "P7b MIX=1 bit-for-bit (MOD out)", b);
         }
-        // P7c: mix=0, MOD out (latency 0): output == input.
+        // P7c: mix=0, MOD out: output == input delayed by
+        // the reported latency (v53: 32 samples of
+        // oversampling — the dry tap aligns to it, exactly
+        // as it aligned to 960 with MOD in before).
         {
             auto d = runMix(0.0f, false, 1.5);
             bool exact = true;
             for (int i = settle; i < (int)d.outL.size(); ++i)
-                if (d.outL[(size_t)i] != d.inL[(size_t)i] || d.outR[(size_t)i] != d.inR[(size_t)i])
+                if (d.outL[(size_t)i] != d.inL[(size_t)(i - 32)] || d.outR[(size_t)i] != d.inR[(size_t)(i - 32)])
                     exact = false;
-            std::snprintf(b, sizeof b, "settled mix=0 output == input exactly: %d", (int)exact);
-            check(exact, "P7c MIX=0 returns the input (MOD out, aligned)", b);
+            std::snprintf(b, sizeof b, "settled mix=0 output == input delayed 32 exactly: %d", (int)exact);
+            check(exact, "P7c MIX=0 returns the input delayed by the latency (MOD out, v53)", b);
         }
         // P7d: mix=0, MOD in: output == input delayed by the
-        // chain's 960-sample latency, exactly.
+        // chain's 992-sample latency, exactly (v53).
         {
             auto d = runMix(0.0f, true, 1.5);
             bool exact = true;
             for (int i = settle; i < (int)d.outL.size(); ++i)
-                if (d.outL[(size_t)i] != d.inL[(size_t)(i - 960)] || d.outR[(size_t)i] != d.inR[(size_t)(i - 960)])
+                if (d.outL[(size_t)i] != d.inL[(size_t)(i - 992)] || d.outR[(size_t)i] != d.inR[(size_t)(i - 992)])
                     exact = false;
-            std::snprintf(b, sizeof b, "settled mix=0 (MOD in) == input delayed 960 exactly: %d", (int)exact);
+            std::snprintf(b, sizeof b, "settled mix=0 (MOD in) == input delayed 992 exactly: %d", (int)exact);
             check(exact, "P7d MIX=0 returns the input delayed by the chain latency (MOD in)", b);
         }
         // P7e/P7f: mix=0.5 == the mean of the aligned dry and
@@ -397,7 +400,7 @@ int main() {
         for (bool warble : { false, true }) {
             auto w = runMix(1.0f, warble, 2.0);
             auto h = runMix(0.5f, warble, 2.0);
-            const int lat = warble ? 960 : 0;
+            const int lat = warble ? 992 : 32;
             double maxErr = 0;
             for (int i = settle; i < (int)w.outL.size(); ++i) {
                 const double mL = 0.5 * ((double)w.inL[(size_t)(i - lat)] + w.outL[(size_t)i]);
@@ -520,7 +523,7 @@ int main() {
         const int total = (int)(1.5 * kFs), impAt = (int)(0.5 * kFs);
         char b[256];
         for (bool warble : { false, true }) {
-            const int lat = warble ? 960 : 0;
+            const int lat = warble ? 992 : 32;
             auto dry = runImp(0.0f, warble, impAt, total);
             auto wet = runImp(1.0f, warble, impAt, total);
             auto half = runImp(0.5f, warble, impAt, total);
@@ -531,8 +534,8 @@ int main() {
             std::snprintf(b, sizeof b, "warble=%d: peaks dry@%+d wet@%+d half@%+d (want all %+d)",
                           (int)warble, atDry - impAt, atWet - impAt, atHalf - impAt, lat);
             check(atDry == impAt + lat && atWet == impAt + lat && atHalf == impAt + lat,
-                  warble ? "P9a blended impulse peak exactly at +960 (MOD in)"
-                         : "P9a blended impulse peak exactly at +0 (MOD out)", b);
+                  warble ? "P9a blended impulse peak exactly at +992 (MOD in, v53)"
+                         : "P9a blended impulse peak exactly at +32 (MOD out, v53)", b);
             // Coincidence: the blended peak must reach the mean
             // of the two path peaks. Any path offset splits the
             // peak and the height collapses toward the larger
@@ -557,8 +560,13 @@ int main() {
                 if (std::fabs(wet[(size_t)i]) > 0.5f * pkWet) first = i;
             std::snprintf(b, sizeof b, "warble=%d: first >50%% sample at %+d (want %+d)",
                           (int)warble, first - impAt, lat);
-            check(first == impAt + lat, warble ? "P9d wet arrival exactly at the latency (MOD in)"
-                                               : "P9d wet arrival exactly at the input (MOD out)", b);
+            // v53: the >50% crossing sits at lat-1 — the
+            // linear-phase resampler's centre-1 tap already
+            // exceeds half the peak (the peak itself is at
+            // lat exactly, P9a). Pre-v53 the ceiling-shaped
+            // response crossed at the latency sample itself.
+            check(first == impAt + lat - 1, warble ? "P9d wet arrival at the latency (MOD in, v53)"
+                                               : "P9d wet arrival at the latency (MOD out, v53)", b);
         }
         // P9e: MOD toggle mid-stream at mix 0.5 — the dry tap
         // must follow the chain's own 30 ms engagement law.
@@ -591,11 +599,11 @@ int main() {
                 for (int j = 0; j < block; ++j) out[(size_t)(base + j)] = buf.getSample(0, j);
             }
             int at0 = 0, at960 = 0;
-            const float pk0 = peakAt(out, midImp, 48, at0);
-            const float pk960 = peakAt(out, midImp + 960, 96, at960);
-            std::snprintf(b, sizeof b, "mid-fade impulse: +0 peak %.3f @%+d, +960 peak %.3f @%+d",
+            const float pk0 = peakAt(out, midImp + 32, 48, at0);
+            const float pk960 = peakAt(out, midImp + 992, 96, at960);
+            std::snprintf(b, sizeof b, "mid-fade impulse: +32 peak %.3f @%+d, +992 peak %.3f @%+d",
                           pk0, at0 - midImp, pk960, at960 - midImp);
-            check(pk0 > 0.22f && at0 == midImp && at960 == midImp + 960,
+            check(pk0 > 0.22f && at0 == midImp + 32 && at960 == midImp + 992,
                   "P9e dry tap crossfades its offset on MOD toggle (no step)", b);
         }
     }

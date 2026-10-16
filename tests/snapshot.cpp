@@ -7,6 +7,12 @@
 //                    flange) + beaten-up case
 //   warble         = 'mod' toggle IN (default: out)
 //   limitout       = 'limit' toggle OUT (default: in)
+//                    v53: the toggle is the RATIO mode switch —
+//                    IN (default here) renders COMP (lever up),
+//                    'limitout' renders LIMIT (lever down); the
+//                    jewel is lit in both. gui-v50-a is rendered
+//                    knob=5 + limitout = the plugin's actual
+//                    default opening state (INPUT 5, LIMIT).
 //   poweroff       = strip 'power' toggle OFF (default: on) —
 //                    v19: the whole unit dark and bypassed.
 //   (v19: the knob ships BLACK, so no colour token is the

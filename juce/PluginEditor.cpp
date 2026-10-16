@@ -2873,13 +2873,18 @@ void Osc72Editor::paint(juce::Graphics& g)
     // jewels take the label blocks' centres ((125, 400) /
     // (315, 400) — mirror pair about the module centre).
     // Words, toggles, baselines unchanged.
-    drawTrackedText(g, "LIMIT", capsFont(14.5f), 0.6f,
+    // v53 (Nathan): the left cluster is the RATIO mode
+    // switch — header word RATIO, positions COMP (top) /
+    // LIMIT (bottom), words only, no figures. The section
+    // is always engaged; the jewel beside it is lit in both
+    // modes (dark only with POWER off).
+    drawTrackedText(g, "RATIO", capsFont(14.5f), 0.6f,
                     86.0f, 363.0f, Anchor::centre);
     drawTrackedText(g, "MOD", capsFont(14.5f), 0.6f,
                     354.0f, 363.0f, Anchor::centre);
-    drawTrackedText(g, "IN", capsFont(14.0f), 0.4f,
+    drawTrackedText(g, "COMP", capsFont(14.0f), 0.4f,
                     62.0f, 397.0f, Anchor::right);
-    drawTrackedText(g, "OUT", capsFont(14.0f), 0.4f,
+    drawTrackedText(g, "LIMIT", capsFont(14.0f), 0.4f,
                     62.0f, 415.0f, Anchor::right);
     drawTrackedText(g, "IN", capsFont(14.0f), 0.4f,
                     378.0f, 397.0f, Anchor::left);
@@ -2956,7 +2961,7 @@ void Osc72Editor::paint(juce::Graphics& g)
     // the old IN/OUT label blocks' centres, mirror pair
     // about the module centre; the repaint rects in
     // timerCallback follow.
-    drawPowerJewel(g, 125.0f, 400.0f, powerOn && limitToggle_.getToggleState(), 1.0f);
+    drawPowerJewel(g, 125.0f, 400.0f, powerOn, 1.0f); // v53: RATIO section always engaged — lit in both modes
     drawPowerJewel(g, 315.0f, 400.0f, powerOn && modToggle_.getToggleState(), 1.0f);
 
     // ── Module wordmark (v29, Nathan): 'WESTERN

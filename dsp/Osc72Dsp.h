@@ -240,15 +240,99 @@ inline constexpr float kBa6aDetSense = 2.2f;
 // ratio at fixed working depth is set by env x slope at
 // the equilibrium — softness is redistributed (front down,
 // top up), not conjured.
-inline float ba6aSenseShape(float envLin) {
-    return envLin * envLin / (envLin + kBa6aDetToeEnv);
+inline float ba6aSenseShape(float envLin, float toeEnv) {
+    return envLin * envLin / (envLin + toeEnv);
 }
-inline float ba6aVariMuDb(float envLin) {
-    const float over = ba6aSenseShape(envLin) - ba6aSenseShape(dbToLinear(kBa6aCeilingDb));
+inline float ba6aVariMuDb(float envLin, float slope, float toeEnv) {
+    const float over = ba6aSenseShape(envLin, toeEnv)
+                     - ba6aSenseShape(dbToLinear(kBa6aCeilingDb), toeEnv);
     if (over <= 0.0f) return 0.0f;
-    const float gr = kBa6aDbPerVolt * over;
+    const float gr = slope * over;
     return gr > kBa6aGrCapDb ? kBa6aGrCapDb : gr;
 }
+// The shipped law (v1.1.2 constants above) — kept as the
+// DEMAND reference for the SLOW detector's T4 charge shaping
+// (ba6aDetSlowTau below): the demand a peak represents is a
+// property of the panel physics, not of the selected mode,
+// so the ballistics' dynamics never change with the mode —
+// only the static GR map does (v53, below).
+inline float ba6aVariMuDb(float envLin) {
+    return ba6aVariMuDb(envLin, kBa6aDbPerVolt, kBa6aDetToeEnv);
+}
+// ─────────────────────────────────────────────────────────────────────
+// COMP / LIMIT ratio modes (v53, Nathan): the LIMIT cluster's
+// IN/OUT bypass was, in his words, "rendered somewhat
+// pointless — nobody bypasses the compressor on a
+// compressor" — so the switch is now a RATIO mode switch and
+// the section is always engaged. Both modes are the same
+// vari-mu law family re-voiced on the gain-computer side
+// (slope on the shaped sense, the 6H6 toe corner, and the
+// detector sense scale); the audio path, the ballistics
+// constants and the flux relief are untouched. Nathan's
+// calibration: COMP ≈ 1.5:1 at shallow/working depths
+// digging to ≈ 3:1 deep; LIMIT ≈ 3:1 already at
+// shallow/working depths rising to ≈ 4–5:1 deep. Measured
+// on the bench (perturbation method, knob 0.75 — the local
+// ratio where a +1 dB input step is parked at the depth):
+//   depth dB GR:        1     3     6     12    18
+//   COMP  (28/.60/2.2): 1.40  1.75  2.24  2.89  3.04
+//   LIMIT (90/.10/1.4): 2.62  2.93  3.45  4.30  5.01
+//   shipped (27/.38):   1.25  1.73  2.20  2.89  3.46
+// COMP is the shipped law with its deep end tamed (4.1:1
+// class -> 3:1); LIMIT firms the front with slope and a
+// lower sense scale (the lower sense flattens the deep end
+// against the slope's rise — the pair was solved together).
+// DEFAULT = LIMIT. The mode change slews the three law
+// parameters over ~5 ms so toggling never clicks; the auto
+// makeup rides GR, so it follows the mode by itself.
+// Session note: the APVTS 'limit' bool is repurposed
+// (true = COMP / false = LIMIT); a pre-1.1.9 session saved
+// with the switch OUT (false) now loads as LIMIT-active
+// instead of bypassed, and IN (true) loads as COMP.
+inline constexpr float kBa6aCompSlope  = 28.0f;
+inline constexpr float kBa6aCompToe    = 0.60f;
+inline constexpr float kBa6aCompSense  = 2.2f;
+inline constexpr float kBa6aLimitSlope = 90.0f;
+inline constexpr float kBa6aLimitToe   = 0.10f;
+inline constexpr float kBa6aLimitSense = 1.40f;
+inline constexpr float kBa6aLawSlewTauSec = 0.005f; // mode-change slew (~5 ms)
+// ─────────────────────────────────────────────────────────────────────
+// Oversampling (v53): the "breaking glass" fix — Nathan's
+// ear report on 1.1.8: pushing INPUT hard produced a hard,
+// unpleasant glassiness at the limits. Diagnosis
+// (docs/harshness-diagnosis.md): at HF the glass is ALIASING
+// — the nonlinear cascade runs at base rate, so at 5 kHz
+// 9.0% of the fundamental's energy at full drive is folded
+// inharmonic energy (vs 0.15% in a 384 kHz reference render).
+// The whole limiter core now runs at 2x the host rate
+// behind a polyphase windowed-sinc resampler pair
+// (Blackman-Harris prototype, 32 taps per phase, cutoff at
+// the host Nyquist), which cuts the 5 kHz folded energy to
+// 1.8% (the residue is decimation transition leakage of
+// genuine ultrasonic harmonics, and the two-tone test lands
+// within 0.5 pt of the 384 kHz truth). 4x measured barely
+// better (1.6%) at double the cost again and was rejected.
+// What oversampling cannot remove — the cascade's TRUE
+// high-order harmonics and intermodulation at extreme
+// depth (997 Hz H7+ ≈ 4.0%, two-tone off-grid ≈ 45% at
+// 36 dB GR) — is documented in the diagnosis as the model's
+// limit character, not a digital defect. Colour is
+// untouched: THD at the colour point is identical to
+// 1.1.8 (0.156%), and the statics (GR, RMS, peaks) match
+// the base-rate build to measurement precision.
+// Cost: full-chain CPU 4.8% -> 10.7% of realtime on the
+// bench VM (G1 pin re-based with cause, docs/
+// build-report-v53.md). Latency: the resampler pair adds
+// exactly 32 host samples at any rate, reported truthfully
+// through Chain::latencySamples(). One housekeeping item:
+// decimation ringing can overshoot the makeup ceiling's
+// 1.600 bound on flat-topped peaks (Gibbs), so the shipped
+// instant-ceiling law is re-applied once at the output
+// rate — it touches only samples above 1.600 (the ceiling
+// was exonerated as a harshness source in the diagnosis:
+// removing it changed no harsh metric).
+inline constexpr int   kBa6aOsRatio       = 2;
+inline constexpr int   kBa6aOsTapsPerPhase = 32; // prototype = 32*2+1 core-rate taps
 // Ballistics (v45 re-voice; research: docs/ballistics-refs.md).
 // The four toggle seats are Nathan's chosen reference voicings
 // — the BA-6A panel has no attack/release controls of its own
@@ -286,9 +370,23 @@ inline constexpr float kBa6aDetDecayTauSec = 0.030f;   // detector env decay
 // (creep), and a small demand (dim panel) slows the whole
 // response. tau = lerp(grab, creep, approach)
 //                 x (1 + dim x (1 - demand)).
-inline constexpr float kBa6aDetSlowGrabTauSec  = 0.002385f; // v45: 0.9 ms x2.65 (v46)
-inline constexpr float kBa6aDetSlowCreepTauSec = 0.00795f;  // v45: 3.0 ms x2.65 (v46)
+inline constexpr float kBa6aDetSlowGrabTauSec  = 0.002981f; // v45: 0.9 ms x2.65 (v46) x1.25 (v53)
+inline constexpr float kBa6aDetSlowCreepTauSec = 0.009938f; // v45: 3.0 ms x2.65 (v46) x1.25 (v53)
 inline constexpr float kBa6aDetSlowDim         = 2.6f;   // dim-panel slowdown factor
+// v53 (Nathan's ballistics confirmation): the SLOW attack
+// seat is the classic LA-2A (attack ~10 ms). The v46 seat
+// measured t90 7.85 ms on a full step / 9.33 ms on a small
+// step — ~20% fast against the restated reference — so the
+// three SLOW attack constants take one common x1.25 (the
+// v46 method: shapes and ratios preserved), landing the
+// full step at 9.7 ms and the small step at 11.4 ms,
+// bracketing the nominal 10 ms. The FAST attack seat is
+// NOT touched: Nathan ruled it stays exactly as shipped
+// (t90 0.375 ms). FAST release and SLOW release measured
+// on their references (0.057 s; 0.070 s / 2.24 s) and are
+// likewise untouched. The demand below is computed with
+// the SHIPPED law (the no-arg ba6aVariMuDb) in both ratio
+// modes, so the detector dynamics are mode-independent.
 inline float ba6aDetSlowTau(float peak, float env) {
     const float demand = clampf(ba6aVariMuDb(peak) / 25.0f, 0.0f, 1.0f);
     const float approach = peak > 1.0e-6f ? clampf(env / peak, 0.0f, 1.0f) : 1.0f;
@@ -297,7 +395,7 @@ inline float ba6aDetSlowTau(float peak, float env) {
     return base * (1.0f + kBa6aDetSlowDim * (1.0f - demand));
 }
 inline constexpr float kBa6aAttFastTauSec  = 0.000252f; // control attack pole, FAST (v45: 90 µs x2.8, v46)
-inline constexpr float kBa6aAttSlowTauSec  = 0.00477f;  // control attack pole, SLOW (v45: 1.8 ms x2.65, v46)
+inline constexpr float kBa6aAttSlowTauSec  = 0.005963f;  // control attack pole, SLOW (v45: 1.8 ms x2.65, v46) x1.25 (v53)
 inline constexpr float kBa6aRelSingleTauSec = 0.014f;  // FAST release (1176 seat)
 inline constexpr float kBa6aRelDualFastTauSec = 0.022f;
 inline constexpr float kBa6aRelDualSlowTauSec = 0.900f; // unstressed tail pole
@@ -338,6 +436,19 @@ public:
     void setReleaseFast(bool fast) { releaseFast_ = fast; }
     bool releaseFast() const { return releaseFast_; }
 
+    // Ratio mode (v53): COMP (true) / LIMIT (false, the
+    // default). Only the gain-computer law parameters have
+    // targets per mode; the currents slew to them at the
+    // core rate (~5 ms) inside processCore.
+    void setCompMode(bool comp)
+    {
+        compMode_ = comp;
+        lawSlopeT_ = comp ? kBa6aCompSlope : kBa6aLimitSlope;
+        lawToeT_   = comp ? kBa6aCompToe   : kBa6aLimitToe;
+        lawSenseT_ = comp ? kBa6aCompSense : kBa6aLimitSense;
+    }
+    bool compMode() const { return compMode_; }
+
     // Sidechain low-cut (v41, Nathan): a one-pole high-pass
     // in the DETECTOR FEED ONLY — per channel on the post-
     // iron sense signal, ahead of the peak combine. The
@@ -358,12 +469,45 @@ public:
 
     void process(float inL, float inR, float& outL, float& outR);
 
+    // Host-rate delay of the oversampling resampler pair
+    // (v53): (prototype length - 1) / ratio = 32 samples at
+    // any host rate. Reported through Chain::latencySamples.
+    int osDelaySamples() const
+    {
+        return (kBa6aOsTapsPerPhase * kBa6aOsRatio) / kBa6aOsRatio;
+    }
+
     float gainReductionDb() const { return grDb_; }
     float appliedMakeupDb() const { return makeupDb_; }
     float driveDb() const { return ba6aDriveDb(knobS_); }
 
 private:
+    void processCore(float inL, float inR, float& outL, float& outR);
     float processChannel(float x, int ch, float grLin, float driveLin);
+
+    // Oversampling state (v53): the core runs at fs_ =
+    // hostFs_ x kBa6aOsRatio. Polyphase FIR histories: the
+    // input ring holds the last 64 host samples per channel;
+    // the high-rate ring holds the last prototype-length
+    // core outputs. Coefficients are built in prepare().
+    double hostFs_ = 48000.0;
+    static constexpr int kOsTaps = kBa6aOsTapsPerPhase * kBa6aOsRatio + 1;
+    static constexpr int kOsHist = 64;
+    float osCoefUp_[kOsTaps] = {};
+    float osCoefDn_[kOsTaps] = {};
+    float osInL_[kOsHist] = {}, osInR_[kOsHist] = {};
+    int   osInPos_ = 0;
+    float osHighL_[kOsTaps + kBa6aOsRatio + 8] = {};
+    float osHighR_[kOsTaps + kBa6aOsRatio + 8] = {};
+    int   osHighPos_ = 0;
+
+    // Ratio-law state (v53): currents slew toward the
+    // mode targets at the core rate.
+    bool  compMode_ = false; // default LIMIT
+    float lawSlope_ = kBa6aLimitSlope, lawSlopeT_ = kBa6aLimitSlope;
+    float lawToe_   = kBa6aLimitToe,   lawToeT_   = kBa6aLimitToe;
+    float lawSense_ = kBa6aLimitSense, lawSenseT_ = kBa6aLimitSense;
+    float lawCoef_  = 0.0f;
 
     double fs_ = 48000.0;
     float knobTarget_ = 0.0f;
@@ -505,7 +649,6 @@ private:
 //    gainReductionDb() is 0 whenever limit is out.
 //  * Latency: 0 unless mod is in; then the ADT base offset.
 // ─────────────────────────────────────────────────────────────────────
-inline constexpr float kLimitFadeSec = 0.045f;
 
 class Chain {
 public:
@@ -518,8 +661,12 @@ public:
     void setReleaseFast(bool fast) { limiter_.setReleaseFast(fast); }
     bool releaseFast() const { return limiter_.releaseFast(); }
 
-    void setLimitIn(bool in);
-    bool limitIn() const { return limitTarget_; }
+    // Ratio mode (v53): the section is always engaged —
+    // the old limit in/out bypass is gone by design (see
+    // the COMP/LIMIT note at the law constants). COMP =
+    // true, LIMIT = false.
+    void setCompMode(bool comp) { limiter_.setCompMode(comp); }
+    bool compMode() const { return limiter_.compMode(); }
     void setScCutoff(float hz) { limiter_.setScCutoff(hz); }
     float scCutoff() const { return limiter_.scCutoff(); }
     void setModIn(bool in) { adt_.setEnabled(in); }
@@ -527,11 +674,15 @@ public:
 
     int latencySamples() const
     {
-        return adt_.enabled() ? adt_.latencySamples() : 0;
+        // v53: the limiter's oversampling delay is always in
+        // the path (the section is always engaged); the ADT
+        // base delay adds when MOD is in.
+        return limiter_.osDelaySamples()
+             + (adt_.enabled() ? adt_.latencySamples() : 0);
     }
     float gainReductionDb() const
     {
-        return limiter_.gainReductionDb() * limitFade_;
+        return limiter_.gainReductionDb();
     }
     const Ba6aLimiter& limiter() const { return limiter_; }
     const AdtChain& adt() const { return adt_; }
@@ -542,8 +693,6 @@ private:
     double fs_ = 48000.0;
     Ba6aLimiter limiter_;
     AdtChain adt_;
-    bool limitTarget_ = true;
-    float limitFade_ = 1.0f;
 };
 
 } // namespace osc72

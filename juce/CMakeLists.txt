@@ -12,7 +12,7 @@
 # NOTE: JUCE 8 is AGPLv3-or-commercial. DSP core has no JUCE dependency.
 
 cmake_minimum_required(VERSION 3.22)
-project(OSC72 VERSION 1.1.8)
+project(OSC72 VERSION 1.1.9)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

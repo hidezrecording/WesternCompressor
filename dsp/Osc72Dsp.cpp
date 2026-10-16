@@ -12,7 +12,35 @@ namespace osc72 {
 
 void Ba6aLimiter::prepare(double sampleRate)
 {
-    fs_ = sampleRate > 0.0 ? sampleRate : 48000.0;
+    hostFs_ = sampleRate > 0.0 ? sampleRate : 48000.0;
+    fs_ = hostFs_ * (double)kBa6aOsRatio; // v53: the core runs oversampled
+
+    // Oversampling prototype (v53): windowed-sinc low-pass,
+    // cutoff at the host Nyquist, Blackman-Harris window.
+    // Sum-normalised so each polyphase up phase sums to ~1
+    // and the down filter's DC gain is 1.
+    {
+        const int c = (kOsTaps - 1) / 2;
+        double sum = 0.0;
+        for (int j = 0; j < kOsTaps; ++j) {
+            const double x = ((double)j - c) / (double)kBa6aOsRatio;
+            const double sinc = x == 0.0 ? 1.0
+                : std::sin(3.14159265358979323846 * x)
+                / (3.14159265358979323846 * x);
+            const double ph = 2.0 * 3.14159265358979323846 * j / (kOsTaps - 1);
+            const double w = 0.35875 - 0.48829 * std::cos(ph)
+                           + 0.14128 * std::cos(2 * ph)
+                           - 0.01168 * std::cos(3 * ph);
+            osCoefUp_[j] = (float)(sinc * w);
+            sum += sinc * w;
+        }
+        for (int j = 0; j < kOsTaps; ++j) {
+            osCoefDn_[j] = (float)(osCoefUp_[j] / sum);
+            osCoefUp_[j] = (float)(osCoefUp_[j] * (kBa6aOsRatio / sum));
+        }
+    }
+    lawCoef_ = tauCoef(kBa6aLawSlewTauSec, fs_);
+
     setScCutoff(scCutoffHz_);   // v41: refresh the sidechain coefficient at the real rate
     ironInL_.prepare(fs_);  ironInR_.prepare(fs_);
     ironMidL_.prepare(fs_); ironMidR_.prepare(fs_);
@@ -22,6 +50,12 @@ void Ba6aLimiter::prepare(double sampleRate)
 
 void Ba6aLimiter::reset()
 {
+    for (int i = 0; i < kOsHist; ++i) osInL_[i] = osInR_[i] = 0.0f;
+    osInPos_ = 0;
+    for (int i = 0; i < kOsTaps + kBa6aOsRatio + 8; ++i)
+        osHighL_[i] = osHighR_[i] = 0.0f;
+    osHighPos_ = 0;
+    lawSlope_ = lawSlopeT_; lawToe_ = lawToeT_; lawSense_ = lawSenseT_;
     ironInL_.reset();  ironInR_.reset();
     ironMidL_.reset(); ironMidR_.reset();
     ironOutL_.reset(); ironOutR_.reset();
@@ -97,6 +131,58 @@ float Ba6aLimiter::processChannel(float x, int ch, float grLin, float driveLin)
 
 void Ba6aLimiter::process(float inL, float inR, float& outL, float& outR)
 {
+    // Oversampled wrapper (v53): upsample x2 (polyphase),
+    // run the core at the high rate, decimate. The pair's
+    // group delay is 32 host samples, reported via
+    // osDelaySamples().
+    constexpr int HS = kOsTaps + kBa6aOsRatio + 8;
+    osInL_[osInPos_] = inL;
+    osInR_[osInPos_] = inR;
+    for (int p = 0; p < kBa6aOsRatio; ++p) {
+        float upL = 0.0f, upR = 0.0f;
+        for (int idx = p, k = 0; idx < kOsTaps; idx += kBa6aOsRatio, ++k) {
+            const float xvL = osInL_[(osInPos_ - k) & (kOsHist - 1)];
+            const float xvR = osInR_[(osInPos_ - k) & (kOsHist - 1)];
+            upL += osCoefUp_[idx] * xvL;
+            upR += osCoefUp_[idx] * xvR;
+        }
+        float dnL, dnR;
+        processCore(upL, upR, dnL, dnR);
+        osHighPos_ = (osHighPos_ + 1) % HS;
+        osHighL_[osHighPos_] = dnL;
+        osHighR_[osHighPos_] = dnR;
+    }
+    osInPos_ = (osInPos_ + 1) & (kOsHist - 1);
+    float accL = 0.0f, accR = 0.0f;
+    for (int j = 0; j < kOsTaps; ++j) {
+        const int idx = ((osHighPos_ - j) % HS + HS) % HS;
+        accL += osCoefDn_[j] * osHighL_[idx];
+        accR += osCoefDn_[j] * osHighR_[idx];
+    }
+    // The shipped peak discipline, re-applied at the output
+    // rate (v53): decimation ringing on ceiling-limited
+    // peaks can overshoot the 1.600 bound (Gibbs); this is
+    // the makeup ceiling's own instant law and touches only
+    // samples above it — see the oversampling note in the
+    // header.
+    const float ipk = std::max(std::fabs(accL), std::fabs(accR));
+    if (ipk > kBa6aMakeupPeakCeil) {
+        const float g = kBa6aMakeupPeakCeil / ipk;
+        accL *= g; accR *= g;
+    }
+    outL = accL;
+    outR = accR;
+}
+
+void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
+{
+    // Ratio-law slew (v53): the mode's slope/toe/sense glide
+    // to their targets (~5 ms) so a mode toggle never steps
+    // the gain computer.
+    lawSlope_ += (lawSlopeT_ - lawSlope_) * lawCoef_;
+    lawToe_   += (lawToeT_   - lawToe_)   * lawCoef_;
+    lawSense_ += (lawSenseT_ - lawSense_) * lawCoef_;
+
     // Knob smoothing (5 ms): the attenuator is stepped on the
     // hardware; a short slew keeps moves click-free without
     // changing the law.
@@ -129,14 +215,14 @@ void Ba6aLimiter::process(float inL, float inR, float& outL, float& outR)
     const bool scIn = scCutoffHz_ > 10.5f;
     const float senL = scIn ? lastPreL_ - scLpL_ : lastPreL_;
     const float senR = scIn ? lastPreR_ - scLpR_ : lastPreR_;
-    const float peak = kBa6aDetSense
+    const float peak = lawSense_
                      * std::max(std::fabs(senL), std::fabs(senR));
     const float detTau = peak > detEnv_
         ? (attackFast_ ? kBa6aDetFastTauSec : ba6aDetSlowTau(peak, detEnv_))
         : kBa6aDetDecayTauSec;
     detEnv_ += (peak - detEnv_) * tauCoef(detTau, fs_);
 
-    const float target = ba6aVariMuDb(detEnv_);
+    const float target = ba6aVariMuDb(detEnv_, lawSlope_, lawToe_);
 
     // ── Control state: BOTH recovery networks run every
     // sample; the toggle selects which one drives the stage,
@@ -391,39 +477,15 @@ void Chain::reset()
 {
     limiter_.reset();
     adt_.reset();
-    limitTarget_ = true;
-    limitFade_ = 1.0f;
-}
-
-void Chain::setLimitIn(bool in)
-{
-    limitTarget_ = in;
 }
 
 void Chain::process(float inL, float inR, float& outL, float& outR)
 {
-    // The limiter always runs on the input: detector, make-up
-    // and knob smoothing stay live so re-engaging is seamless.
-    float limL, limR;
-    limiter_.process(inL, inR, limL, limR);
-
-    // Limit crossfade (45 ms linear ramp).
-    const float step = 1.0f / (kLimitFadeSec * (float)fs_);
-    if (limitTarget_ && limitFade_ < 1.0f)
-        limitFade_ = std::min(1.0f, limitFade_ + step);
-    else if (!limitTarget_ && limitFade_ > 0.0f)
-        limitFade_ = std::max(0.0f, limitFade_ - step);
-
+    // The limiter section is always engaged (v53: the old
+    // in/out bypass became the COMP/LIMIT ratio mode switch,
+    // which lives inside the limiter's gain computer).
     float midL, midR;
-    if (limitFade_ <= 0.0f) {
-        midL = inL;  midR = inR;             // limiter fully out: exact dry
-    } else if (limitFade_ >= 1.0f) {
-        midL = limL; midR = limR;            // limiter fully in: exact path
-    } else {
-        const float d = 1.0f - limitFade_;
-        midL = inL * d + limL * limitFade_;
-        midR = inR * d + limR * limitFade_;
-    }
+    limiter_.process(inL, inR, midL, midR);
     // ADT insert (bit-exact copy when mod is out).
     adt_.process(midL, midR, outL, outR);
 }

@@ -28,7 +28,10 @@ Osc72Processor::createParameterLayout()
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID { "allTheWay", 1 }, "All The Way",
-        juce::NormalisableRange<float>(0.0f, 10.0f, 0.01f), 0.0f,
+        // v53 (Nathan): the default opening state is INPUT at
+        // 5 — the 1.1.5 staging's "barely kissing" point
+        // (a nominal -14 dBFS signal draws ~1.8 dB of GR).
+        juce::NormalisableRange<float>(0.0f, 10.0f, 0.01f), 5.0f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [](float v, int) { return juce::String(v, 1); },
         [](const juce::String& t) { return t.getFloatValue(); }));
@@ -37,11 +40,14 @@ Osc72Processor::createParameterLayout()
     // Default OUT; when out the insert is bit-transparent.
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID { "warble", 1 }, "Warble", false));
-    // Limit in/out (Nathan, 2026-10-14, v8): the compressor's own
-    // bypass toggle on the faceplate. Default IN. With limit out
-    // and mod out the plugin is bit-exact dry with zero latency.
+    // Ratio mode (v53, Nathan): the old limit in/out bypass
+    // toggle repurposed — true = COMP, false = LIMIT, and the
+    // section is always engaged. Default LIMIT (false), the
+    // firmer law. Session note: a pre-1.1.9 session saved OUT
+    // (false) loads as LIMIT-active rather than bypassed;
+    // saved IN (true) loads as COMP.
     params.push_back(std::make_unique<juce::AudioParameterBool>(
-        juce::ParameterID { "limit", 1 }, "Limit", true));
+        juce::ParameterID { "limit", 1 }, "Limit", false));
     // Power (Nathan, 2026-10-14, v19): the strip's POWER toggle,
     // a third switch cluster matching LIMIT/MOD. Default ON.
     // Power off = the whole unit goes off, "like our other
@@ -121,8 +127,8 @@ void Osc72Processor::prepareToPlay(double sampleRate, int)
 {
     chain_.prepare(sampleRate);
     chain_.setKnob(apvts.getRawParameterValue("allTheWay")->load() / 10.0f);
-    limitIn_ = apvts.getRawParameterValue("limit")->load() > 0.5f;
-    chain_.setLimitIn(limitIn_);
+    compMode_ = apvts.getRawParameterValue("limit")->load() > 0.5f;
+    chain_.setCompMode(compMode_);
     warbleOn_ = apvts.getRawParameterValue("warble")->load() > 0.5f;
     chain_.setModIn(warbleOn_);
     attackFast_ = apvts.getRawParameterValue("attackFast")->load() > 0.5f;
@@ -146,9 +152,10 @@ void Osc72Processor::prepareToPlay(double sampleRate, int)
     // v44: the dry tap starts settled on the current target.
     dryDelayA_ = dryDelayB_ = powerOn_ ? chain_.latencySamples() : 0;
     dryTapFade_ = 1.0f;
-    // Truthful latency: 0 unless mod is in; then the ADT
-    // insert's base delay (20 ms). v19: 0 while POWER is off — the chain
-    // is out of the path entirely.
+    // Truthful latency: the limiter's oversampling delay
+    // (32 samples, v53) always; the ADT insert's base delay
+    // (20 ms) adds while mod is in. v19: 0 while POWER is
+    // off — the chain is out of the path entirely.
     setLatencySamples(powerOn_ ? chain_.latencySamples() : 0);
 }
 
@@ -158,14 +165,16 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
     juce::ScopedNoDenormals noDenormals;
     chain_.setKnob(apvts.getRawParameterValue("allTheWay")->load() / 10.0f);
 
-    // Faceplate toggle edges. 'limit' just re-points the chain's
-    // crossfade (no latency consequence). 'mod' engages/disengages
-    // the warble insert and keeps the reported latency honest.
-    const bool wantLimit = apvts.getRawParameterValue("limit")->load() > 0.5f;
-    if (wantLimit != limitIn_)
+    // Faceplate toggle edges. 'limit' selects the ratio mode
+    // (v53: true = COMP / false = LIMIT; the law slews inside
+    // the gain computer, no click, no latency consequence).
+    // 'mod' engages/disengages the warble insert and keeps
+    // the reported latency honest.
+    const bool wantComp = apvts.getRawParameterValue("limit")->load() > 0.5f;
+    if (wantComp != compMode_)
     {
-        limitIn_ = wantLimit;
-        chain_.setLimitIn(limitIn_);
+        compMode_ = wantComp;
+        chain_.setCompMode(compMode_);
     }
     const bool wantWarble = apvts.getRawParameterValue("warble")->load() > 0.5f;
     if (wantWarble != warbleOn_)
@@ -330,8 +339,7 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
         }
     }
     // Publish the gain reduction for the magic-eye display in the
-    // editor (the chain already reads 0 while limit is out).
-    // v19: while POWER is off the eye reads nothing.
+    // editor. v19: while POWER is off the eye reads nothing.
     displayedGrDb_.store(powerOn_ ? chain_.gainReductionDb() : 0.0f,
                          std::memory_order_relaxed);
 }

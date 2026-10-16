@@ -75,10 +75,10 @@ jobs:
           pkgbuild --root "$PKGROOT" \
             --component-plist components.plist \
             --identifier com.sabatinoaudio.westerncompressor \
-            --version 1.1.8 \
+            --version 1.1.9 \
             --install-location / \
             --scripts pkg_scripts \
-            WesternCompressor-1.1.8-macOS.pkg
+            WesternCompressor-1.1.9-macOS.pkg
 
       - name: Upload plugins
         uses: actions/upload-artifact@v4
@@ -90,4 +90,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: WesternCompressor-Installer-macOS-${{ github.run_number }}
-          path: WesternCompressor-1.1.8-macOS.pkg
+          path: WesternCompressor-1.1.9-macOS.pkg
