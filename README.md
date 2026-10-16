@@ -840,6 +840,33 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.1.8 — LF FLUX RELIEF (diagnosis
+docs/lf-blowout-diagnosis.md; report
+docs/build-report-v52.md). Nathan's ear verdict on
+1.1.7: at high INPUT the low end "hits a wall" and
+blows out too quickly. Stage bisection put the LF
+excess on the irons (92% of distortion power at knob
+0.5, 47% at 0.85, ~0% at 1 kHz) — the waveshape gate
+stood fully open at storm flux while the regulated
+swing ran through it; the detector, the make-up
+ceiling and the imbalance term were exonerated by
+measurement. Fix (the ONLY change in this release):
+the iron gate is multiplied by a flux-relief factor
+1/(1+(|flux|/0.35)^2) — real-core saturation behaviour
+(incremental permeability collapses, so the colour
+stops growing instead of squaring): ~0.99 at nominal
+programme flux, ~0.91 at the hot colour point, ~0.52
+at a 40 Hz storm peak; a measured no-op at 1 kHz
+(flux ~0.02). 40 Hz THD at -10 dBFS: 5.73 -> 4.62% at
+knob 0.75, 11.37 -> 9.38% at 0.85; the 5%-THD crossing
+moves 0.72 -> 0.76 of knob. Density/weight held:
+programme mean GR at max 31.1 dB, LF share unchanged,
+bloom +7.87 dB; zero pins moved. GUI unchanged
+(snapshot byte-identical to docs/gui-v49-a.png);
+installer unchanged from 1.1.6 (relocation off;
+preinstall byte-compare passes). Suites: DSP 42/42,
+processor 31/31.
+
 v1.1.7 — METER REWORK (GUI v45–v49; reports
 docs/build-report-v47.md … v51.md) + ADT TRIM.
 Nathan's ear/eye rounds on 1.1.6. The gain-reduction

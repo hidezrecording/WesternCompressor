@@ -78,7 +78,9 @@ inline float tubeSat(float x, float drive, float asym) {
 // core flux state is a ~30 Hz magnetisation average of the
 // signal (real flux is the signal's integral, so colour lives
 // at LF and the top stays clean); flux gates a soft odd/even
-// waveshape. The model's ONLY memory is that flux state,
+// waveshape, with the v52 flux-relief knee backing the gate
+// off as the core saturates (kIronFluxReliefKnee). The
+// model's ONLY memory is that flux state,
 // discharging in ~5 ms — colour starts and stops with the
 // signal (criterion 3, dryness: no ring, no tail). Voiced FAT
 // per criteria 1/2 (density/weight, always-on colour): these
@@ -86,6 +88,32 @@ inline float tubeSat(float x, float drive, float asym) {
 // ticket — the deviation is documented in the design doc §8.
 // ─────────────────────────────────────────────────────────────────────
 inline constexpr float kIronFluxTauSec = 0.0053f; // ~30 Hz flux average
+// Flux relief knee (v52; docs/lf-blowout-diagnosis.md,
+// docs/build-report-v52.md). Nathan's ear verdict on 1.1.7:
+// at high INPUT the low end "hits a wall" and blows out too
+// quickly. The bisection put the LF excess on the irons
+// (92 % of distortion power at knob 0.5, 47 % at 0.85, ~0 %
+// at 1 kHz) — specifically on the waveshape gate standing
+// fully open at storm flux while the regulated swing runs
+// through it. A real core answers that region by SATURATING:
+// incremental permeability collapses, the magnetisation
+// cannot be pushed further, and the colour stops growing
+// instead of squaring. The relief factor models exactly
+// that: 1 / (1 + (|flux|/knee)^2) multiplies the gate —
+// ~0.99 at a typical nominal flux peak (~0.06, a -20 dBFS
+// programme peak), ~0.91 at the hot E1 colour point (0.112),
+// ~0.52 at a 40 Hz storm peak (0.43, knob 0.85), ~0.28 deep
+// in the storm (0.66, knob 1.0). It reads the flux STATE
+// only; the state's own dynamics (tau, dryness) are
+// untouched, and at MF/HF flux ~ 0.02 so the relief is a
+// measured no-op there (1 kHz wall identical to 0.01 pt).
+// Knee 0.35 = the measured knee of the trade: the next step
+// down (0.28) bought ~0.3 pt more wall relief for ~1.5x
+// the nominal-colour cost. Measured at the knee (40 Hz,
+// -10 dBFS): THD 5.73 -> 4.62 % at knob 0.75 and
+// 11.37 -> 9.38 % at 0.85; the 5 %-THD crossing moves
+// 0.72 -> 0.76 of knob. E1a colour cost 1.06 -> 1.01 %.
+inline constexpr float kIronFluxReliefKnee = 0.35f;
 
 class IronStage {
 public:
@@ -108,7 +136,13 @@ public:
         float z = clampf(x * drive, -3.0f, 3.0f);
         z += asym_ * z * z;                        // even-order warmth
         const float shaped = z + odd_ * (tanhPade(z) - z);
-        const float gate = aFlux / (aFlux + knee_);
+        // Flux relief (v52, kIronFluxReliefKnee above): past
+        // the knee the core saturates and the gate backs off,
+        // so storm-flux LF linearises progressively instead
+        // of squaring into the wall.
+        const float relief = 1.0f / (1.0f + (aFlux / kIronFluxReliefKnee)
+                                          * (aFlux / kIronFluxReliefKnee));
+        const float gate = aFlux / (aFlux + knee_) * relief;
         return x + gate * (shaped - x);
     }
     float flux() const { return flux_; }
