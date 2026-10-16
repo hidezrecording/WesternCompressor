@@ -227,6 +227,80 @@
 // darkness law (the gr= series shows the patterned field
 // narrowing: full woven glow / partly closed / narrow
 // patterned centre strip).
+// v49 shots: gui-v49-a.png / gui-v49-off.png ("poweroff") /
+// gui-v49-gr-{20,25}.png + gui-v49-display-crop.png
+// (the 0 dB display at 3x). v49 changes (Nathan, on the
+// v48 stills): RIB SHADING DEPTH ONLY — "make all the
+// vertical shading slightly darker so it looks deeper
+// and more 3D, but taper it off toward the edges." In
+// buildGrFieldImage the rib louver's two amplitudes
+// scale together about their 0.62 base by
+// 1 + 0.18 * cos^2(pi * (u - 1/2)): the full +18% of
+// shading contrast at the field centre (groove point
+// 0.425 -> 0.390, crest-to-valley swing 0.615 -> 0.726),
+// easing to ZERO extra depth at the far edges, whose
+// columns keep exactly the v48 shading. The ramp's
+// colour stops, the closing masks, the fin span, the
+// geometry and the lit law do not move.
+// v48 shots: gui-v48-a.png / gui-v48-off.png ("poweroff") /
+// gui-v48-gr-{20,25}.png + gui-v48-display-crop.png
+// (the 0 dB display at 3x). v48 changes (Nathan, on the
+// v47 stills): MASK FALLOFF ONLY — the centre brightness
+// is approved, but the gradient falls too far to the
+// edges, so the centre-to-edge darkening is reduced by
+// about a third: the leading edge stays (28, 155, 65),
+// the delta (5, 26, 11) shrinks to (3, 17, 7) and the
+// mask floor rises (23, 129, 54) -> (25, 138, 58). The
+// field ramp's dark end re-anchors on the new floor
+// (its intermediate stops keep their relative positions;
+// the v41 invariant holds), the dead-glass gradient
+// tracks in step, and the field BRIGHT stops, geometry
+// and lit law do not move.
+// v47 shots: gui-v47-a.png / gui-v47-off.png ("poweroff") /
+// gui-v47-gr-{20,25}.png + gui-v47-display-crop.png
+// (the 0 dB display at 3x). v47 changes (Nathan, on the
+// v46 stills): MASK LADDER ONLY — the dark triangles
+// toward the centre are "pretty good" but it gets too
+// dark by the edges, so the gradient's shape stays and
+// the whole ladder shifts up one step: mask floor
+// (18, 103, 43) -> (23, 129, 54) (v46's leading edge
+// becomes the edges' brightness), leading edge
+// (23, 129, 54) -> (28, 155, 65). The field ramp's
+// dark end steps x1.25 with it (floor lands exactly on
+// the new mask floor; the v41 invariant holds), the
+// dead-glass gradient tracks in step, and the field
+// BRIGHT stops, geometry and lit law do not move.
+// v46 shots: gui-v46-a.png / gui-v46-off.png ("poweroff") /
+// gui-v46-gr-{0,20,25}.png + gui-v46-display-crop.png
+// (the 0 dB display at 3x). v46 changes (Nathan, on the
+// v45 stills): (1) the v45 meter was a little TOO short
+// — the frame grows ~15% taller than v45: virtual
+// (124, 45.8, 192, 60.4), same width, still centred
+// (220, 76), artwork re-rendered natively (height line:
+// 70 -> 52.5 -> 60.4 across v44/v45/v46); (2) a global
+// brightening of the meter palette — the field ramp's
+// dark end steps x1.25 (floor (14, 82, 34) ->
+// (18, 103, 43)), its bright stops x1.20 (peak
+// (138, 250, 150) -> (166, 255, 180), G clamped at
+// 255), the mask gradient steps up with it (floor
+// (18, 103, 43), leading edge (23, 129, 54), shape
+// unchanged), and the dead-glass gradient tracks in
+// step ((19, 90, 36) -> (11, 59, 24)). Nothing outside
+// the meter artwork moves.
+// v45 shots: gui-v45-a.png / gui-v45-b.png ("warble") /
+// gui-v45-off.png ("poweroff") + gui-v45-gr-{0,10,20,25}.png
+// + gui-v45-display-crop.png (the 0 dB display at 3x).
+// (The v37–v44 iterations — bow-tie field, static artwork
+// + masks, palette lifts — are recorded in their build
+// reports, docs/build-report-v37..v46.md.) v45 changes
+// (Nathan, on 1.1.6): (1) the display assembly is a
+// QUARTER SHORTER — frame virtual (124, 49.75, 192, 52.5),
+// same width, still centred (220, 76), artwork rendered
+// natively at the new height; (2) the closing masks are
+// no longer flat — a horizontal gradient: the leading
+// edge rides at the floor brightened ~25% ((18, 103, 43))
+// falling to the floor (14, 82, 34) at the field edges,
+// the rib shading still reading through the feather.
 // v36 shots: gui-v36-a.png / gui-v36-b.png ("warble") /
 // gui-v36-off.png ("poweroff") + gui-v36-gr-{0,10,25}.png
 // + gui-v36-display-crop.png (the 0 dB display at 3x).

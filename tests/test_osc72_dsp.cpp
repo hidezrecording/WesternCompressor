@@ -642,8 +642,14 @@ int main() {
         // corr 0.62 -> 0.79, side/mid 0.49 -> 0.35 measured.
         // The pins still require real widening (dry mono
         // corr is 1.00, side/mid 0). See build-report-v40.md.
-        check(corr < 0.85, "F2a mono source decorrelates (widens)", d);
-        check(width > 0.30, "F2b mono source gains real side energy", d);
+        // v46 pin moves (ADT deck trim x0.85 again, Nathan:
+        // the ADT mix 15% less on 1.1.6 — kAdtDeckGain
+        // 0.4920 -> 0.4182): corr 0.83 -> 0.87, side/mid
+        // 0.32 -> 0.27 measured on this tree. Thresholds
+        // relaxed to 0.90 / 0.24; the pins still require
+        // real widening. See build-report-v48.md.
+        check(corr < 0.90, "F2a mono source decorrelates (widens)", d);
+        check(width > 0.24, "F2b mono source gains real side energy", d);
     }
     {
         // F3: STEREO feed also widens vs its dry correlation.
@@ -674,7 +680,11 @@ int main() {
         std::snprintf(d, sizeof d, "stereo corr dry %.2f -> wet %.2f", dry, wet);
         // v1.1.1 pin move (ADT trim): wet corr 0.55 -> 0.66
         // measured; margin relaxed 0.15 -> 0.08.
-        check(wet < dry - 0.08, "F3 stereo programme decorrelates under ADT", d);
+        // v46 pin move (ADT trim x0.85, Nathan — see F2):
+        // wet corr 0.68 -> 0.70 against dry 0.78 measured;
+        // margin relaxed 0.08 -> 0.05. The pin still
+        // requires a clear decorrelation gap.
+        check(wet < dry - 0.05, "F3 stereo programme decorrelates under ADT", d);
     }
     {
         // F4: pitch swing on a steady tone, measured in the

@@ -398,8 +398,12 @@ inline constexpr float kAdtMotorTauSec = 0.180f;
 // LFOs and deck machinery are unchanged. v1.1.2 (his
 // verdict on 1.1.1: the MOD "could come down another
 // ~10%") trims a further x0.90 -> 0.492, which is 60% of
-// the 1.1.0 return level exactly.
-inline constexpr float kAdtDeckGain    = 0.82f * (2.0f / 3.0f) * 0.90f;
+// the 1.1.0 return level exactly. v46 round (Nathan, on
+// 1.1.6: the ADT mix goes 15% LESS again) trims a further
+// x0.85 -> 0.4182, which is 51% of the 1.1.0 return
+// level exactly. Timing, LFOs and deck machinery are
+// unchanged, as in every trim.
+inline constexpr float kAdtDeckGain    = 0.82f * (2.0f / 3.0f) * 0.90f * 0.85f;
 inline constexpr float kAdtFadeSec     = 0.030f;
 inline constexpr float kAdtMinDelayMs  = 3.0f;
 

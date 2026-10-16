@@ -1556,7 +1556,20 @@ void drawDisplayFrame(juce::Graphics& g, juce::Rectangle<float> outer)
 juce::Image Osc72Editor::buildGrFieldImage()
 {
     // Field geometry — must match drawGrDisplay's.
-    const juce::Rectangle<float> frame(124.0f, 41.0f, 192.0f, 70.0f);
+    // v45 (Nathan): the whole display assembly is a
+    // QUARTER SHORTER — frame height 70 -> 52.5 virtual
+    // px, width unchanged — still centred on (220, 76),
+    // so the frame top moves 41 -> 49.75 and the POWER
+    // toggle stays on its centre line. The artwork is
+    // rendered natively at the new size (the field is
+    // normalised u/v throughout, so the bow tie simply
+    // re-renders at the shorter height — no rescale).
+    // v46 (Nathan): v45 was a little TOO short — the
+    // frame grows ~15% taller than v45: height 52.5 ->
+    // 60.4 virtual px, top 49.75 -> 45.8, width and
+    // centre (220, 76) unchanged, artwork re-rendered
+    // natively at the new height as before.
+    const juce::Rectangle<float> frame(124.0f, 45.8f, 192.0f, 60.4f);
     const auto field = frame.reduced(6.5f).reduced(5.0f, 5.0f);
     const float fx = field.getX(), fy = field.getY();
     const float fw = field.getWidth(), fh = field.getHeight();
@@ -1619,14 +1632,65 @@ juce::Image Osc72Editor::buildGrFieldImage()
     // remaining contrast again to ~2:1, where "closed"
     // would stop reading as dark — this step is safe, the
     // direction is not bottomless.
+    // v45 (Nathan): the ramp is UNCHANGED — floor stays
+    // (14, 82, 34). This round's brightening lives in the
+    // closing MASKS (see drawGrDisplay): the mask is no
+    // longer flat — its leading edge rides ~25% above the
+    // floor and falls back to the floor at the field
+    // edges, so the artwork's own darks (this ramp) and
+    // the mask's outer reaches still meet at the floor.
+    // v46 (Nathan, on the v45 stills): "both the main
+    // green and the dark green areas should be brighter
+    // green" — one clear GLOBAL step up the ladder.
+    // The dark end takes the masks' own ladder step
+    // (x1.25 per channel): floor (14, 82, 34) ->
+    // (18, 103, 43) — exactly the new mask floor, so the
+    // v41 invariant (artwork darks = mask floor = the
+    // fully-closed shade) survives the move; 0.30
+    // (20, 116, 46) -> (25, 145, 58); 0.55 (23, 140, 51)
+    // -> (29, 175, 64). The bright stops rise x1.20 per
+    // channel: 0.78 (53, 196, 82) -> (64, 235, 98);
+    // 0.95 (96, 244, 120) -> (115, 255, 144) and 1.12
+    // (138, 250, 150) -> (166, 255, 180) — at the top
+    // two stops G is already at 244/250, so its x1.20
+    // clamps at 255 and R/B carry the step. Hue, rib
+    // structure, sparkle and every shading relationship
+    // are untouched — only the stops' values move.
+    // v47 (Nathan, on the v46 stills): the dark triangles
+    // toward the centre are "pretty good", but it gets
+    // "too dark by the edges" — keep the mask gradient,
+    // shift the whole ladder up: v46's centre brightness
+    // becomes approximately the edges' brightness, and
+    // the centre goes brighter still. The ramp's DARK
+    // END steps with the masks by the same x1.25 as
+    // v46, so the v41 invariant (artwork floor = mask
+    // floor = fully-closed shade) holds at the new
+    // floor: floor (18, 103, 43) -> (23, 129, 54) —
+    // exactly the new mask floor; 0.30 (25, 145, 58) ->
+    // (31, 181, 73); 0.55 (29, 175, 64) -> (36, 219,
+    // 80). The BRIGHT stops (0.78 up) do NOT move this
+    // round — Nathan asked only for the darks.
+    // v48 (Nathan, on the v47 stills): the centre is
+    // approved, but the gradient "does not have to stand
+    // out so much" — reduce the centre-to-edge darkening
+    // by about a third. The mask's leading edge (28, 155,
+    // 65) does NOT move; only its floor rises, so the
+    // ramp's floor lands exactly on the new mask floor
+    // (25, 138, 58) and the v41 invariant holds. The
+    // intermediate dark stops keep their relative
+    // positions — each holds the same fraction of the way
+    // from the floor to the 0.78 bright stop as in v47:
+    // 0.30 (31, 181, 73) -> (33, 186, 75); 0.55 (36, 219,
+    // 80) -> (37, 220, 82). The BRIGHT stops (0.78 up)
+    // do NOT move this round either.
     auto ramp = [](float L, float& r, float& g, float& b) {
         static const float stops[][4] = {
-            { 0.00f,  14.0f,  82.0f,  34.0f },
-            { 0.30f,  20.0f, 116.0f,  46.0f },
-            { 0.55f,  23.0f, 140.0f,  51.0f },
-            { 0.78f,  53.0f, 196.0f,  82.0f },
-            { 0.95f,  96.0f, 244.0f, 120.0f },
-            { 1.12f, 138.0f, 250.0f, 150.0f },
+            { 0.00f,  25.0f, 138.0f,  58.0f },
+            { 0.30f,  33.0f, 186.0f,  75.0f },
+            { 0.55f,  37.0f, 220.0f,  82.0f },
+            { 0.78f,  64.0f, 235.0f,  98.0f },
+            { 0.95f, 115.0f, 255.0f, 144.0f },
+            { 1.12f, 166.0f, 255.0f, 180.0f },
         };
         L = osc72::clampf(L, 0.0f, 1.12f);
         int i = 0;
@@ -1657,7 +1721,26 @@ juce::Image Osc72Editor::buildGrFieldImage()
         const float ridge = std::pow(0.5f + 0.5f * std::cos(6.2831853f * (ph - 0.45f)), 1.2f);
         const float grooveD = std::min(ph, 1.0f - ph);
         const float groove = std::exp(-std::pow(grooveD / 0.11f, 2.0f));
-        colRib[ix] = 0.62f + 0.42f * ridge - 0.20f * groove;
+        // v49 (Nathan, on the v48 stills): "make all the
+        // vertical shading slightly darker so it looks
+        // deeper and more 3D, but taper it off toward the
+        // edges." The rib shading's two AMPLITUDES scale
+        // together about the 0.62 base by
+        // ribAmp = 1 + 0.18 * cos^2(pi * (u - 1/2)): the
+        // full +18% of extra contrast at the field centre
+        // (the groove point falls 0.425 -> 0.390 and the
+        // crest-to-valley swing grows 0.615 -> 0.726),
+        // easing smoothly through +9% at the quarter
+        // points to ZERO extra depth at the far edges —
+        // the edge columns keep exactly the v48 shading.
+        // Only the artwork's rib term moves: the ramp's
+        // colour stops, the masks, the fin span and the
+        // lit law are all untouched, and the deepening
+        // reads through the closing masks exactly as the
+        // shading did before.
+        const float depthEnv = std::pow(std::cos(3.14159265f * (u - 0.5f)), 2.0f);
+        const float ribAmp = 1.0f + 0.18f * depthEnv;
+        colRib[ix] = 0.62f + ribAmp * (0.42f * ridge - 0.20f * groove);
         // v39 (Nathan's law): the dark span h is ZERO across
         // exactly the central rib's width (halfBar each side
         // of u = 1/2) and grows LINEARLY with distance beyond
@@ -1792,10 +1875,19 @@ juce::Image Osc72Editor::buildGrFieldImage()
 // Geometry (virtual): frame (124, 41, 192, 70), centre
 // (220, 76) — tucked BETWEEN the ATTACK/RELEASE toggle
 // plates (x 73..113 / 327..367): 11 px of air each side.
+// v45 (Nathan): the frame is a quarter shorter —
+// (124, 49.75, 192, 52.5), same width, same centre
+// (220, 76); nothing else on the panel moves (the
+// GAIN REDUCTION caption keeps its line above, the
+// ATTACK/RELEASE words keep theirs below, POWER stays
+// on the centre line).
+// v46 (Nathan): a little too short — the frame grows
+// ~15% taller than v45: (124, 45.8, 192, 60.4), same
+// width, same centre; still nothing else moves.
 // ─────────────────────────────────────────────────────────────────────
 void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
 {
-    const juce::Rectangle<float> frame(124.0f, 41.0f, 192.0f, 70.0f);
+    const juce::Rectangle<float> frame(124.0f, 45.8f, 192.0f, 60.4f);
     const auto window = frame.reduced(6.5f);          // inside the gold band
     const auto field = window.reduced(5.0f, 5.0f);    // the ribbed field
     const float cx = frame.getCentreX();
@@ -1829,9 +1921,23 @@ void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
     // v44: in step with the v44 ramp — (15, 72, 29)
     // -> (9, 47, 19), still a step below the new floor
     // (top G 72 vs floor G 82, the same 10-unit gap as v43).
+    // v46: in step with the v46 ramp — the same x1.25
+    // ladder step as the dark end: (19, 90, 36)
+    // -> (11, 59, 24), still a step below the new floor
+    // (18, 103, 43).
+    // v47: in step with the v47 ladder shift — the same
+    // x1.25 step once more: (24, 113, 45)
+    // -> (14, 74, 30), still a step below the new floor
+    // (23, 129, 54).
+    // v48: in step with the v48 floor — the floor's own
+    // shift (+2, +9, +4) applied, so the step below the
+    // floor is preserved exactly: (26, 122, 49)
+    // -> (16, 83, 34), still a step below the new floor
+    // (25, 138, 58) (top G 122 vs floor G 138 — the same
+    // 16-unit gap as v47).
     {
-        juce::ColourGradient dead(juce::Colour(0xff0f481d), window.getX(), window.getY(),
-                                  juce::Colour(0xff092f13), window.getX(), window.getBottom(), false);
+        juce::ColourGradient dead(juce::Colour(0xff1a7a31), window.getX(), window.getY(),
+                                  juce::Colour(0xff105322), window.getX(), window.getBottom(), false);
         g.setGradientFill(dead);
         g.fillRoundedRectangle(window, 3.0f);
     }
@@ -1879,7 +1985,71 @@ void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
                 // mask follows it exactly, as before.
                 // v44: the floor moved to (14, 82, 34); the
                 // mask follows it exactly, as before.
-                const auto maskCol = juce::Colour(14, 82, 34);
+                // v45 (Nathan): the mask is no longer FLAT.
+                // He likes the vertical rib shading inside
+                // the dark areas and wants their main body
+                // — toward the centre — "about 25% brighter,
+                // closer to the main green", getting "darker
+                // by the edges". So each mask is now a
+                // HORIZONTAL GRADIENT: the leading (inner)
+                // edge rides at the floor brightened by a
+                // quarter — (14, 82, 34) x 1.25 = (18, 103,
+                // 43) — and the colour falls back to the
+                // floor itself at the field's outer edge, so
+                // the mask's far reaches still meet the
+                // artwork's fully-closed corners at the one
+                // floor colour, and the feather at the front
+                // now veils the ribs in the brighter shade
+                // (the rib shading reads through the feather
+                // as before, one rib wide). The GR geometry
+                // is untouched: same lit law, same fronts,
+                // same feather width — only the mask's
+                // colour varies across its span.
+                // v46 (Nathan): the whole ladder steps up
+                // once more, the gradient's SHAPE untouched
+                // — both stops take the same x1.25 step as
+                // v45's brightening: the floor (14, 82, 34)
+                // -> (18, 103, 43) (v45's leading edge
+                // becomes the new floor, and it is exactly
+                // the field ramp's new floor stop, so the
+                // mask's outer reaches still meet the
+                // artwork's darks at one colour), and the
+                // leading edge (18, 103, 43) -> (23, 129,
+                // 54). The centre underlay takes the inner
+                // colour, as in v45.
+                // v47 (Nathan, on the v46 stills): the
+                // triangles toward the centre are "pretty
+                // good" but it gets "too dark by the
+                // edges" — the gradient's SHAPE stays,
+                // the whole ladder shifts up one step:
+                // the floor (18, 103, 43) -> (23, 129,
+                // 54) — v46's leading edge becomes the
+                // edges' brightness — and the leading
+                // edge (23, 129, 54) -> (28, 155, 65),
+                // one more step of the established
+                // increments (+5, +26, +11). The ramp's
+                // floor lands on the same (23, 129, 54),
+                // so the mask's outer reaches still meet
+                // the artwork's darks at one colour, and
+                // the centre underlay takes the new
+                // inner colour, as before.
+                // v48 (Nathan, on the v47 stills): the
+                // centre brightness is approved, but the
+                // falloff to the edges is too extreme —
+                // "it does not have to stand out so much":
+                // reduce the centre-to-edge darkening by
+                // about a third. The leading edge (28, 155,
+                // 65) does NOT move; the centre-to-edge
+                // delta (5, 26, 11) shrinks by a third to
+                // (3, 17, 7), so the floor rises (23, 129,
+                // 54) -> (25, 138, 58) and the gradient
+                // compresses against the same inner colour.
+                // The gradient's interpolation profile is
+                // unchanged, the centre underlay still
+                // takes the inner colour, and the ramp's
+                // floor lands on the same (25, 138, 58).
+                const auto maskFloor = juce::Colour(25, 138, 58);
+                const auto maskInner = juce::Colour(28, 155, 65);
                 const float fL = field.getX(), fR = field.getRight();
                 const float fCx = field.getCentreX();
                 const float fTop = field.getY(), fBot = field.getBottom();
@@ -1889,30 +2059,40 @@ void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
                 // When the fronts nearly meet, an opaque
                 // centre underlay keeps 28 dB+ fully dark
                 // (the two feathers alone sum to 75% there).
+                // v45: the underlay takes the INNER colour —
+                // it is the point where the two leading
+                // edges meet, the brightest part of the
+                // gradient, and still a deep closed green.
                 if (halfLit < feather * 0.5f) {
-                    g.setColour(maskCol);
+                    g.setColour(maskInner);
                     g.fillRect(juce::Rectangle<float>(frontL, fTop, frontR - frontL, fBot - fTop));
                 }
-                // Left mask: solid, then a one-rib feather
-                // down to clear at the front.
+                // Left mask: a solid span graded floor (at
+                // the field edge) -> inner (at the front),
+                // then a one-rib feather down to clear at
+                // the front, veiling in the inner colour.
                 if (frontL - feather * 0.5f > fL) {
-                    g.setColour(maskCol);
+                    juce::ColourGradient grad(maskFloor, fL, fTop,
+                                              maskInner, frontL - feather * 0.5f, fTop, false);
+                    g.setGradientFill(grad);
                     g.fillRect(juce::Rectangle<float>(fL, fTop, frontL - feather * 0.5f - fL, fBot - fTop));
                 }
                 {
-                    juce::ColourGradient grad(maskCol, frontL - feather * 0.5f, fTop,
-                                              maskCol.withAlpha(0.0f), frontL + feather * 0.5f, fTop, false);
+                    juce::ColourGradient grad(maskInner, frontL - feather * 0.5f, fTop,
+                                              maskInner.withAlpha(0.0f), frontL + feather * 0.5f, fTop, false);
                     g.setGradientFill(grad);
                     g.fillRect(juce::Rectangle<float>(frontL - feather * 0.5f, fTop, feather, fBot - fTop));
                 }
                 // Right mask, mirrored.
                 if (frontR + feather * 0.5f < fR) {
-                    g.setColour(maskCol);
+                    juce::ColourGradient grad(maskInner, frontR + feather * 0.5f, fTop,
+                                              maskFloor, fR, fTop, false);
+                    g.setGradientFill(grad);
                     g.fillRect(juce::Rectangle<float>(frontR + feather * 0.5f, fTop, fR - (frontR + feather * 0.5f), fBot - fTop));
                 }
                 {
-                    juce::ColourGradient grad(maskCol.withAlpha(0.0f), frontR - feather * 0.5f, fTop,
-                                              maskCol, frontR + feather * 0.5f, fTop, false);
+                    juce::ColourGradient grad(maskInner.withAlpha(0.0f), frontR - feather * 0.5f, fTop,
+                                              maskInner, frontR + feather * 0.5f, fTop, false);
                     g.setGradientFill(grad);
                     g.fillRect(juce::Rectangle<float>(frontR - feather * 0.5f, fTop, feather, fBot - fTop));
                 }
@@ -2242,7 +2422,7 @@ void Osc72Editor::resized()
     mixKnob_.setBounds(617, 184, 50, 50);           // centre (642, 209) = virtual (584, 190) — right column, top row (was (540, 190) in v38–v40)
     outLevelL_.setBounds(521, 305, 50, 50);         // centre (546, 330) = virtual (496, 300) — left column, bottom row
     outLevelR_.setBounds(617, 305, 50, 50);         // centre (642, 330) = virtual (584, 300) — right column, bottom row
-    eyeArea_ = juce::Rectangle<int>(128, 16, 232, 122);  // v4: the GR display window + its glow (frame virtual (124, 41, 192, 70)); x2 in audio v2. v36: extended up — the GAIN REDUCTION caption now rides ABOVE the display (ink virtual y ~20..31) inside this repaint region
+    eyeArea_ = juce::Rectangle<int>(128, 16, 232, 122);  // v4: the GR display window + its glow (frame virtual (124, 41, 192, 70)); x2 in audio v2. v36: extended up — the GAIN REDUCTION caption now rides ABOVE the display (ink virtual y ~20..31) inside this repaint region. v45: the frame is shorter (virtual (124, 49.75, 192, 52.5)) — it sits entirely inside this region, so the rect is unchanged. v46: the frame grows to (124, 45.8, 192, 60.4) — still entirely inside, rect unchanged
 }
 
 void Osc72Editor::paint(juce::Graphics& g)

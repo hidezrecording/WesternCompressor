@@ -840,6 +840,34 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.1.7 — METER REWORK (GUI v45–v49; reports
+docs/build-report-v47.md … v51.md) + ADT TRIM.
+Nathan's ear/eye rounds on 1.1.6. The gain-reduction
+display first shrank a quarter in height, then came
+back up 15%: frame height 70 -> 52.5 -> 60.4 virtual
+(width unchanged, still centred on the POWER line;
+nothing else on the panel moved). The palette climbed
+the brightening ladder: field brights x1.20 (peak stop
+(166,255,180)), the dark end stepped in kind, and the
+mask became a gradient — leading edge (28,155,65)
+falling to floor (25,138,58) at the edges, the falloff
+itself then softened by a third at Nathan's word so
+the dark triangles sit closer to the main green while
+the gradient still reads. Finally the vertical rib
+shading deepened +18% at the field centre (cos^2
+envelope, exactly zero extra depth at the far edges)
+for a deeper, more 3D louver. The artwork floor still
+equals the mask floor equals the fully-closed shade,
+and the centre green never moves with GR. Audio: one
+change — the ADT deck trim goes 15% less again
+(kAdtDeckGain 0.4920 -> 0.4182, exactly 51% of the
+1.1.0 return level; F2/F3 pins moved with the trim,
+still requiring real widening). Installer unchanged
+from 1.1.6 (bundle relocation stays off; the shipped
+pkg's PackageInfo <relocate/> is empty — verified from
+the artifact). Suites: DSP 42/42, processor 31/31;
+snapshot byte-identical to docs/gui-v49-a.png.
+
 v1.1.6 — INSTALLER: BUNDLE RELOCATION OFF (the Luna
 root cause). Diagnosis closed
 (docs/luna-missing-diagnosis.md): the shipped
