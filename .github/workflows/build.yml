@@ -49,12 +49,36 @@ jobs:
           if [ -d "build/OSC72_artefacts/Release/Standalone/Western Compressor.app" ]; then
             cp -R "build/OSC72_artefacts/Release/Standalone/Western Compressor.app" "$PKGROOT/Applications/"
           fi
+          pkgbuild --analyze --root "$PKGROOT" components.plist
+          # Suppress bundle relocation. pkgbuild's default analysis
+          # marks bundles relocatable (BundleIsRelocatable), which
+          # compiles into a <relocate> entry in PackageInfo: the
+          # Installer then 'upgrades' any pre-existing copy of the
+          # bundle it finds ANYWHERE on disk (any mounted volume)
+          # instead of writing to the PKGROOT paths above. All three
+          # of our bundles share ONE bundle id
+          # (com.Sabatino Audio.OSC72), so a single stray copy
+          # captured all three while the preinstall wiped the
+          # /Library copies first — successful installs left no
+          # component in /Library at all (the 1.1.x Luna
+          # disappearance saga; docs/luna-missing-diagnosis.md).
+          # Force BundleIsRelocatable=false on every bundle and
+          # build with the component plist.
+          i=0
+          while /usr/libexec/PlistBuddy -c "Print :$i" components.plist >/dev/null 2>&1; do
+            /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" components.plist 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Add :$i:BundleIsRelocatable bool false" components.plist
+            i=$((i + 1))
+          done
+          echo "BundleIsRelocatable forced false on $i bundle(s)"
+          cat components.plist
           pkgbuild --root "$PKGROOT" \
+            --component-plist components.plist \
             --identifier com.sabatinoaudio.westerncompressor \
-            --version 1.1.5 \
+            --version 1.1.6 \
             --install-location / \
             --scripts pkg_scripts \
-            WesternCompressor-1.1.5-macOS.pkg
+            WesternCompressor-1.1.6-macOS.pkg
 
       - name: Upload plugins
         uses: actions/upload-artifact@v4
@@ -66,4 +90,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: WesternCompressor-Installer-macOS-${{ github.run_number }}
-          path: WesternCompressor-1.1.5-macOS.pkg
+          path: WesternCompressor-1.1.6-macOS.pkg

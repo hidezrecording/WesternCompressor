@@ -43,6 +43,11 @@ rm -rf "/Library/Caches/AudioUnitCache" 2>/dev/null
 if [ -n "$USER_HOME" ]; then
   rm -f "$USER_HOME/Library/Caches/com.apple.audiounits.cache"
   rm -rf "$USER_HOME/Library/Caches/AudioUnitCache"
+  # Current macOS also keeps a component record in this Preferences
+  # plist; the 1.1.5 Luna diagnosis found the OS72 record surviving
+  # there after every Caches clear (auval kept serving the dangling
+  # registration from it). Clear it too.
+  rm -f "$USER_HOME/Library/Preferences/com.apple.audio.AudioComponentCache.plist"
 fi
 killall -9 AudioComponentRegistrar 2>/dev/null || true
 

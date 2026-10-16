@@ -840,6 +840,32 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.1.6 — INSTALLER: BUNDLE RELOCATION OFF (the Luna
+root cause). Diagnosis closed
+(docs/luna-missing-diagnosis.md): the shipped
+PackageInfo carried a <relocate> entry for the bundles'
+SHARED id (com.Sabatino Audio.OSC72) — pkgbuild's
+default analysis marks bundles relocatable
+(BundleIsRelocatable), so the Installer 'upgraded' any
+pre-existing copy of that id it found on disk (any
+mounted volume) instead of writing to /Library, while
+our preinstall wiped the /Library copies first:
+successful installs left no component in /Library at
+all (auval: "didn't find the component"). The artifacts
+themselves audited clean: the payload holds all 35
+entries (component binary 17,966,336 B, modes correct),
+the Bom lists the exact declared paths, Scripts =
+preinstall only and PackageInfo declares no other
+script phase. Fix: the installer build now analyzes a
+component plist, forces BundleIsRelocatable=false on
+every bundle and builds with --component-plist (the new
+pkg's PackageInfo <relocate/> is empty — verified from
+the shipped artifact). The preinstall additionally
+clears the user Preferences component cache
+(com.apple.audio.AudioComponentCache.plist), which also
+carried the dangling OS72 record. Audio code unchanged
+from 1.1.5. Suites: DSP 42/42, processor 31/31.
+
 v1.1.5 — STAGING RE-CENTRE + ATTACKS DOUBLED
 (v46; report docs/build-report-v46.md). Nathan's ear
 verdict on 1.1.4: the box "is still digging in way too
