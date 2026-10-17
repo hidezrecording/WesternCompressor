@@ -9,6 +9,10 @@
 //   phaser         = MOD flavour P selected (default: A) —
 //                    gui-v53: the A/P mini toggle's lever
 //                    toward P ('modPhaser' true).
+//   timestwo       = 1X/2X timing selector at 2X
+//                    (default: 1X) — gui-v58: the RATIO-side
+//                    mini toggle's lever outward ('timesTwo'
+//                    true).
 //   limitout       = 'limit' toggle OUT (default: in)
 //                    v53: the toggle is the RATIO mode switch —
 //                    IN (default here) renders COMP (lever up),
@@ -251,6 +255,18 @@
 // columns keep exactly the v48 shading. The ramp's
 // colour stops, the closing masks, the fin span, the
 // geometry and the lit law do not move.
+// v58 shots: gui-v58-a.png ("knob=5 limitout" — the
+// default opening state: INPUT 5, LIMIT, MOD out, A/P
+// lever at A, 1X/2X lever at 1X) / gui-v58-b.png
+// ("knob=5 limitout timestwo" — 2X selected, the
+// RATIO-side mini toggle's lever outward toward 2X)
+// + gui-v58-ratio-crop.png (2x RATIO corner).
+// v58 change (Nathan): the 1X / 2X timing selector
+// (the v62 DSP's 'timesTwo') gains its panel control —
+// a second MiniBatToggle mirrored beside RATIO,
+// reading 2X · toggle · 1X · RATIO with 1X nearest
+// the word. Editor artwork + one snapshot token only
+// (build-report-v63.md).
 // v51 shots: gui-v51-a.png ("knob=5 limitout" — the
 // default opening state, as v50-a) / gui-v51-b.png
 // ("knob=5 limitout gr=12" — driven at exactly 12 dB so
@@ -276,6 +292,22 @@
 // (the MOD jewel's own logic — no pulsing; Nathan dropped
 // the in-sync flashing). Editor artwork only
 // (build-report-v60.md).
+// v57 shots: gui-v57-a.png ("knob=5 limitout" — the
+// default opening state: INPUT 5, LIMIT, MOD out, the
+// A/P mini toggle at A) / gui-v57-b.png ("knob=5
+// limitout warble phaser" — MOD in, P selected, lever
+// toward P) + gui-v57-mod-crop.png (2x MOD corner).
+// v57 change (Nathan): the A/P selector REVERTS to the
+// v54 mini bat toggle ("revert the mod button back to
+// a small toggle that toggles left right") — the v56
+// push button goes — at the v56 ALIGNED position
+// (assembly +6.36 virtual px right of v54, so the A
+// ink's left edge stands in the IN/OUT ink column),
+// and the v56 lamp letters are dropped entirely on
+// Nathan's word ("Don't make the A and the P light
+// up"): 'A' / 'P' are plain silk in both states and
+// the lever position alone shows the flavour. Editor
+// artwork only (build-report-v61.md).
 // v53 shots: gui-v53-a.png ("knob=5 limitout" — the
 // default opening state: INPUT 5, LIMIT, MOD out, the
 // new A/P mini toggle at A) / gui-v53-b.png ("knob=5
@@ -404,6 +436,7 @@ int main(int argc, char* argv[]) {
     bool limitIn = true;
     bool powerOn = true;
     bool phaserOn = false;     // gui-v53: 'modPhaser' (default A)
+    bool timesTwoOn = false;   // gui-v58: 'timesTwo' (default 1X)
     float knobVal = 7.0f;      // v33: knob=<0..10> token
     float grOverride = 0.0f;   // v33: gr=<dB> token
     for (int i = 2; i < argc; ++i) {
@@ -425,6 +458,8 @@ int main(int argc, char* argv[]) {
             warbleOn = true;
         } else if (v == "phaser") {
             phaserOn = true;
+        } else if (v == "timestwo") {
+            timesTwoOn = true;
         } else if (v == "limitout") {
             limitIn = false;
         } else if (v == "poweroff") {
@@ -440,6 +475,8 @@ int main(int argc, char* argv[]) {
         p->setValueNotifyingHost(warbleOn ? 1.0f : 0.0f);
     if (auto* p = proc.apvts.getParameter("modPhaser"))
         p->setValueNotifyingHost(phaserOn ? 1.0f : 0.0f);
+    if (auto* p = proc.apvts.getParameter("timesTwo"))
+        p->setValueNotifyingHost(timesTwoOn ? 1.0f : 0.0f);
     if (auto* p = proc.apvts.getParameter("limit"))
         p->setValueNotifyingHost(limitIn ? 1.0f : 0.0f);
     if (auto* p = proc.apvts.getParameter("power"))

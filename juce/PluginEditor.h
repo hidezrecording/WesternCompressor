@@ -300,24 +300,49 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────
-// Mini push button (gui-v56, Nathan 2026-10-17): the MOD
-// section's A/P flavour selector — a small ROUND metal push
-// button on the MOD WORD's own line, between the 'A' and 'P'
-// silk, reading as a continuation of the word: MOD, a word
-// space, 'A', the button, 'P'. One press swaps flavour
-// (APVTS 'modPhaser', false = A, the Reel ADT, the default;
-// true = P, the Phase 90). The button itself is unlettered
-// hardware; the ACTIVE flavour's letter lights in the
-// jewels' amber in the editor's paint (lit while MOD is in
-// and POWER is on — the section jewels' own logic, steady,
-// no pulsing). Replaces gui-v53's MiniBatToggle (v53–v55),
-// dropped by Nathan: "let's just make it a push button."
+// Mini bat toggle (gui-v53; placement corrected in
+// gui-v54, Nathan 2026-10-17): the MOD section's A/P
+// flavour selector — a MINIATURE silver bat with a
+// HORIZONTAL throw, sitting on the MOD WORD's own line,
+// reading as a continuation of it: MOD, a word space,
+// 'A', the toggle, 'P'. Lever toward A (left) = the
+// Reel ADT,
+// toward P (right) = the Phase 90 (APVTS 'modPhaser',
+// false = A, the default). Same rendering language as
+// BatToggle — black escutcheon plate, silver teardrop
+// lever foreshortening through the flip, editor-timer
+// animation — authored in a 52x40 space and scaled to its
+// (much smaller) bounds. The 'A' / 'P' silk is drawn by
+// the editor around it, like the other toggles' labels.
+// gui-v56 replaced this bat with a round push button and
+// lit the active letter as a lamp; gui-v57 (Nathan,
+// 2026-10-17) RESTORES the bat — "revert the mod button
+// back to a small toggle that toggles left right" — at
+// the v56 aligned position, and drops the lamp letters
+// entirely ("Don't make the A and the P light up"): the
+// letters are plain silk in both states, and the lever
+// position alone shows the flavour.
+// gui-v58 (Nathan, 2026-10-17): a SECOND instance joins
+// the panel — the 1X / 2X timing selector on the RATIO
+// word's line, the A/P assembly's mirror (reading
+// 2X · toggle · 1X · RATIO, lever toward the word at
+// 1X). It is built MIRRORED: its off state (1X) throws
+// the lever +x (toward RATIO) and its on state (2X)
+// throws it -x (outward) — the A/P sense inverted —
+// selected by the constructor flag.
 // ─────────────────────────────────────────────────────────────────────
-class MiniPushButton : public juce::Button
+class MiniBatToggle : public juce::Button
 {
 public:
-    MiniPushButton();
+    explicit MiniBatToggle(bool mirrored = false);
+    // Same contract as BatToggle::advanceAnimation.
+    bool advanceAnimation();
     void paintButton(juce::Graphics& g, bool highlighted, bool down) override;
+
+private:
+    float flipT_ = 0.0f;      // 0 = off state, 1 = on state
+    bool snapped_ = false;    // first paint snaps to the real state
+    bool mirrored_ = false;   // gui-v58: lever sense inverted (1X/2X)
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -439,9 +464,15 @@ private:
     BatToggle limitToggle_, modToggle_, powerToggle_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> limitAtt_, modAtt_, powerAtt_;
     // gui-v53 (Nathan): the MOD flavour selector (A/P),
-    // bound to 'modPhaser' — a MiniPushButton since gui-v56.
-    MiniPushButton phaserToggle_;
+    // bound to 'modPhaser' — a MiniBatToggle (restored in
+    // gui-v57 after gui-v56's push-button round).
+    MiniBatToggle phaserToggle_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> phaserAtt_;
+    // gui-v58 (Nathan): the 1X / 2X timing selector,
+    // bound to 'timesTwo' (the v62 DSP) — the A/P
+    // toggle's mirrored twin on the RATIO word's line.
+    MiniBatToggle timesTwoToggle_ { true };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> timesTwoAtt_;
     // v4: ATTACK / RELEASE ballistics toggles flanking the GR
     // display at the v31 positions (no jewels on these two).
     // v35: the pair drops down — words on the line the GAIN
@@ -504,7 +535,6 @@ private:
     bool lastModState_ = false;
     bool lastPowerState_ = true;   // v19: power flip repaints the whole panel (all lights + eye)
     bool lastLinkState_ = true;    // v36: LINK jewel repaint tracking
-    bool lastPhaserState_ = false; // gui-v56: A/P lamp-letter repaint tracking
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Osc72Editor)
 };

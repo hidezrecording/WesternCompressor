@@ -840,6 +840,64 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.3.0 — A/P SELECTOR BACK TO THE MINI TOGGLE +
+1X/2X TIMING DOUBLER (reports
+docs/build-report-v61.md, docs/build-report-v62.md,
+docs/build-report-v63.md). Three changes over
+1.2.0. (1) THE A/P SELECTOR IS A TOGGLE AGAIN
+(gui-v57): Nathan on the shipped 1.2.0 — "Pretty
+cool. Revert the mod button back to a small toggle
+that toggles left right", then "Don't make the A
+and the P light up." The round push button and its
+lamp letters are gone: the selector is the gui-v54
+MiniBatToggle (black escutcheon, silver teardrop
+lever, horizontal throw), letters plain white silk
+in both states, flavour shown by the lever alone.
+The v56 alignment is kept — the assembly stands so
+the A ink's left edge lines up with the I and the O
+of the IN/OUT labels below (measured 378.64 vs the
+column's 378.18 vp). (2) 1X/2X TIMING SELECTOR: a
+second mini selector, Nathan's mirror of the A/P —
+"a toggle that goes between 1x and 2x ... double
+the selected attack and release times". New APVTS
+bool `timesTwo` (default false = 1X). One slewed
+scale factor multiplies every ballistics tau at its
+use site: detector charge and decay, control attack
+pole, SINGLE and DUAL release taus, and the T4
+memory charge/decay. NOT scaled: B+ sag (a
+power-supply behaviour), make-up/slew taus, ratio
+laws, statics, colour, ADT and phaser. The frozen
+FAST constants are never edited — the FAST chain
+takes a calibrated scale (x3.0 at 2X) because the
+bench step's t90 carries a fixed resampler-edge
+floor; measured after calibration, every timing
+lands inside x2.0 ±15% in both modes (attacks
+1.93-2.15x, releases 1.97-2.06x; the Dual 90% tail
+reads 1.73-1.78x by mechanism — a doubled memory
+charge tau means a fixed hold charges less T4
+stress, the hardware's own "recovery depends on
+previous reduction"). Toggling is click-free (the
+scale slews on the 5 ms law coefficient and snaps
+exact in ~46 ms). AT 1X THE PLUGIN IS BIT-IDENTICAL
+TO 1.2.0: settled at 1X every scaled tau is
+multiplied by exactly 1.0f (K7: 0 differing samples
+of 192,000; K8: identity restored exactly after a
+2X excursion). No latency change in either
+position. (3) THE 1X/2X PANEL TOGGLE (gui-v58): a
+second MiniBatToggle on the RATIO word's line,
+reading 2X · toggle · 1X · RATIO — 1X nearest the
+word (the default, mirroring A nearest MOD), the
+lever throwing toward the word at 1X and outward
+at 2X; the 1X stands on the COMP/LIMIT ink column
+exactly as the A stands on IN/OUT's. Plain silk
+legend, no lamps. The face now carries the matched
+pair: MOD · A · toggle · P at right, 2X · toggle ·
+1X · RATIO at left. Suites: DSP 70/70, processor
+45/45; snapshots byte-identical to
+docs/gui-v58-a.png (default opening state: INPUT 5,
+LIMIT, 1X, lever at A) and docs/gui-v58-b.png (2X
+selected).
+
 v1.2.0 — 20 dB METER SCALE + MOD A/P PHASE 90
 SELECTOR (reports docs/build-report-v55.md,
 docs/build-report-v56.md, docs/build-report-v57.md,

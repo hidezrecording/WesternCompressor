@@ -56,6 +56,7 @@ void Ba6aLimiter::reset()
         osHighL_[i] = osHighR_[i] = 0.0f;
     osHighPos_ = 0;
     lawSlope_ = lawSlopeT_; lawToe_ = lawToeT_; lawSense_ = lawSenseT_;
+    timeScaleS_ = timeScaleT_;  // v62: reset settles the timing scale, like the law
     ironInL_.reset();  ironInR_.reset();
     ironMidL_.reset(); ironMidR_.reset();
     ironOutL_.reset(); ironOutR_.reset();
@@ -183,6 +184,20 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
     lawToe_   += (lawToeT_   - lawToe_)   * lawCoef_;
     lawSense_ += (lawSenseT_ - lawSense_) * lawCoef_;
 
+    // 1X/2X timing scale (v62): glides on the same ~5 ms
+    // coefficient as the law slew (a timing toggle never
+    // steps the ballistics mid-programme), then snaps to
+    // the exact target — a settled scale is exactly 1.0f
+    // or 2.0f, which is what keeps 1X bit-identical to
+    // 1.2.0 (every * ts below is then an IEEE identity).
+    timeScaleS_ += (timeScaleT_ - timeScaleS_) * lawCoef_;
+    if (std::fabs(timeScaleS_ - timeScaleT_) < kBa6aTimeScaleSnap)
+        timeScaleS_ = timeScaleT_;
+    const float ts = timeScaleS_;
+    // FAST attack chain calibration (v62): exactly 1.0f at
+    // 1X, 3.0f at 2X — see kBa6aAttFastCalib.
+    const float fastAttScale = 1.0f + (ts - 1.0f) * kBa6aAttFastCalib;
+
     // Knob smoothing (5 ms): the attenuator is stepped on the
     // hardware; a short slew keeps moves click-free without
     // changing the law.
@@ -217,33 +232,39 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
     const float senR = scIn ? lastPreR_ - scLpR_ : lastPreR_;
     const float peak = lawSense_
                      * std::max(std::fabs(senL), std::fabs(senR));
-    const float detTau = peak > detEnv_
+    const bool detRising = peak > detEnv_;
+    const float detTau = detRising
         ? (attackFast_ ? kBa6aDetFastTauSec : ba6aDetSlowTau(peak, detEnv_))
         : kBa6aDetDecayTauSec;
-    detEnv_ += (peak - detEnv_) * tauCoef(detTau, fs_);
+    // v62: the rising FAST charge takes the calibrated
+    // FAST scale; the SLOW shaped charge and the decay
+    // (release-side) take the plain scale.
+    const float detScale = (detRising && attackFast_) ? fastAttScale : ts;
+    detEnv_ += (peak - detEnv_) * tauCoef(detTau * detScale, fs_);
 
     const float target = ba6aVariMuDb(detEnv_, lawSlope_, lawToe_);
 
     // ── Control state: BOTH recovery networks run every
     // sample; the toggle selects which one drives the stage,
     // so flipping RELEASE mid-programme never jumps. ──
-    const float attTau = attackFast_ ? kBa6aAttFastTauSec : kBa6aAttSlowTauSec;
+    const float attTau = (attackFast_ ? kBa6aAttFastTauSec : kBa6aAttSlowTauSec)
+                       * (attackFast_ ? fastAttScale : ts);
     if (target > grSingle_)
         grSingle_ += (target - grSingle_) * tauCoef(attTau, fs_);
     else
-        grSingle_ += (target - grSingle_) * tauCoef(kBa6aRelSingleTauSec, fs_);
+        grSingle_ += (target - grSingle_) * tauCoef(kBa6aRelSingleTauSec * ts, fs_);
     const float t1 = kBa6aRelDualFastShare * target;
     const float t2 = (1.0f - kBa6aRelDualFastShare) * target;
     if (t1 > grDual1_)
         grDual1_ += (t1 - grDual1_) * tauCoef(attTau, fs_);
     else
-        grDual1_ += (t1 - grDual1_) * tauCoef(kBa6aRelDualFastTauSec, fs_);
+        grDual1_ += (t1 - grDual1_) * tauCoef(kBa6aRelDualFastTauSec * ts, fs_);
     // The Dual tail pole carries the T4 memory: the stress
     // state (integrated GR history, updated below from the
     // PREVIOUS sample's GR — the cell remembers what it has
     // already done) stretches the pole monotonically.
     const float dualSlowTau = kBa6aRelDualSlowTauSec
-        * (1.0f + kBa6aMemStretch * clampf(stress_ / kBa6aMemRefDb, 0.0f, 1.0f));
+        * (1.0f + kBa6aMemStretch * clampf(stress_ / kBa6aMemRefDb, 0.0f, 1.0f)) * ts;
     if (t2 > grDual2_)
         grDual2_ += (t2 - grDual2_) * tauCoef(attTau, fs_);
     else
@@ -255,7 +276,7 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
     // by the GR cap itself; only ever read as a 0..1 stretch
     // of the Dual tail pole. ──
     stress_ += (grDb_ - stress_) * tauCoef(
-        grDb_ > stress_ ? kBa6aMemChargeTauSec : kBa6aMemDecayTauSec, fs_);
+        (grDb_ > stress_ ? kBa6aMemChargeTauSec : kBa6aMemDecayTauSec) * ts, fs_);
 
     // ── Auto make-up (design §3.2): tracks the ACTUAL GR
     // (slow average) + a crank term in the knob; applied after

@@ -410,6 +410,46 @@ inline constexpr float kBa6aMemChargeTauSec = 1.2f;
 inline constexpr float kBa6aMemDecayTauSec  = 8.0f;
 inline constexpr float kBa6aMemStretch      = 1.6f;
 inline constexpr float kBa6aMemRefDb        = 25.0f;   // GR depth counted as full stress
+// 1X / 2X timing selector (v62, Nathan): a second mini
+// selector mirroring the MOD section's A/P — 2X doubles
+// the SELECTED attack and release times, 1X is the shipped
+// behaviour exactly. The scale multiplies every tau of the
+// ballistics chain at its use site in processCore: the
+// detector charge (FAST tau and the SLOW shaped tau), the
+// detector decay, the control attack pole, the SINGLE
+// release tau, both DUAL taus (the tail pole keeps its T4
+// stretch product on top) and the T4 memory charge/decay
+// taus — a whole-loop time-scale, so both seats and both
+// ratio laws scale together and the memory behaviour
+// scales with the release it shapes. NOT scaled, by
+// design: the B+ sag charge/recover (a power-supply
+// behaviour, not a selected timing), the make-up average
+// and slew, the knob and law slews, the sidechain filter
+// and every audio-path constant. The scale itself slews
+// on the law slew's ~5 ms coefficient (click-free, the
+// v53 mode slew's spirit) and SNAPS to its target inside
+// kBa6aTimeScaleSnap: a settled 1X therefore multiplies
+// by exactly 1.0f — an IEEE identity at every site — so
+// the 1X path is bit-identical to 1.2.0 (pinned, suite K).
+inline constexpr float kBa6aTimeScaleSnap = 1.0e-4f;
+// FAST-attack calibration at 2X (v62, measured — the v46
+// method: factors calibrated, not nominal). The bench
+// step's t90 is affine in the scale: a fixed ~0.33 ms
+// (LIMIT) / ~0.27 ms (COMP) floor — the oversampling
+// resampler's step edge, the same artefact the C1 pin
+// documents at 1X — plus a scalable part (0.25 / 0.44 ms
+// per unit scale). A pure x2 on the FAST taus therefore
+// reads only 1.43x / 1.62x on the step, so the FAST
+// attack chain (detector FAST charge + the FAST control
+// pole) takes scale' = 1 + (scale - 1) x this constant:
+// at 2X the FAST taus run x3.0 and the measured step t90
+// lands at 1.97x (LIMIT) / 2.18x (COMP), inside the
+// +/-15% band in both modes (sweep: docs/
+// build-report-v62.md). At 1X scale' is exactly 1.0f, so
+// the frozen FAST seat is untouched. The SLOW seats and
+// every release tau take the plain scale — they measure
+// 1.98-2.01x uncalibrated.
+inline constexpr float kBa6aAttFastCalib = 2.0f;
 // Auto make-up (v1.0.3 law carried per Nathan; design §3.2).
 inline constexpr float kBa6aMakeupAvgChargeTauSec = 0.080f;
 inline constexpr float kBa6aMakeupAvgDecayTauSec  = 0.300f;
@@ -435,6 +475,17 @@ public:
     bool attackFast() const { return attackFast_; }
     void setReleaseFast(bool fast) { releaseFast_ = fast; }
     bool releaseFast() const { return releaseFast_; }
+
+    // 1X / 2X timing selector (v62): false = 1X (default,
+    // the shipped timings bit-identical), true = 2X (every
+    // ballistics tau doubled — see the note at
+    // kBa6aTimeScaleSnap). Sets the TARGET only; the current
+    // scale glides to it in processCore.
+    void setTimesTwo(bool two) { timeScaleT_ = two ? 2.0f : 1.0f; }
+    bool timesTwo() const { return timeScaleT_ > 1.5f; }
+    // Introspection (tests): the slewed scale — exactly
+    // 1.0f / 2.0f once settled (the snap guarantees it).
+    float timeScale() const { return timeScaleS_; }
 
     // Ratio mode (v53): COMP (true) / LIMIT (false, the
     // default). Only the gain-computer law parameters have
@@ -514,6 +565,12 @@ private:
     float knobS_ = 0.0f;
     bool attackFast_ = true;    // default: stock (research §A.6)
     bool releaseFast_ = false;  // default: DUAL (research §A.6)
+
+    // 1X/2X timing scale (v62): target 1.0f / 2.0f; the
+    // current glides on the law slew and snaps (see the
+    // note at kBa6aTimeScaleSnap).
+    float timeScaleT_ = 1.0f;
+    float timeScaleS_ = 1.0f;
 
     IronStage ironInL_{IronStage::Voicing::input},      ironInR_{IronStage::Voicing::input};
     IronStage ironMidL_{IronStage::Voicing::interstage}, ironMidR_{IronStage::Voicing::interstage};
@@ -756,6 +813,13 @@ public:
     bool attackFast() const { return limiter_.attackFast(); }
     void setReleaseFast(bool fast) { limiter_.setReleaseFast(fast); }
     bool releaseFast() const { return limiter_.releaseFast(); }
+
+    // 1X / 2X timing selector (v62): doubles the selected
+    // attack and release times inside the limiter; 1X is
+    // bit-identical to 1.2.0. No latency consequence; the
+    // ADT/phaser inserts are untouched.
+    void setTimesTwo(bool two) { limiter_.setTimesTwo(two); }
+    bool timesTwo() const { return limiter_.timesTwo(); }
 
     // Ratio mode (v53): the section is always engaged —
     // the old limit in/out bypass is gone by design (see

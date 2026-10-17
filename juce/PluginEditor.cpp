@@ -1346,73 +1346,172 @@ void BatToggle::paintButton(juce::Graphics& g, bool, bool)
     }
 }
 
-// ── Mini push button (gui-v56, Nathan 2026-10-17) ────────────
-// The MOD flavour selector, third form: v53's miniature bat
-// became this — "let's just make it a push button." A round
-// metal push button in the panel's hardware language,
-// authored in the same 52x40 space the bat's plate used and
-// scaled to the component bounds (25x20 device px). It
-// carries no legend of its own: the 'A' / 'P' silk beside it
-// (editor paint) does the talking — the ACTIVE flavour's
-// letter lights in the jewels' amber (see paint()). The
-// button is a plain latching select, like a console
-// channel-select push (clicking toggles state); 'down' dips
-// the cap a breath while the finger is on it.
-MiniPushButton::MiniPushButton() : juce::Button(juce::String())
+// ── Mini bat toggle (gui-v53, Nathan 2026-10-17) ─────────────
+// The MOD flavour selector: BatToggle's rendering language
+// transposed to a horizontal throw and shrunk — authored in
+// a 52x40 space, scaled to the component bounds (25x20
+// device px, about half the big toggles' plate). flipT 0 =
+// lever toward A (left, the ADT), 1 = toward P (right, the
+// Phase 90); mid-flip the lever foreshortens exactly as the
+// vertical bats' do.
+// gui-v57 (Nathan, 2026-10-17): RESTORED verbatim after
+// gui-v56's push-button round — see the class note in the
+// header. It sits at the gui-v56 aligned position (bounds
+// +7 device px right of gui-v54) and the 'A' / 'P' letters
+// are plain silk in both states again.
+// gui-v58: the constructor gains the mirror flag for the
+// second instance (the 1X / 2X timing selector) — the
+// artwork is identical; only the lever sense inverts in
+// paintButton.
+MiniBatToggle::MiniBatToggle(bool mirrored)
+    : juce::Button(juce::String()), mirrored_(mirrored)
 {
     setClickingTogglesState(true);
     setWantsKeyboardFocus(false);
 }
 
-void MiniPushButton::paintButton(juce::Graphics& g, bool, bool down)
+bool MiniBatToggle::advanceAnimation()
 {
+    const float target = getToggleState() ? 1.0f : 0.0f;
+    if (!snapped_) { flipT_ = target; snapped_ = true; return false; }
+    if (flipT_ == target) return false;
+    const float step = 0.30f;
+    flipT_ = target > flipT_ ? juce::jmin(target, flipT_ + step)
+                             : juce::jmax(target, flipT_ - step);
+    return true;
+}
+
+void MiniBatToggle::paintButton(juce::Graphics& g, bool, bool)
+{
+    if (!snapped_) { flipT_ = getToggleState() ? 1.0f : 0.0f; snapped_ = true; }
     const auto realB = getLocalBounds().toFloat();
     g.addTransform(juce::AffineTransform::scale(realB.getWidth() / 52.0f,
                                                 realB.getHeight() / 40.0f));
-    const float cx = 26.0f, cy = 20.0f;
+    const float cxp = 26.0f, cyp = 20.0f;
+    const float t = flipT_ * flipT_ * (3.0f - 2.0f * flipT_); // eased
+    float sgn = 2.0f * t - 1.0f;    // -1 = A (left), +1 = P (right)
+    // gui-v58: the mirrored instance (the 1X / 2X timing
+    // selector) reads the other way — its off state (1X)
+    // throws the lever toward its word (+x) and its on
+    // state (2X) outward (-x).
+    if (mirrored_) sgn = -sgn;
+    const float dirX = sgn >= 0.0f ? 1.0f : -1.0f;
 
-    // Seat shadow on the panel (stays put while the cap dips)
-    g.setColour(juce::Colour(0x59000000));
-    g.fillEllipse(cx - 14.5f, cy - 13.0f, 29.0f, 29.0f);
-
-    // Bezel washer: the jewel bezel's language — a dark steel
-    // ring raked from the upper left, hairline rim light.
+    // Escutcheon: the big plate's language at miniature
+    // scale — near-black bakelite, faint top light catch,
+    // four tiny corner screws, sharp corners.
     {
-        const float br = 15.0f;
-        juce::ColourGradient bez(juce::Colour(0xff4c4f4c), cx - br, cy - br,
-                                 juce::Colour(0xff131415), cx + br, cy + br, false);
-        g.setGradientFill(bez);
-        g.fillEllipse(cx - br, cy - br, br * 2.0f, br * 2.0f);
-        g.setColour(juce::Colour(0x50ffffff));
-        g.drawEllipse(cx - br, cy - br, br * 2.0f, br * 2.0f, 1.0f);
-        g.setColour(juce::Colour(0x80000000));
-        const float ir = 12.8f;
-        g.drawEllipse(cx - ir, cy - ir, ir * 2.0f, ir * 2.0f, 1.6f);
+        const juce::Rectangle<float> plate(cxp - 20.0f, cyp - 15.0f, 40.0f, 30.0f);
+        juce::ColourGradient pg(juce::Colour(0xff1b1c1b), plate.getX(), plate.getY(),
+                                juce::Colour(0xff070808), plate.getX(), plate.getBottom(), false);
+        g.setGradientFill(pg);
+        g.fillRect(plate);
+        g.setColour(juce::Colour(0xff000000));
+        g.drawRect(plate, 1.2f);
+        g.setColour(juce::Colour(0x2affffff));
+        g.drawLine(plate.getX() + 3.0f, plate.getY() + 1.0f,
+                   plate.getRight() - 3.0f, plate.getY() + 1.0f, 1.0f);
+        for (float sx : { -15.5f, 15.5f })
+            for (float sy : { -10.5f, 10.5f }) {
+                g.setColour(juce::Colour(0xff454845));
+                g.fillEllipse(cxp + sx - 1.5f, cyp + sy - 1.5f, 3.0f, 3.0f);
+                g.setColour(juce::Colour(0xcc101110));
+                g.drawLine(cxp + sx - 1.0f, cyp + sy - 0.35f,
+                           cxp + sx + 1.0f, cyp + sy + 0.35f, 0.7f);
+            }
     }
 
-    // The cap: the v19 silver of the levers, domed — bright
-    // at the light, through mid steel, to gunmetal at the
-    // shadow edge. Pressed, it sits 0.7 lower and a shade
-    // darker, as a real push cap rides into its bezel.
+    // Slot recess the lever travels in: deep black, with a
+    // faint rim catch along its top edge.
     {
-        const float r = 11.6f;
-        const float dy = down ? 0.7f : 0.0f;
-        juce::ColourGradient cap(juce::Colour(0xfff4f5f7), cx - r * 0.8f, cy - r * 0.8f + dy,
-                                 juce::Colour(0xff565b61), cx + r * 0.7f, cy + r * 0.9f + dy, false);
-        cap.addColour(0.35, juce::Colour(0xffb7bcc2));
-        cap.addColour(0.72, juce::Colour(0xff83888f));
-        g.setGradientFill(cap);
-        g.fillEllipse(cx - r, cy - r + dy, r * 2.0f, r * 2.0f);
-        if (down) {
-            g.setColour(juce::Colour(0x20000000));
-            g.fillEllipse(cx - r, cy - r + dy, r * 2.0f, r * 2.0f);
-        }
-        // Dome catch, upper left; a soft shade ring inside
-        // the foot, as the bat's collar wore.
-        g.setColour(juce::Colour(0x66ffffff));
-        g.fillEllipse(cx - r * 0.46f, cy - r * 0.52f + dy, 6.4f, 4.2f);
+        g.setColour(juce::Colour(0xff020202));
+        g.fillRoundedRectangle(cxp - 11.0f, cyp - 3.2f, 22.0f, 6.4f, 3.2f);
+        g.setColour(juce::Colour(0x26ffffff));
+        g.drawLine(cxp - 9.0f, cyp - 3.2f, cxp + 9.0f, cyp - 3.2f, 0.8f);
+    }
+
+    // Collar at the pivot: the dark steel washer, as the
+    // big toggles wear.
+    {
+        juce::ColourGradient wg(juce::Colour(0xff43463f), cxp - 6.75f, cyp - 6.75f,
+                                juce::Colour(0xff0e100e), cxp + 6.75f, cyp + 6.75f, false);
+        g.setGradientFill(wg);
+        g.fillEllipse(cxp - 6.75f, cyp - 6.75f, 13.5f, 13.5f);
+        g.setColour(juce::Colour(0x38ffffff));
+        g.drawEllipse(cxp - 6.75f, cyp - 6.75f, 13.5f, 13.5f, 1.0f);
         g.setColour(juce::Colour(0x30000000));
-        g.drawEllipse(cx - r * 0.72f, cy - r * 0.72f + dy, r * 1.44f, r * 1.44f, 1.6f);
+        g.drawEllipse(cxp - 4.45f, cyp - 4.45f, 8.9f, 8.9f, 1.1f);
+    }
+
+    // The lever: the big bats' heavy silver teardrop laid
+    // on its side — narrow at the pivot, swelling to a bulb
+    // before the rounded end, its drawn length
+    // foreshortening through the flip (|sgn| -> 0).
+    {
+        const float len = 5.5f + 8.5f * std::fabs(sgn);
+        auto halfW = [](float u) {   // u: 0 at pivot -> 1 at tip
+            return 2.3f + 1.9f * std::sin(u * 2.05f) * (1.0f - 0.18f * u);
+        };
+        auto leverPath = [&](juce::Point<float> off) {
+            juce::Path p;
+            const int steps = 10;
+            for (int i = 0; i <= steps; ++i) {
+                const float u = (float)i / (float)steps;
+                const float px = cxp + dirX * len * u + off.x;
+                const float py = cyp - halfW(u) + off.y;
+                if (i == 0) p.startNewSubPath(px, py); else p.lineTo(px, py);
+            }
+            // Rounded bulb cap
+            p.quadraticTo(cxp + dirX * (len + 2.6f) + off.x, cyp + off.y,
+                          cxp + dirX * len + off.x, cyp + halfW(1.0f) + off.y);
+            for (int i = steps - 1; i >= 0; --i) {
+                const float u = (float)i / (float)steps;
+                p.lineTo(cxp + dirX * len * u + off.x,
+                         cyp + halfW(u) + off.y);
+            }
+            p.closeSubPath();
+            return p;
+        };
+        // Cast shadow on the plate
+        g.setColour(juce::Colour(0x59000000));
+        g.fillPath(leverPath({ 1.3f, 2.2f }));
+        // The lever body: the v19 silver — bright silver at
+        // the light, through a mid steel to gunmetal at the
+        // shadow side, light raking from the upper left.
+        juce::ColourGradient bg(juce::Colour(0xfff4f5f7), cxp - 5.0f, cyp - 4.0f,
+                                juce::Colour(0xff565b61), cxp + 5.0f, cyp + 5.0f, false);
+        bg.addColour(0.35, juce::Colour(0xffb7bcc2));
+        bg.addColour(0.72, juce::Colour(0xff83888f));
+        g.setGradientFill(bg);
+        g.fillPath(leverPath({ 0.0f, 0.0f }));
+        // Specular streak along the bulb's upper flank, rim
+        // light along the lower — the big lever's pair.
+        {
+            juce::Path streak;
+            for (int i = 1; i <= 9; ++i) {
+                const float u = (float)i / 10.0f;
+                const float px = cxp + dirX * len * u;
+                const float py = cyp - halfW(u) * 0.52f;
+                if (i == 1) streak.startNewSubPath(px, py); else streak.lineTo(px, py);
+            }
+            g.setColour(juce::Colour(0x59ffffff));
+            g.strokePath(streak, juce::PathStrokeType(1.2f));
+
+            juce::Path rim;
+            for (int i = 1; i <= 9; ++i) {
+                const float u = (float)i / 10.0f;
+                const float px = cxp + dirX * len * u;
+                const float py = cyp + halfW(u) * 0.86f;
+                if (i == 1) rim.startNewSubPath(px, py); else rim.lineTo(px, py);
+            }
+            g.setColour(juce::Colour(0x263a3e44));
+            g.strokePath(rim, juce::PathStrokeType(0.8f));
+        }
+        // Pivot cap — deep gunmetal, as the big bats.
+        g.setColour(juce::Colour(0xff4a4f55));
+        g.fillEllipse(cxp - 2.4f, cyp - 2.4f, 4.8f, 4.8f);
+        g.setColour(juce::Colour(0x66ffffff));
+        g.drawLine(cxp - 1.4f, cyp - 1.5f, cxp + 0.2f, cyp - 1.9f, 0.8f);
     }
 }
 
@@ -2231,6 +2330,12 @@ Osc72Editor::Osc72Editor(Osc72Processor& p) : AudioProcessorEditor(&p), proc_(p)
     addAndMakeVisible(phaserToggle_);
     phaserAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         proc_.apvts, "modPhaser", phaserToggle_);
+    // gui-v58 (Nathan): the 1X / 2X timing selector — the
+    // A/P toggle's mirrored twin beside RATIO, bound to
+    // 'timesTwo' (v62 DSP; false = 1X, the default).
+    addAndMakeVisible(timesTwoToggle_);
+    timesTwoAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        proc_.apvts, "timesTwo", timesTwoToggle_);
     // POWER toggle (v19): the strip's third BatToggle — a full
     // switch cluster matching LIMIT/MOD — bound to 'power'.
     addAndMakeVisible(powerToggle_);
@@ -2349,6 +2454,10 @@ void Osc72Editor::timerCallback()
         repaint(limitToggle_.getBounds());
     if (modToggle_.advanceAnimation())
         repaint(modToggle_.getBounds());
+    if (phaserToggle_.advanceAnimation())
+        repaint(phaserToggle_.getBounds());
+    if (timesTwoToggle_.advanceAnimation())
+        repaint(timesTwoToggle_.getBounds());
     if (powerToggle_.advanceAnimation())
         repaint(powerToggle_.getBounds());
     if (attackToggle_.advanceAnimation())
@@ -2377,18 +2486,6 @@ void Osc72Editor::timerCallback()
     if (mod != lastModState_) {
         lastModState_ = mod;
         repaint(juce::Rectangle<int>(309, 403, 76, 74));  // MOD jewel, centre device (347, 440) — v36: swapped to the cluster's INNER flank (was outer, centre device (432, 439))
-        repaint(juce::Rectangle<int>(402, 378, 70, 34));  // gui-v56: the A/P lamp letters track MOD too (lit only while MOD is in)
-    }
-    // gui-v56: the A/P lamp letters are editor paint — repaint
-    // their band when the flavour flips so the light follows
-    // the push button. (POWER flips repaint the whole panel
-    // above, which covers the power side of the lamp logic.
-    // The button component repaints itself on a state change,
-    // as buttons do.)
-    const bool pha = phaserToggle_.getToggleState();
-    if (pha != lastPhaserState_) {
-        lastPhaserState_ = pha;
-        repaint(juce::Rectangle<int>(402, 378, 70, 34));  // A/P selector band, device px
     }
     // v36: the LINK jewel is editor paint too — repaint its
     // area when the link state flips (lit = linked).
@@ -2476,7 +2573,8 @@ void Osc72Editor::resized()
     knob_.setBounds(148, 238, 188, 188);            // centre (242, 332) = virtual (220, 302)
     limitToggle_.setBounds(72, 410, 44, 60);        // centre (94, 440) = virtual (85, 400) — v32: back down to the flange-bottom line (v31: virtual (93, 76))
     modToggle_.setBounds(368, 410, 44, 60);         // centre (390, 440) = virtual (355, 400) — v32: back down to the flange-bottom line (v31: virtual (347, 76))
-    phaserToggle_.setBounds(424, 384, 25, 20);      // centre (436.5, 394) = virtual (396.8, 358.2) — gui-v56: the A/P push button on the MOD WORD's line, its centre on the word's cap centre (358.4), reading MOD A [button] P (see paint()); gui-v56 shifts the whole assembly +6.36 virtual px right (device +7) so the A ink stands in the IN/OUT ink column
+    phaserToggle_.setBounds(424, 384, 25, 20);      // centre (436.5, 394) = virtual (396.8, 358.2) — gui-v57: the A/P mini bat toggle (restored) on the MOD WORD's line, its plate centre on the word's cap centre (358.4), reading MOD A [toggle] P (see paint()); the bounds keep gui-v56's +6.36 virtual px right shift (device +7 vs gui-v54) so the A ink stands in the IN/OUT ink column
+    timesTwoToggle_.setBounds(28, 384, 25, 20);     // centre (40.5, 394) = virtual (36.8, 358.2) — gui-v58: the 1X/2X mini bat on the RATIO WORD's line, same plate height as its A/P twin; NOT the plate's perfect mirror (centre virtual 43.2): the '1X' ink is ~5 virtual px wider than 'A', and with the 1X right edge pinned to the COMP/LIMIT ink column (see paint()) the plate absorbs the difference and lands ~6.4 left of the mirror
     powerToggle_.setBounds(572, 54, 44, 60);        // centre (594, 84) = virtual (540, 76) — on the display centre line (76)
     // v4: ATTACK / RELEASE toggles flank the GR display at the
     // v31 span, centres on the same y-76 line.
@@ -3120,51 +3218,56 @@ void Osc72Editor::paint(juce::Graphics& g)
     // tracking 0.6), measured at 5.45 virtual px
     // ink-to-ink on the render — so the A lands where
     // the next word would start.
-    // gui-v56 (Nathan): the selector is a round PUSH
-    // BUTTON now (phaserToggle_, a MiniPushButton — the
-    // v53-v55 mini bat is dropped: "let's just make it a
-    // push button"), and the whole assembly shifts
-    // +6.36 virtual px right so the A ink's left edge
-    // (378.18) stands in the ink column of the IN/OUT
-    // labels on the line below (their I and O inks both
-    // start at 378.18). The A anchor moves 379.4 ->
-    // 385.76, the P anchor 401.3 -> 407.66; the legend
-    // stays capsFont 12.5 on baseline 362.9, caps centred
-    // on the word's cap line.
-    // The ACTIVE flavour's letter is a LAMP: lit in the
-    // jewels' amber — the glow spill (0x59ff9d1e radial)
-    // and the jewel's core gradient (0xffffe9a8 crown,
-    // 0xfff7b733 mid, 0xffb35c00 foot) from drawPowerJewel
-    // — while MOD is in and POWER is on: the section
-    // jewels' own logic, steady (Nathan dropped the
-    // in-sync flashing idea). The inactive letter stays
-    // plain silk; with MOD out or POWER off, neither
-    // letter lights (the button still preselects).
-    {
-        const bool lampsLive = powerOn && modToggle_.getToggleState();
-        const bool pSelected = phaserToggle_.getToggleState();
-        auto drawFlavourLetter = [&] (const juce::String& letter, float anchorX,
-                                      Anchor anchor, float centreX, bool lit) {
-            if (lit) {
-                const float gr = 14.0f, cy = 359.0f;
-                juce::ColourGradient glow(juce::Colour(0x59ff9d1e), centreX, cy,
-                                          juce::Colour(0x00ff9d1e), centreX, cy + gr, true);
-                g.setGradientFill(glow);
-                g.fillEllipse(centreX - gr, cy - gr, gr * 2.0f, gr * 2.0f);
-                juce::ColourGradient core(juce::Colour(0xffffe9a8), centreX, 354.0f,
-                                          juce::Colour(0xffb35c00), centreX, 363.5f, false);
-                core.addColour(0.45, juce::Colour(0xfff7b733));
-                g.setGradientFill(core);
-            } else {
-                g.setColour(kSilk);
-            }
-            drawTrackedText(g, letter, capsFont(12.5f), 0.4f,
-                            anchorX, 362.9f, anchor);
-        };
-        drawFlavourLetter("A", 385.76f, Anchor::right, 381.6f, lampsLive && !pSelected);
-        drawFlavourLetter("P", 407.66f, Anchor::left, 410.9f, lampsLive && pSelected);
-        g.setColour(kSilk);
-    }
+    // gui-v56 shifted the whole assembly +6.36 virtual
+    // px right so the A ink's left edge stands in the
+    // ink column of the IN/OUT labels on the line below
+    // (their I and O inks both start at 378.18; the A
+    // measures 378.64 — build-report-v60.md). The
+    // anchors keep those aligned positions in gui-v57:
+    // A 385.76 (right), P 407.66 (left); the legend
+    // stays capsFont 12.5 on baseline 362.9, caps
+    // centred on the word's cap line.
+    // gui-v57 (Nathan): the selector is the mini BAT
+    // TOGGLE again — the gui-v56 push button is reverted
+    // ("revert the mod button back to a small toggle
+    // that toggles left right") — and the letters are
+    // PLAIN SILK in both states: the gui-v56 lamp
+    // letters are dropped on Nathan's word ("Don't make
+    // the A and the P light up"), so the lever position
+    // alone shows the flavour, exactly as gui-v54 drew
+    // them.
+    drawTrackedText(g, "A", capsFont(12.5f), 0.4f,
+                    385.76f, 362.9f, Anchor::right);
+    drawTrackedText(g, "P", capsFont(12.5f), 0.4f,
+                    407.66f, 362.9f, Anchor::left);
+    // gui-v58 (Nathan): the A/P assembly's mirror on the
+    // RATIO word's line — the 1X / 2X timing selector
+    // (the v62 DSP's 'timesTwo'): reading, left to
+    // right, 2X, the toggle, 1X, RATIO — 1X nearest the
+    // word (the default, mirroring A nearest MOD), the
+    // lever thrown toward the word at 1X and outward at
+    // 2X. Same legend treatment (capsFont 12.5, plain
+    // silk, baseline 362.9) and the same plate height.
+    // Placement, by the panel's own grids: the 1X ink's
+    // RIGHT edge stands on the left cluster's label
+    // column — the COMP / LIMIT ink right edge (their
+    // right-anchor line, x 62) — exactly as the A ink's
+    // left edge stands on the IN / OUT column on the
+    // right. '1X' ink runs ~11.9 virtual px wide against
+    // 'A''s ~6.8, so holding that edge AND both air gaps
+    // at the A/P values (plate flanks ~2.4-2.6) pushes
+    // the plate ~6.4 left of its perfect mirror about
+    // the module centre (plate centre virtual 36.8 vs
+    // the mirror's 43.2); the 2X ink then clears the
+    // module's left edge by ~14. The anchors below are
+    // set from the font model so the INK lands there —
+    // drawTrackedText rounds each glyph's pen to whole
+    // virtual px, so the ink edges stand within ~0.4 of
+    // their targets (measured in build-report-v63.md).
+    drawTrackedText(g, "2X", capsFont(12.5f), 0.4f,
+                    26.8f, 362.9f, Anchor::right);
+    drawTrackedText(g, "1X", capsFont(12.5f), 0.4f,
+                    61.7f, 362.9f, Anchor::right);
 
     // ── v4 (Nathan): ATTACK / RELEASE clusters flanking the
     //    GR display at the v31 positions (toggle centres

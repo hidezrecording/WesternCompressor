@@ -78,6 +78,16 @@ Osc72Processor::createParameterLayout()
         juce::ParameterID { "attackFast", 1 }, "Attack Fast", true));
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID { "releaseFast", 1 }, "Release Fast", false));
+    // 1X / 2X timing selector (Nathan, 2026-10-17, v62): a
+    // second mini selector mirroring the MOD A/P — on the
+    // RATIO cluster's line (GUI follow-on). false = 1X, the
+    // shipped attack/release timings bit-identical (the
+    // default); true = 2X, the SELECTED attack and release
+    // times doubled inside the limiter (whole ballistics
+    // chain time-scaled; ratio laws, statics, colour and
+    // the MOD inserts untouched). No latency consequence.
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID { "timesTwo", 1 }, "Times Two", false));
     // Sidechain low-cut (Nathan, 2026-10-15, v41): the strip's
     // SIDECHAIN pot — a high-pass in the BA-6A's DETECTOR feed
     // only (audio path untouched), 10–200 Hz on a log taper.
@@ -147,6 +157,8 @@ void Osc72Processor::prepareToPlay(double sampleRate, int)
     chain_.setAttackFast(attackFast_);
     releaseFast_ = apvts.getRawParameterValue("releaseFast")->load() > 0.5f;
     chain_.setReleaseFast(releaseFast_);
+    timesTwo_ = apvts.getRawParameterValue("timesTwo")->load() > 0.5f;
+    chain_.setTimesTwo(timesTwo_);
     scCutoffHz_ = apvts.getRawParameterValue("scCutoff")->load();
     chain_.setScCutoff(scCutoffHz_);
     outGainL_ = juce::Decibels::decibelsToGain(
@@ -222,6 +234,15 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
     {
         releaseFast_ = wantReleaseFast;
         chain_.setReleaseFast(releaseFast_);
+    }
+    // v62 1X/2X edge: no latency consequence; the scale
+    // glides inside the limiter's gain computer (~5 ms),
+    // so a mid-programme flip never steps a time constant.
+    const bool wantTimesTwo = apvts.getRawParameterValue("timesTwo")->load() > 0.5f;
+    if (wantTimesTwo != timesTwo_)
+    {
+        timesTwo_ = wantTimesTwo;
+        chain_.setTimesTwo(timesTwo_);
     }
     // v41 sidechain low-cut: no latency consequence; the DSP
     // filter's states track continuously, so moves never step

@@ -97,13 +97,15 @@ static float thdLim(float knob, float amp, float freq, bool attackFast = true,
 // GR step response: silence -> loud sine at t=0. Returns the
 // GR trace (per-sample) for `seconds`.
 static std::vector<float> grStep(bool attackFast, bool releaseFast, float knob = 0.75f,
-                                 float amp = 0.5f, double seconds = 1.2, bool comp = false) {
+                                 float amp = 0.5f, double seconds = 1.2, bool comp = false,
+                                 bool x2 = false) {
     osc72::Ba6aLimiter lim;
     lim.prepare(kFs);
     lim.setCompMode(comp);
     lim.setKnob(knob);
     lim.setAttackFast(attackFast);
     lim.setReleaseFast(releaseFast);
+    lim.setTimesTwo(x2);   // v62: set before reset so the scale snaps settled
     lim.reset();
     const int total = (int)(kFs * seconds);
     std::vector<float> tr((size_t)total);
@@ -115,13 +117,15 @@ static std::vector<float> grStep(bool attackFast, bool releaseFast, float knob =
     return tr;
 }
 // Release trace: loud sine for 1 s, then silence.
-static std::vector<float> grRelease(bool releaseFast, double seconds = 6.5, bool comp = false) {
+static std::vector<float> grRelease(bool releaseFast, double seconds = 6.5, bool comp = false,
+                                    bool x2 = false) {
     osc72::Ba6aLimiter lim;
     lim.prepare(kFs);
     lim.setCompMode(comp);
     lim.setKnob(0.75f);
     lim.setAttackFast(true);
     lim.setReleaseFast(releaseFast);
+    lim.setTimesTwo(x2);   // v62: set before reset so the scale snaps settled
     lim.reset();
     const int loud = (int)(1.0 * kFs);
     const int total = loud + (int)(kFs * seconds);
@@ -1252,6 +1256,206 @@ int main() {
             }
             check(ident, "J10 MOD-in P: mono in stays bit-identical L/R (image stays put)", "");
         }
+    }
+
+    // ═══════════════ K. 1X / 2X TIMING SELECTOR (v62) ═══════════════
+    // Nathan: a second mini selector mirroring the MOD A/P
+    // — 2X doubles the SELECTED attack and release times;
+    // 1X is 1.2.0 exactly. The scale multiplies every
+    // ballistics tau (detector charge/decay, control pole,
+    // SINGLE tau, both DUAL taus, T4 memory taus); the FAST
+    // attack chain takes a calibrated x3.0 at 2X (the bench
+    // step's fixed resampler edge otherwise caps its
+    // reading at ~1.4-1.6x — see kBa6aAttFastCalib and
+    // docs/build-report-v62.md). Assertions are RATIOS of
+    // the C-section protocols run at 1X vs 2X on this tree:
+    // target 2.00, band +/-15% unless a comment says why.
+    {
+        auto t90of = [&](const std::vector<float>& tr) {
+            float settled = tr.back();
+            for (size_t i = 0; i < tr.size(); ++i)
+                if (tr[i] >= 0.9f * settled) return (double)i / kFs * 1000.0;
+            return -1.0;
+        };
+        auto relTimes = [&](bool relFast, bool comp, bool x2, double& t50, double& t90) {
+            auto tr = grRelease(relFast, 7.0, comp, x2);
+            float g0 = tr[100];
+            t50 = -1; t90 = -1;
+            for (size_t i = 0; i < tr.size(); ++i) {
+                if (t50 < 0 && tr[i] <= 0.5f * g0) t50 = (double)i / kFs;
+                if (tr[i] <= 0.1f * g0) { t90 = (double)i / kFs; break; }
+            }
+        };
+        for (bool comp : { false, true }) {
+            const char* mn = comp ? "COMP" : "LIMIT";
+            // K1: attack FAST, full step.
+            double a1 = t90of(grStep(true, false, 0.75f, 0.5f, 1.2, comp, false));
+            double a2 = t90of(grStep(true, false, 0.75f, 0.5f, 1.2, comp, true));
+            std::snprintf(d, sizeof d, "%s t90 %.3f -> %.3f ms, ratio %.3f", mn, a1, a2, a2 / a1);
+            check(a2 / a1 > 1.70 && a2 / a1 < 2.30,
+                  comp ? "K1-COMP 2X attack FAST t90 ~2x (calibrated seat)"
+                       : "K1 2X attack FAST t90 ~2x (calibrated seat)", d);
+            // K2: attack SLOW, full step.
+            double s1 = t90of(grStep(false, false, 0.75f, 0.5f, 1.2, comp, false));
+            double s2 = t90of(grStep(false, false, 0.75f, 0.5f, 1.2, comp, true));
+            std::snprintf(d, sizeof d, "%s t90 %.2f -> %.2f ms, ratio %.3f", mn, s1, s2, s2 / s1);
+            check(s2 / s1 > 1.70 && s2 / s1 < 2.30,
+                  comp ? "K2-COMP 2X attack SLOW full-step t90 ~2x"
+                       : "K2 2X attack SLOW full-step t90 ~2x", d);
+            // K3: attack SLOW, small step (the T4-shaped seat).
+            double m1 = t90of(grStep(false, false, 0.75f, 0.12f, 1.2, comp, false));
+            double m2 = t90of(grStep(false, false, 0.75f, 0.12f, 1.2, comp, true));
+            std::snprintf(d, sizeof d, "%s t90 %.2f -> %.2f ms, ratio %.3f", mn, m1, m2, m2 / m1);
+            check(m2 / m1 > 1.70 && m2 / m1 < 2.30,
+                  comp ? "K3-COMP 2X attack SLOW small-step t90 ~2x"
+                       : "K3 2X attack SLOW small-step t90 ~2x", d);
+            // K4: release FAST (SINGLE), 50% and 90%.
+            double f50a, f90a, f50b, f90b;
+            relTimes(true, comp, false, f50a, f90a);
+            relTimes(true, comp, true, f50b, f90b);
+            std::snprintf(d, sizeof d, "%s 50%% %.4f -> %.4f (x%.3f), 90%% %.4f -> %.4f (x%.3f)",
+                          mn, f50a, f50b, f50b / f50a, f90a, f90b, f90b / f90a);
+            check(f50b / f50a > 1.70 && f50b / f50a < 2.30
+               && f90b / f90a > 1.70 && f90b / f90a < 2.30,
+                  comp ? "K4-COMP 2X release SINGLE 50/90% ~2x"
+                       : "K4 2X release SINGLE 50/90% ~2x", d);
+            // K5: release SLOW (DUAL), 50% and 90%. The 90%
+            // band widens to [1.65, 2.35]: the tail pole's
+            // T4 stretch is set by the stress the 1 s hold
+            // happened to charge, and the scaled memory
+            // charges less of it in the same hold (measured
+            // 1.73 LIMIT / 1.78 COMP — the mechanism, not
+            // slop; see the build report). The LIMIT 50%
+            // reading is additionally split-sensitive (the
+            // settled DUAL share grazes the 50% line); it
+            // lands at 1.97 on this tree and is asserted in
+            // the plain band, with the sensitivity on record.
+            double d50a, d90a, d50b, d90b;
+            relTimes(false, comp, false, d50a, d90a);
+            relTimes(false, comp, true, d50b, d90b);
+            std::snprintf(d, sizeof d, "%s 50%% %.4f -> %.4f (x%.3f), 90%% %.3f -> %.3f (x%.3f)",
+                          mn, d50a, d50b, d50b / d50a, d90a, d90b, d90b / d90a);
+            check(d50b / d50a > 1.70 && d50b / d50a < 2.30
+               && d90b / d90a > 1.65 && d90b / d90a < 2.35,
+                  comp ? "K5-COMP 2X release DUAL 50% ~2x, 90% ~2x (T4 band)"
+                       : "K5 2X release DUAL 50% ~2x, 90% ~2x (T4 band)", d);
+        }
+    }
+    {
+        // K6: T4 memory at 2X (C5 protocol): the brief/long
+        // contrast survives the time-scale, and both holds'
+        // recoveries run ~2x their 1X figures.
+        auto relAfter = [&](double holdSec, bool x2) {
+            osc72::Ba6aLimiter lim;
+            lim.prepare(kFs); lim.setKnob(0.85f);
+            lim.setAttackFast(true); lim.setReleaseFast(false);
+            lim.setTimesTwo(x2); lim.reset();
+            const int loud = (int)(holdSec * kFs);
+            const int tail = (int)(9.0 * kFs);
+            float g0 = 0; double t90 = -1;
+            for (int i = 0; i < loud + tail; ++i) {
+                float s = i < loud ? 0.5f * (float)std::sin(2.0 * kPi * 1000.0 * i / kFs) : 0.0f;
+                float oL, oR; lim.process(s, s, oL, oR);
+                if (i == loud + 100) g0 = lim.gainReductionDb();
+                if (i > loud && g0 > 0 && t90 < 0 && lim.gainReductionDb() <= 0.1f * g0)
+                    t90 = (double)(i - loud) / kFs;
+            }
+            return t90;
+        };
+        double b1 = relAfter(0.3, false), l1 = relAfter(8.0, false);
+        double b2 = relAfter(0.3, true),  l2 = relAfter(8.0, true);
+        std::snprintf(d, sizeof d, "brief %.2f -> %.2f (x%.3f), long %.2f -> %.2f (x%.3f), 2X contrast %.2f",
+                      b1, b2, b2 / b1, l1, l2, l2 / l1, l2 / b2);
+        check(b2 / b1 > 1.65 && b2 / b1 < 2.35 && l2 / l1 > 1.65 && l2 / l1 < 2.35
+              && l2 / b2 > 1.35,
+              "K6 2X T4 memory: both holds ~2x, contrast survives", d);
+    }
+    {
+        // K7: 1X BIT-IDENTITY — a Chain whose selector was
+        // never touched vs one explicitly set to 1X, MOD in
+        // (A flavour), programme in lockstep: every sample
+        // identical. The settled scale is exactly 1.0f, so
+        // every scaled tau is multiplied by an IEEE
+        // identity; this pin is the proof, not the argument.
+        osc72::Chain cA, cB;
+        for (auto* c : { &cA, &cB }) {
+            c->prepare(kFs); c->setKnob(0.75f); c->setModIn(true); c->reset();
+        }
+        cB.setTimesTwo(false);
+        ProgGen pg;
+        int diffs = 0;
+        const int total = (int)(4.0 * kFs);
+        for (int i = 0; i < total; ++i) {
+            float l, r; pg.sample(i, l, r);
+            float aL, aR, bL, bR;
+            cA.process(l, r, aL, aR);
+            cB.process(l, r, bL, bR);
+            if (aL != bL || aR != bR) ++diffs;
+        }
+        std::snprintf(d, sizeof d, "%d differing samples of %d", diffs, total);
+        check(diffs == 0, "K7 1X bit-identical to the untouched path (MOD in)", d);
+    }
+    {
+        // K8: the scale SNAPS — after a mid-stream toggle
+        // and 0.2 s of audio the slewed scale is EXACTLY
+        // the target in both directions (this is what
+        // restores bit-identity after a 2X excursion).
+        osc72::Ba6aLimiter lim;
+        lim.prepare(kFs); lim.setKnob(0.75f); lim.reset();
+        auto run = [&](int n, int start) {
+            for (int i = 0; i < n; ++i) {
+                float s = 0.5f * (float)std::sin(2.0 * kPi * 1000.0 * (start + i) / kFs);
+                float oL, oR; lim.process(s, s, oL, oR);
+            }
+        };
+        run((int)(0.2 * kFs), 0);
+        bool ok = lim.timeScale() == 1.0f;
+        lim.setTimesTwo(true);
+        run((int)(0.2 * kFs), (int)(0.2 * kFs));
+        ok = ok && lim.timeScale() == 2.0f;
+        lim.setTimesTwo(false);
+        run((int)(0.2 * kFs), (int)(0.4 * kFs));
+        ok = ok && lim.timeScale() == 1.0f;
+        check(ok, "K8 timing scale snaps exactly to 1.0 / 2.0 after toggles", "");
+    }
+    {
+        // K9: the 1X<->2X edge is click-free mid-tone (A3
+        // method: edge-window max step vs the settled
+        // configurations' steady reference).
+        auto steadyStep = [&](bool x2) {
+            osc72::Chain c;
+            c.prepare(kFs);
+            c.setKnob(0.6f);
+            c.setTimesTwo(x2);
+            c.reset();
+            float prev = 0, mx = 0;
+            for (int i = 0; i < (int)(2.0 * kFs); ++i) {
+                float s = 0.4f * (float)std::sin(2.0 * kPi * 997.0 * i / kFs);
+                float oL, oR; c.process(s, s, oL, oR);
+                if (i > (int)(0.5 * kFs)) mx = std::max(mx, std::fabs(oL - prev));
+                prev = oL;
+            }
+            return mx;
+        };
+        const float steadyRef = std::max(steadyStep(false), steadyStep(true));
+        osc72::Chain ch;
+        ch.prepare(kFs);
+        ch.setKnob(0.6f);
+        float prevL = 0, edgeMax = 0;
+        const int edges[] = { (int)(0.7 * kFs), (int)(1.7 * kFs) };
+        const int total = (int)(2.7 * kFs);
+        for (int i = 0; i < total; ++i) {
+            float s = 0.4f * (float)std::sin(2.0 * kPi * 997.0 * i / kFs);
+            if (i == edges[0]) ch.setTimesTwo(true);
+            if (i == edges[1]) ch.setTimesTwo(false);
+            float oL, oR; ch.process(s, s, oL, oR);
+            bool nearEdge = false;
+            for (int e : edges) if (std::abs(i - e) < (int)(0.03 * kFs)) nearEdge = true;
+            if (i > 100 && nearEdge) edgeMax = std::max(edgeMax, std::fabs(oL - prevL));
+            prevL = oL;
+        }
+        std::snprintf(d, sizeof d, "edge-window max step %.4f vs steady ref %.4f", edgeMax, steadyRef);
+        check(edgeMax < 1.5f * steadyRef + 0.02f, "K9 1X<->2X toggles click-free mid-tone", d);
     }
 
     std::printf("\n%s (%d checks, %d failures)\n",
