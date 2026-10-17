@@ -28,11 +28,13 @@
 //          impulse alignment in the P flavour, A<->P mid-
 //          stream toggle crossfades, POWER-off bit-exactness
 //          and mono-stays-mono with P selected
-//   P11    1X / 2X timing selector (v62): the 'timesTwo'
-//          param — default 1X, the doubled ballistics
-//          audible end-to-end (SLOW attack passes more
-//          transient, DUAL release holds longer), and no
-//          latency consequence in any state
+//   P11    baked 2X ballistics (v64; was the v62 1X/2X
+//          selector section): the 'timesTwo' param is
+//          REMOVED — its absence and the tolerance of a
+//          legacy 1.3.0 state carrying its value are
+//          pinned, and the end-to-end attack/release
+//          timings are pinned at the 1.3.0-at-2X reference
+//          values the selector's 2X arm printed
 //   P9     MIX ALIGNMENT at impulse level (v44 diagnosis):
 //          P7's pins took the nominal latency as their own
 //          reference, so a wet path arriving a sample early
@@ -879,32 +881,68 @@ int main() {
         }
     }
 
-    // ── P11. 1X / 2X timing selector (v62) ──────────────────
+    // ── P11. BAKED 2X BALLISTICS (v64; the v62 1X/2X
+    // ── selector section, re-based) ───────────────────────
+    // The 'timesTwo' parameter is GONE (Nathan's 1.3.0 ear
+    // verdict retired the 1X speeds; the 2X ballistics are
+    // baked into the DSP). This section pins what remains:
+    // the parameter's absence and the legacy-state
+    // tolerance around it (P11a), and the end-to-end
+    // timings at their 1.3.0-at-2X reference values through
+    // processBlock (P11b/c — the same protocols the v62
+    // pins ran against the selector's 2X arm, captured
+    // from the pre-change suite run), plus the latency
+    // figures the selector never touched (P11d).
     {
-        // P11a: param exists, default 1X (false).
+        // P11a: 'timesTwo' no longer exists, and a 1.3.0
+        // session state carrying its value restores
+        // cleanly — the orphaned entry is ignored, the
+        // surviving parameters land exactly. (The state is
+        // built from this build's own state XML with an
+        // orphaned PARAM element injected, i.e. byte-for-
+        // byte the shape a 1.3.0 chunk presents to
+        // setStateInformation: apvts.replaceState matches
+        // values to parameters by ID and never looks up an
+        // ID that no longer exists.)
         {
-            Osc72Processor p;
-            p.prepareToPlay(kFs, 512);
-            auto* pt = p.apvts.getParameter("timesTwo");
-            std::snprintf(b, sizeof b, "timesTwo default=%.0f (want 0)",
-                          pt ? (double)pt->getValue() : -1.0);
-            check(pt && pt->getValue() < 0.5f,
-                  "P11a timesTwo param exists, default 1X", b);
+            Osc72Processor src;
+            src.prepareToPlay(kFs, 512);
+            src.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.7f);
+            const float srcKnob = src.apvts.getParameter("allTheWay")->getValue();
+            juce::MemoryBlock mb;
+            src.getStateInformation(mb);
+            bool injected = false;
+            Osc72Processor dst;
+            if (auto xml = juce::AudioProcessor::getXmlFromBinary(mb.getData(), (int)mb.getSize())) {
+                auto* orphan = new juce::XmlElement("PARAM");
+                orphan->setAttribute("id", "timesTwo");
+                orphan->setAttribute("value", "1.0");
+                xml->addChildElement(orphan);
+                juce::MemoryBlock mb2;
+                juce::AudioProcessor::copyXmlToBinary(*xml, mb2);
+                dst.setStateInformation(mb2.getData(), (int)mb2.getSize());
+                injected = true;
+            }
+            auto* pt = dst.apvts.getParameter("timesTwo");
+            const float dstKnob = dst.apvts.getParameter("allTheWay")->getValue();
+            std::snprintf(b, sizeof b, "param %s; state injected=%d, knob %.3f -> %.3f after legacy restore",
+                          pt ? "STILL EXISTS" : "absent", (int)injected, srcKnob, dstKnob);
+            check(pt == nullptr && injected && std::fabs(dstKnob - srcKnob) < 0.001f,
+                  "P11a 'timesTwo' removed; 1.3.0 legacy state restores, orphan ignored", b);
         }
         // P11b: end-to-end attack — the GR readout's rise
         // time (t90) with the SLOW seat selected, measured
-        // on 64-sample blocks so the readout resolves
-        // ~1.3 ms. (A burst-peak method cannot see this
-        // selector: at this depth both arms' early peaks
-        // ride the make-up ceiling identically — the P6b
-        // ceiling note — while the GR trajectory itself
-        // doubles cleanly.)
-        auto grRiseT90 = [&](bool x2) {
+        // on 64-sample blocks (the v62 protocol). Reference:
+        // 16.0 ms — the figure the 2X arm printed on the
+        // 1.3.0 tree. (A burst-peak method cannot see the
+        // ballistics: at this depth the early peaks ride the
+        // make-up ceiling identically — the P6b ceiling note
+        // — while the GR trajectory itself carries them.)
+        auto grRiseT90 = [&]() {
             Osc72Processor q;
             q.prepareToPlay(kFs, 64);
             q.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.75f);
             q.apvts.getParameter("attackFast")->setValueNotifyingHost(0.0f);
-            if (x2) q.apvts.getParameter("timesTwo")->setValueNotifyingHost(1.0f);
             juce::MidiBuffer midi;
             const int block = 64;
             const int onset = (int)(0.3 * kFs);
@@ -927,23 +965,21 @@ int main() {
                     return (double)(k + 1) * block / kFs * 1000.0;
             return -1.0;
         };
-        double r1 = grRiseT90(false), r2 = grRiseT90(true);
-        std::snprintf(b, sizeof b, "SLOW attack GR rise t90: 1X %.1f ms vs 2X %.1f ms (ratio %.2f)",
-                      r1, r2, r2 / r1);
-        check(r2 / r1 > 1.6 && r2 / r1 < 2.4,
-              "P11b proc: 2X SLOW attack rise ~2x end-to-end (readout)", b);
+        double r = grRiseT90();
+        std::snprintf(b, sizeof b, "SLOW attack GR rise t90: baked %.1f ms vs 1.3.0-at-2X ref 16.0 ms", r);
+        check(std::fabs(r - 16.0) <= (64.0 / kFs * 1000.0),
+              "P11b proc: baked SLOW attack rise == 1.3.0-at-2X end-to-end (readout)", b);
 
         // P11c: end-to-end release — the GR readout's 50%
         // recovery time after a loud passage (DUAL seat),
-        // same small-block readout method; the peak depths
-        // the two arms fall FROM must agree (the selector
-        // changes times, not depths).
-        auto grFallT50 = [&](bool x2, float& peakGr) {
+        // same small-block readout method; the peak depth
+        // it falls FROM is part of the pin. References from
+        // the 1.3.0 tree's 2X arm: 0.103 s from 22.5 dB.
+        auto grFallT50 = [&](float& peakGr) {
             Osc72Processor q;
             q.prepareToPlay(kFs, 64);
             q.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.75f);
             q.apvts.getParameter("releaseFast")->setValueNotifyingHost(0.0f);
-            if (x2) q.apvts.getParameter("timesTwo")->setValueNotifyingHost(1.0f);
             juce::MidiBuffer midi;
             const int block = 64;
             const int loudEnd = (int)(1.0 * kFs);
@@ -966,21 +1002,19 @@ int main() {
             }
             return t50;
         };
-        float pkA = 0, pkB = 0;
-        double f1 = grFallT50(false, pkA), f2 = grFallT50(true, pkB);
-        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: 1X %.3f s vs 2X %.3f s (ratio %.2f), peaks %.1f / %.1f dB",
-                      f1, f2, f2 / f1, pkA, pkB);
-        check(std::fabs(pkB - pkA) < 0.15f * pkA && f2 / f1 > 1.6 && f2 / f1 < 2.4,
-              "P11c proc: 2X DUAL release 50% recovery ~2x from the same depth", b);
+        float pk = 0;
+        double f = grFallT50(pk);
+        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: baked %.3f s vs ref 0.103 s, peak %.1f dB (ref 22.5)",
+                      f, pk);
+        check(std::fabs(f - 0.103) <= (64.0 / kFs) && std::fabs(pk - 22.5f) < 0.3f,
+              "P11c proc: baked DUAL release 50% recovery == 1.3.0-at-2X from the same depth", b);
 
-        // P11d: no latency consequence — the reported
-        // latency is the state's own figure with the
-        // selector on or off (MOD in A: 992; MOD out: 32).
+        // P11d: the reported latency is untouched by the
+        // bake (MOD in A: 992; MOD out: 32).
         {
-            auto latOf = [&](bool modIn, bool x2) {
+            auto latOf = [&](bool modIn) {
                 Osc72Processor p;
                 if (modIn) p.apvts.getParameter("warble")->setValueNotifyingHost(1.0f);
-                if (x2) p.apvts.getParameter("timesTwo")->setValueNotifyingHost(1.0f);
                 p.prepareToPlay(kFs, 512);
                 juce::AudioBuffer<float> buf(2, 512);
                 juce::MidiBuffer midi;
@@ -988,11 +1022,10 @@ int main() {
                 p.processBlock(buf, midi);
                 return p.getLatencySamples();
             };
-            const int a = latOf(true, false), c = latOf(true, true);
-            const int e = latOf(false, false), f = latOf(false, true);
-            std::snprintf(b, sizeof b, "latency MOD-in %d / %d (1X/2X), MOD-out %d / %d", a, c, e, f);
-            check(a == 992 && c == 992 && e == 32 && f == 32,
-                  "P11d proc: timesTwo has no latency consequence", b);
+            const int a = latOf(true), e = latOf(false);
+            std::snprintf(b, sizeof b, "latency MOD-in %d, MOD-out %d", a, e);
+            check(a == 992 && e == 32,
+                  "P11d proc: latency unchanged by the bake (992 / 32)", b);
         }
     }
 

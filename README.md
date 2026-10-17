@@ -840,6 +840,42 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.3.1 — THE 2X BALLISTICS ARE THE ONLY BALLISTICS
+(report docs/build-report-v64.md). One change over
+1.3.0, on Nathan's ear verdict: the 2X timings "just
+sound so much better"; 1X "is just crushing and
+wrecking all the transients" — so the 1X speeds are
+done away with entirely. The 1X/2X selector is
+REMOVED at every level: the mirrored MiniBatToggle
+beside RATIO and its 2X/1X silk (gui-v59 — the RATIO
+word's line is plain silk again; the face is
+byte-identical to gui-v57), and the APVTS 'timesTwo'
+parameter and its processor control path. In the
+DSP the v62 slewed scale is replaced by the
+compile-time constant kBa6aTimeScale = 2.0f at the
+same use sites — including the FAST chain's x3
+calibration seat — and the frozen FAST constants
+are untouched, as ever. THE AUDIO IS BIT-IDENTICAL
+TO 1.3.0 WITH 2X ENGAGED: programme renders across
+30 seat/mode/MOD configurations hash identically
+to reference renders captured from the 1.3.0 tree
+with 2X engaged and settled (suite K7a-e), the
+absolute attack/release timings land exactly on
+the 1.3.0-at-2X values (K1-K6; end-to-end P11b/c:
+SLOW rise 16.0 ms, DUAL 50% recovery 0.103 s from
+22.5 dB), and the settled scale is now the state
+from the FIRST SAMPLE — the selector's ~46 ms
+load glide does not exist. Sessions saved under
+1.3.0 load fine: the orphaned 'timesTwo' state
+value is ignored by APVTS restore (pinned, P11a);
+a 2X session is bit-identical, a 1X session now
+plays at the baked ballistics — the directive's
+intent. Everything else is 1.3.0 exactly: A/P mini
+toggle + plain silk, Phase 90 / ADT, meter, ratio
+laws, statics. Suites: DSP 72/72, processor 45/45;
+snapshots byte-identical to docs/gui-v59-a.png
+(default opening state: INPUT 5, LIMIT, lever at
+A) and docs/gui-v59-b.png (P selected).
 v1.3.0 — A/P SELECTOR BACK TO THE MINI TOGGLE +
 1X/2X TIMING DOUBLER (reports
 docs/build-report-v61.md, docs/build-report-v62.md,

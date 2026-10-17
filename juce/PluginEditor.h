@@ -468,11 +468,12 @@ private:
     // gui-v57 after gui-v56's push-button round).
     MiniBatToggle phaserToggle_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> phaserAtt_;
-    // gui-v58 (Nathan): the 1X / 2X timing selector,
-    // bound to 'timesTwo' (the v62 DSP) — the A/P
-    // toggle's mirrored twin on the RATIO word's line.
-    MiniBatToggle timesTwoToggle_ { true };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> timesTwoAtt_;
+    // gui-v59 (Nathan, 1.3.1): the gui-v58 1X/2X mini
+    // toggle that mirrored the A/P here is REMOVED with
+    // its 'timesTwo' binding — the 1X speeds are retired
+    // and the 2X ballistics are baked in (v64 DSP), so
+    // there is no selector left to draw. The RATIO word's
+    // line is plain silk again, as before gui-v58.
     // v4: ATTACK / RELEASE ballistics toggles flanking the GR
     // display at the v31 positions (no jewels on these two).
     // v35: the pair drops down — words on the line the GAIN

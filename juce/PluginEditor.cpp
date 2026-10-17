@@ -2330,12 +2330,9 @@ Osc72Editor::Osc72Editor(Osc72Processor& p) : AudioProcessorEditor(&p), proc_(p)
     addAndMakeVisible(phaserToggle_);
     phaserAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         proc_.apvts, "modPhaser", phaserToggle_);
-    // gui-v58 (Nathan): the 1X / 2X timing selector — the
-    // A/P toggle's mirrored twin beside RATIO, bound to
-    // 'timesTwo' (v62 DSP; false = 1X, the default).
-    addAndMakeVisible(timesTwoToggle_);
-    timesTwoAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        proc_.apvts, "timesTwo", timesTwoToggle_);
+    // gui-v59 (Nathan): the gui-v58 1X/2X toggle beside
+    // RATIO is gone with the 'timesTwo' parameter (1.3.1:
+    // the 2X ballistics are baked in; no selector).
     // POWER toggle (v19): the strip's third BatToggle — a full
     // switch cluster matching LIMIT/MOD — bound to 'power'.
     addAndMakeVisible(powerToggle_);
@@ -2456,8 +2453,6 @@ void Osc72Editor::timerCallback()
         repaint(modToggle_.getBounds());
     if (phaserToggle_.advanceAnimation())
         repaint(phaserToggle_.getBounds());
-    if (timesTwoToggle_.advanceAnimation())
-        repaint(timesTwoToggle_.getBounds());
     if (powerToggle_.advanceAnimation())
         repaint(powerToggle_.getBounds());
     if (attackToggle_.advanceAnimation())
@@ -2574,7 +2569,8 @@ void Osc72Editor::resized()
     limitToggle_.setBounds(72, 410, 44, 60);        // centre (94, 440) = virtual (85, 400) — v32: back down to the flange-bottom line (v31: virtual (93, 76))
     modToggle_.setBounds(368, 410, 44, 60);         // centre (390, 440) = virtual (355, 400) — v32: back down to the flange-bottom line (v31: virtual (347, 76))
     phaserToggle_.setBounds(424, 384, 25, 20);      // centre (436.5, 394) = virtual (396.8, 358.2) — gui-v57: the A/P mini bat toggle (restored) on the MOD WORD's line, its plate centre on the word's cap centre (358.4), reading MOD A [toggle] P (see paint()); the bounds keep gui-v56's +6.36 virtual px right shift (device +7 vs gui-v54) so the A ink stands in the IN/OUT ink column
-    timesTwoToggle_.setBounds(28, 384, 25, 20);     // centre (40.5, 394) = virtual (36.8, 358.2) — gui-v58: the 1X/2X mini bat on the RATIO WORD's line, same plate height as its A/P twin; NOT the plate's perfect mirror (centre virtual 43.2): the '1X' ink is ~5 virtual px wider than 'A', and with the 1X right edge pinned to the COMP/LIMIT ink column (see paint()) the plate absorbs the difference and lands ~6.4 left of the mirror
+    // gui-v59: the gui-v58 1X/2X mini bat's bounds went
+    // with the toggle — nothing sits left of RATIO now.
     powerToggle_.setBounds(572, 54, 44, 60);        // centre (594, 84) = virtual (540, 76) — on the display centre line (76)
     // v4: ATTACK / RELEASE toggles flank the GR display at the
     // v31 span, centres on the same y-76 line.
@@ -3240,34 +3236,16 @@ void Osc72Editor::paint(juce::Graphics& g)
                     385.76f, 362.9f, Anchor::right);
     drawTrackedText(g, "P", capsFont(12.5f), 0.4f,
                     407.66f, 362.9f, Anchor::left);
-    // gui-v58 (Nathan): the A/P assembly's mirror on the
-    // RATIO word's line — the 1X / 2X timing selector
-    // (the v62 DSP's 'timesTwo'): reading, left to
-    // right, 2X, the toggle, 1X, RATIO — 1X nearest the
-    // word (the default, mirroring A nearest MOD), the
-    // lever thrown toward the word at 1X and outward at
-    // 2X. Same legend treatment (capsFont 12.5, plain
-    // silk, baseline 362.9) and the same plate height.
-    // Placement, by the panel's own grids: the 1X ink's
-    // RIGHT edge stands on the left cluster's label
-    // column — the COMP / LIMIT ink right edge (their
-    // right-anchor line, x 62) — exactly as the A ink's
-    // left edge stands on the IN / OUT column on the
-    // right. '1X' ink runs ~11.9 virtual px wide against
-    // 'A''s ~6.8, so holding that edge AND both air gaps
-    // at the A/P values (plate flanks ~2.4-2.6) pushes
-    // the plate ~6.4 left of its perfect mirror about
-    // the module centre (plate centre virtual 36.8 vs
-    // the mirror's 43.2); the 2X ink then clears the
-    // module's left edge by ~14. The anchors below are
-    // set from the font model so the INK lands there —
-    // drawTrackedText rounds each glyph's pen to whole
-    // virtual px, so the ink edges stand within ~0.4 of
-    // their targets (measured in build-report-v63.md).
-    drawTrackedText(g, "2X", capsFont(12.5f), 0.4f,
-                    26.8f, 362.9f, Anchor::right);
-    drawTrackedText(g, "1X", capsFont(12.5f), 0.4f,
-                    61.7f, 362.9f, Anchor::right);
+    // gui-v59 (Nathan, 1.3.1): the gui-v58 mirror
+    // assembly that stood here — 2X · toggle · 1X beside
+    // RATIO, the 1X ink standing on the COMP/LIMIT
+    // column — is REMOVED with the 'timesTwo' selector
+    // it served: the 1X speeds are retired and the 2X
+    // ballistics are the unit's only ballistics, baked
+    // into the DSP (v64; docs/build-report-v64.md). The
+    // RATIO word's line returns to plain silk — the word
+    // alone on its line, exactly the pre-gui-v58 face.
+    // The A/P assembly opposite (above) is untouched.
 
     // ── v4 (Nathan): ATTACK / RELEASE clusters flanking the
     //    GR display at the v31 positions (toggle centres

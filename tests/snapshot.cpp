@@ -9,10 +9,10 @@
 //   phaser         = MOD flavour P selected (default: A) —
 //                    gui-v53: the A/P mini toggle's lever
 //                    toward P ('modPhaser' true).
-//   timestwo       = 1X/2X timing selector at 2X
-//                    (default: 1X) — gui-v58: the RATIO-side
-//                    mini toggle's lever outward ('timesTwo'
-//                    true).
+//   timestwo       = RETIRED in gui-v59 (1.3.1): the 1X/2X
+//                    selector and its 'timesTwo' parameter
+//                    are gone (the 2X ballistics are baked
+//                    in), so the token no longer exists.
 //   limitout       = 'limit' toggle OUT (default: in)
 //                    v53: the toggle is the RATIO mode switch —
 //                    IN (default here) renders COMP (lever up),
@@ -267,6 +267,20 @@
 // reading 2X · toggle · 1X · RATIO with 1X nearest
 // the word. Editor artwork + one snapshot token only
 // (build-report-v63.md).
+// v59 shots: gui-v59-a.png ("knob=5 limitout" — the
+// default opening state: INPUT 5, LIMIT, MOD out, A/P
+// lever at A, NO 1X/2X assembly) / gui-v59-b.png
+// ("knob=5 limitout warble phaser" — MOD in, P
+// selected, lever toward P).
+// v59 change (Nathan, 1.3.1): the 1X/2X selector is
+// REMOVED ENTIRELY — the mirrored mini toggle beside
+// RATIO, its 2X/1X silk and the 'timesTwo' parameter
+// (suite P11a pins its absence + legacy-state
+// tolerance). The 2X ballistics are baked into the
+// DSP as the unit's only ballistics (v64), bit-
+// identical to 1.3.0 with 2X engaged (suite K7). The
+// RATIO word's line is plain silk again — the face is
+// the gui-v57 face (build-report-v64.md).
 // v51 shots: gui-v51-a.png ("knob=5 limitout" — the
 // default opening state, as v50-a) / gui-v51-b.png
 // ("knob=5 limitout gr=12" — driven at exactly 12 dB so
@@ -436,7 +450,6 @@ int main(int argc, char* argv[]) {
     bool limitIn = true;
     bool powerOn = true;
     bool phaserOn = false;     // gui-v53: 'modPhaser' (default A)
-    bool timesTwoOn = false;   // gui-v58: 'timesTwo' (default 1X)
     float knobVal = 7.0f;      // v33: knob=<0..10> token
     float grOverride = 0.0f;   // v33: gr=<dB> token
     for (int i = 2; i < argc; ++i) {
@@ -458,8 +471,6 @@ int main(int argc, char* argv[]) {
             warbleOn = true;
         } else if (v == "phaser") {
             phaserOn = true;
-        } else if (v == "timestwo") {
-            timesTwoOn = true;
         } else if (v == "limitout") {
             limitIn = false;
         } else if (v == "poweroff") {
@@ -475,8 +486,6 @@ int main(int argc, char* argv[]) {
         p->setValueNotifyingHost(warbleOn ? 1.0f : 0.0f);
     if (auto* p = proc.apvts.getParameter("modPhaser"))
         p->setValueNotifyingHost(phaserOn ? 1.0f : 0.0f);
-    if (auto* p = proc.apvts.getParameter("timesTwo"))
-        p->setValueNotifyingHost(timesTwoOn ? 1.0f : 0.0f);
     if (auto* p = proc.apvts.getParameter("limit"))
         p->setValueNotifyingHost(limitIn ? 1.0f : 0.0f);
     if (auto* p = proc.apvts.getParameter("power"))

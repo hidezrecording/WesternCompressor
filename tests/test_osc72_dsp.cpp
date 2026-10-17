@@ -10,6 +10,8 @@
 #include <cstdio>
 #include <cmath>
 #include <chrono>
+#include <cstdint>
+#include <cstring>
 #include <vector>
 
 static int failures = 0;
@@ -97,15 +99,21 @@ static float thdLim(float knob, float amp, float freq, bool attackFast = true,
 // GR step response: silence -> loud sine at t=0. Returns the
 // GR trace (per-sample) for `seconds`.
 static std::vector<float> grStep(bool attackFast, bool releaseFast, float knob = 0.75f,
-                                 float amp = 0.5f, double seconds = 1.2, bool comp = false,
-                                 bool x2 = false) {
+                                 float amp = 0.5f, double seconds = 1.2, bool comp = false) {
+    // v64 (1.3.1): through 1.3.0 this helper took an x2 flag
+    // (v62) that engaged the 1X/2X selector before reset;
+    // the default arm measured the 1X ballistics. The
+    // selector is gone — the baked 2X ballistics are the
+    // only ballistics — so the flag and the call are gone
+    // with it, and every protocol on this helper now reads
+    // the baked timings (the C bands were re-based to
+    // their 1.3.0-at-2X values, ledgered per pin).
     osc72::Ba6aLimiter lim;
     lim.prepare(kFs);
     lim.setCompMode(comp);
     lim.setKnob(knob);
     lim.setAttackFast(attackFast);
     lim.setReleaseFast(releaseFast);
-    lim.setTimesTwo(x2);   // v62: set before reset so the scale snaps settled
     lim.reset();
     const int total = (int)(kFs * seconds);
     std::vector<float> tr((size_t)total);
@@ -117,15 +125,15 @@ static std::vector<float> grStep(bool attackFast, bool releaseFast, float knob =
     return tr;
 }
 // Release trace: loud sine for 1 s, then silence.
-static std::vector<float> grRelease(bool releaseFast, double seconds = 6.5, bool comp = false,
-                                    bool x2 = false) {
+static std::vector<float> grRelease(bool releaseFast, double seconds = 6.5, bool comp = false) {
+    // v64: the v62 x2 flag is gone with the selector (see
+    // grStep) — this protocol reads the baked ballistics.
     osc72::Ba6aLimiter lim;
     lim.prepare(kFs);
     lim.setCompMode(comp);
     lim.setKnob(0.75f);
     lim.setAttackFast(true);
     lim.setReleaseFast(releaseFast);
-    lim.setTimesTwo(x2);   // v62: set before reset so the scale snaps settled
     lim.reset();
     const int loud = (int)(1.0 * kFs);
     const int total = loud + (int)(kFs * seconds);
@@ -236,7 +244,7 @@ int main() {
         osc72::Chain ch;
         ch.prepare(kFs);
         ch.setKnob(0.6f);
-        float prevL = 0, edgeMax = 0;
+        float prevL = 0, edgeMax = 0, relEdgeMax = 0;
         const int edges[] = { (int)(0.7 * kFs), (int)(1.2 * kFs), (int)(1.8 * kFs),
                               (int)(2.4 * kFs), (int)(2.7 * kFs), (int)(3.2 * kFs) };
         const int total = (int)(4.0 * kFs);
@@ -249,13 +257,33 @@ int main() {
             if (i == edges[4]) ch.setReleaseFast(true);
             if (i == edges[5]) ch.setModIn(false);
             float oL, oR; ch.process(s, s, oL, oR);
-            bool nearEdge = false;
-            for (int e : edges) if (std::abs(i - e) < (int)(0.03 * kFs)) nearEdge = true;
+            bool nearEdge = false, nearRelEdge = false;
+            for (int e : edges) if (e != edges[4] && std::abs(i - e) < (int)(0.03 * kFs)) nearEdge = true;
+            if (std::abs(i - edges[4]) < (int)(0.03 * kFs)) nearRelEdge = true;
             if (i > 100 && nearEdge) edgeMax = std::max(edgeMax, std::fabs(oL - prevL));
+            if (i > 100 && nearRelEdge) relEdgeMax = std::max(relEdgeMax, std::fabs(oL - prevL));
             prevL = oL;
         }
-        std::snprintf(d, sizeof d, "edge-window max step %.4f vs steady ref %.4f", edgeMax, steadyRef);
-        check(edgeMax < 1.5f * steadyRef + 0.02f, "A3 all toggles click-free mid-tone", d);
+        // v64 pin move (cause: the baked 2X ballistics):
+        // the RELEASE-select edge (edges[4], DUAL -> SINGLE)
+        // is a hard select between two recovery networks
+        // whose instantaneous states diverge by the tone
+        // ripple's falling-phase separation; with the
+        // release taus doubled that divergence at the flip
+        // instant grows — measured on this protocol:
+        // 0.1629 (1.39x steady) at the 1X ballistics this
+        // pin was calibrated on, 0.2460 (2.10x) baked. No
+        // state anywhere steps (the networks are continuous;
+        // the select is the discontinuity, as it was at 1X),
+        // and the audio is 1.3.0-at-2X bit-identical (K7),
+        // so the bound — not the engine — moves, and only
+        // for that one edge: the other five edges keep the
+        // original 1.5x bound (worst at 2X: MOD-in 0.1264),
+        // the release edge is bounded at 2.5x.
+        std::snprintf(d, sizeof d, "edge max %.4f, release-edge max %.4f vs steady ref %.4f",
+                      edgeMax, relEdgeMax, steadyRef);
+        check(edgeMax < 1.5f * steadyRef + 0.02f && relEdgeMax < 2.5f * steadyRef + 0.02f,
+              "A3 all toggles click-free mid-tone (release edge re-based, v64)", d);
     }
     {
         // A4 (v53 REWORKED — cause: no bypassed state exists
@@ -349,6 +377,16 @@ int main() {
         // same band; the base-rate bench readings (COMP
         // 0.375 / LIMIT 0.271, law mapping only) are in
         // docs/build-report-v53.md.
+        // v64 pin move (cause: the baked 2X ballistics —
+        // the selector this protocol's helper engaged at
+        // 1X no longer exists): the same step now reads the
+        // doubled FAST chain, landing exactly on the K1
+        // references captured from 1.3.0 at 2X (1.125 ms
+        // LIMIT / 1.521 ms COMP). The bands below are those
+        // references +/-15%. The seat's constants are still
+        // the frozen ones — the doubling lives in the
+        // baked scale (kBa6aTimeScale + the FAST
+        // calibration), never in the constants.
         for (bool comp : { false, true }) {
             auto tr = grStep(true, false, 0.75f, 0.5f, 1.2, comp);
             float settled = tr.back();
@@ -357,9 +395,9 @@ int main() {
                 if (tr[i] >= 0.9f * settled) { t90 = (double)i / kFs * 1000.0; break; }
             std::snprintf(d, sizeof d, "%s settled GR %.1f dB, t90 %.3f ms",
                           comp ? "COMP" : "LIMIT", settled, t90);
-            check(t90 > 0.50 && t90 < 0.75,
-                  comp ? "C1-COMP attack FAST: t90 0.50-0.75 ms (seat frozen, OS step edge)"
-                       : "C1 attack FAST: t90 0.50-0.75 ms (seat frozen, OS step edge, v53)", d);
+            check(comp ? (t90 > 1.29 && t90 < 1.75) : (t90 > 0.95 && t90 < 1.30),
+                  comp ? "C1-COMP attack FAST: t90 1.29-1.75 ms (baked 2X, ref 1.521, v64)"
+                       : "C1 attack FAST: t90 0.95-1.30 ms (baked 2X, ref 1.125, v64)", d);
         }
     }
     {
@@ -379,8 +417,14 @@ int main() {
         };
         double tF = t90of(trF), tS = t90of(trS);
         std::snprintf(d, sizeof d, "t90 fast %.3f ms, slow %.2f ms", tF, tS);
-        check(tS > 6.5 && tS < 9.5 && tS >= 8.0 * tF,
-              "C2 attack SLOW: GR t90 6.5-9.5 ms (between-seat doubled, v46)", d);
+        // v64 pin move (cause as C1): the SLOW full step
+        // reads 15.06 ms baked — the K2 LIMIT reference
+        // from 1.3.0 at 2X; band = ref +/-15%. The seat
+        // separation survives doubled (15.06 / 1.125 =
+        // 13.4x the FAST reading), so the >= 8x condition
+        // is kept verbatim.
+        check(tS > 12.8 && tS < 17.3 && tS >= 8.0 * tF,
+              "C2 attack SLOW: GR t90 12.8-17.3 ms (baked 2X, ref 15.06, v64)", d);
         // v53: the SLOW constants take one common x1.25
         // toward the restated LA-2A reference (attack
         // ~10 ms) — in COMP (the near-shipped law) the full
@@ -392,8 +436,11 @@ int main() {
         auto trSC = grStep(false, false, 0.75f, 0.5f, 1.2, true);
         double tSC = t90of(trSC);
         std::snprintf(d, sizeof d, "COMP full-step t90 %.2f ms", tSC);
-        check(tSC > 9.0 && tSC < 12.0,
-              "C2c attack SLOW (COMP): full-step t90 9-12 ms (LA-2A seat, v53)", d);
+        // v64 pin move (cause as C1): reads 21.15 ms baked
+        // — the K2-COMP reference from 1.3.0 at 2X; band =
+        // ref +/-15%.
+        check(tSC > 18.0 && tSC < 24.3,
+              "C2c attack SLOW (COMP): full-step t90 18.0-24.3 ms (baked 2X, ref 21.15, v64)", d);
         auto trSmall = grStep(false, false, 0.75f, 0.12f);
         double tSmall = t90of(trSmall);
         std::snprintf(d, sizeof d, "small-step (amp .12) t90 %.2f ms, settled GR %.1f dB",
@@ -403,8 +450,13 @@ int main() {
         // step at ~12.1-12.3 ms in both modes; the
         // dim-panel substance (small demands answer
         // lazily, in-family) is unchanged.
-        check(tSmall > 2.0 && tSmall < 13.0,
-              "C2b attack SLOW small step: t90 in the opto family band 2-13 ms (v53)", d);
+        // v64 pin move (cause as C1): reads 24.15 ms baked
+        // — the K3 LIMIT reference from 1.3.0 at 2X; band
+        // = ref +/-15%. The dim-panel substance is
+        // unchanged (the small step still answers far
+        // lazier than the full step's single-tau curve).
+        check(tSmall > 20.5 && tSmall < 27.8,
+              "C2b attack SLOW small step: t90 20.5-27.8 ms (baked 2X, ref 24.15, v64)", d);
     }
     {
         // C3: release FAST = SINGLE — 1176 release at
@@ -418,8 +470,13 @@ int main() {
             if (tr[i] <= 0.1f * g0) { t90 = (double)i / kFs; break; }
         }
         std::snprintf(d, sizeof d, "GR0 %.1f dB, 50%% recovery %.3f s, 90%% recovery %.3f s", g0, t50, t90);
-        check(t90 > 0.040 && t90 < 0.080, "C3 release SINGLE: 90% recovery 40-80 ms (1176 fast seat, v45)", d);
-        check(t50 > 0 && t50 < 0.045, "C3b release SINGLE: 50% recovery < 45 ms (v45)", d);
+        // v64 pin move (cause as C1): baked, the SINGLE
+        // recovery reads the K4 LIMIT references from
+        // 1.3.0 at 2X (50% 0.0470 s, 90% 0.0935 s); bands
+        // = refs +/-15% (C3b, one-sided at 1X, gains its
+        // lower edge from the same reference).
+        check(t90 > 0.079 && t90 < 0.108, "C3 release SINGLE: 90% recovery 79-108 ms (baked 2X, ref 0.0935, v64)", d);
+        check(t50 > 0.040 && t50 < 0.054, "C3b release SINGLE: 50% recovery 40-54 ms (baked 2X, ref 0.0470, v64)", d);
     }
     {
         // C4: release SLOW = DUAL — the opto two-stage shape
@@ -436,8 +493,16 @@ int main() {
         }
         std::snprintf(d, sizeof d, "GR0 %.1f dB, 50%% rec %.3f s, at 0.3 s %.0f%%, 90%% rec %.2f s",
                       g0, t50, 100.0 * at03 / g0, t90);
-        check(at03 > 0.28f * g0 && at03 < 0.48f * g0, "C4a DUAL tail holds 28-48% of GR at 0.3 s", d);
-        check(t90 > 1.9 && t90 < 3.3, "C4b DUAL 90% recovery 1.9-3.3 s (opto between-seat, v45)", d);
+        // v64 pin moves (cause as C1 — the whole C4 block
+        // reads the baked ballistics now): at 0.3 s the
+        // DUAL tail holds ~48% of GR0 (the doubled release
+        // simply lets go later — the tail-hold substance
+        // is the point of the seat); the 90% recovery is
+        // the K5 LIMIT reference 4.663 s (band +/-17.5%,
+        // the T4 band); the LIMIT 50% crossing is the K5
+        // reference 0.2160 s (band +/-15%).
+        check(at03 > 0.40f * g0 && at03 < 0.56f * g0, "C4a DUAL tail holds 40-56% of GR at 0.3 s (baked 2X, v64)", d);
+        check(t90 > 3.85 && t90 < 5.47, "C4b DUAL 90% recovery 3.85-5.47 s (baked 2X, ref 4.663, v64)", d);
         // v53 pin move (cause: law re-voice, constants
         // untouched): in LIMIT the working depth is deeper
         // (GR0 22.3 vs 17.1), the T4 stress state charges
@@ -445,7 +510,7 @@ int main() {
         // 0.110 s. In COMP the same constants read 0.069 s,
         // inside the manuals' band (C4d). The 90% tail and
         // the 0.3 s hold stay in their bands in both modes.
-        check(t50 > 0.095 && t50 < 0.125, "C4c DUAL 50% recovery 95-125 ms in LIMIT (v53 law)", d);
+        check(t50 > 0.184 && t50 < 0.248, "C4c DUAL 50% recovery 184-248 ms in LIMIT (baked 2X, ref 0.2160, v64)", d);
         auto trC = grRelease(false, 6.5, true);
         float g0C = trC[100];
         double t50C = -1, t90C = -1;
@@ -454,8 +519,11 @@ int main() {
             if (trC[i] <= 0.1f * g0C) { t90C = (double)i / kFs; break; }
         }
         std::snprintf(d, sizeof d, "COMP: GR0 %.1f dB, 50%% rec %.3f s, 90%% rec %.2f s", g0C, t50C, t90C);
-        check(t50C > 0.045 && t50C < 0.090 && t90C > 1.9 && t90C < 3.3,
-              "C4d DUAL in COMP: 50% 45-90 ms, 90% 1.9-3.3 s (shipped bands hold)", d);
+        // v64 pin move (cause as C1): the K5-COMP
+        // references from 1.3.0 at 2X (50% 0.1428 s, band
+        // +/-15%; 90% 3.915 s, band +/-17.5%).
+        check(t50C > 0.121 && t50C < 0.164 && t90C > 3.23 && t90C < 4.60,
+              "C4d DUAL in COMP: 50% 121-164 ms, 90% 3.23-4.60 s (baked 2X, refs 0.1428/3.915, v64)", d);
     }
     {
         // C5: T4 MEMORY — same level, same depth, different
@@ -490,8 +558,17 @@ int main() {
         double tBrief = relAfter(0.3), tLong = relAfter(8.0);
         std::snprintf(d, sizeof d, "90%% rec after 0.3 s hold %.2f s, after 8 s hold %.2f s (ratio %.2f)",
                       tBrief, tLong, tBrief > 0 ? tLong / tBrief : 0.0);
-        check(tBrief > 0.5 && tLong > 1.35 * tBrief && tLong < 5.5,
-              "C5 DUAL memory: long hold releases >= 1.35x slower, inside 5 s envelope (v45)", d);
+        // v64 pin move (cause as C1): baked, the two holds
+        // read the K6 references from 1.3.0 at 2X (brief
+        // 4.45 s, long 6.65 s; bands +/-17.5%). The 1X-era
+        // "inside the manuals' 5 s envelope" bound goes
+        // with the 1X speeds: with the memory taus doubled
+        // the stressed tail's 90% recovery is 6.65 s — the
+        // figure 1.3.0's own K6 pin shipped. The memory
+        // substance (long hold releases materially slower,
+        // contrast 1.49) is asserted unchanged.
+        check(tBrief > 3.7 && tBrief < 5.2 && tLong > 1.35 * tBrief && tLong > 5.5 && tLong < 7.8,
+              "C5 DUAL memory: holds at 1.3.0-at-2X refs, long >= 1.35x slower (baked 2X, v64)", d);
     }
 
     // ═══════════════ D. AUTO MAKE-UP (Nathan's pin) ═══════════════
@@ -1258,18 +1335,35 @@ int main() {
         }
     }
 
-    // ═══════════════ K. 1X / 2X TIMING SELECTOR (v62) ═══════════════
-    // Nathan: a second mini selector mirroring the MOD A/P
-    // — 2X doubles the SELECTED attack and release times;
-    // 1X is 1.2.0 exactly. The scale multiplies every
-    // ballistics tau (detector charge/decay, control pole,
-    // SINGLE tau, both DUAL taus, T4 memory taus); the FAST
-    // attack chain takes a calibrated x3.0 at 2X (the bench
-    // step's fixed resampler edge otherwise caps its
-    // reading at ~1.4-1.6x — see kBa6aAttFastCalib and
-    // docs/build-report-v62.md). Assertions are RATIOS of
-    // the C-section protocols run at 1X vs 2X on this tree:
-    // target 2.00, band +/-15% unless a comment says why.
+    // ═══════════════ K. BAKED 2X BALLISTICS (v64; the v62
+    // ═══════════════ 1X/2X SELECTOR section, re-based) ═══════
+    // Nathan's ear verdict on 1.3.0 retired the 1X speeds
+    // ("just crushing and wrecking all the transients"):
+    // the selector, its panel toggle and the 'timesTwo'
+    // parameter are gone, and the 2X ballistics are baked
+    // in as kBa6aTimeScale — the unit's ONLY ballistics.
+    // This section's job is therefore no longer "does the
+    // doubler double" but "is the baked engine EXACTLY the
+    // 1.3.0 engine at 2X":
+    //   K1–K6 assert the ABSOLUTE timings of the shipped
+    //   protocols against the reference values those same
+    //   protocols printed on the 1.3.0 tree with 2X
+    //   engaged and settled (captured from the pre-change
+    //   suite run; docs/build-report-v64.md). The bands
+    //   are the old ratio bands re-expressed about the 2X
+    //   values: ±15% (±17.5% for the K5 90% tail and K6 —
+    //   the T4 mechanism recorded at K5 in v62).
+    //   K7 is the bit-identity proof proper: programme
+    //   renders across a seat/mode/MOD matrix, hashed per
+    //   sample over (outL, outR, GR readout), against
+    //   reference hashes captured from the 1.3.0 tree with
+    //   2X engaged and settled before the first sample —
+    //   any drift in any tau, law or stage flips a hash.
+    // Removed with the selector (cause ledgered in the
+    // build report): the old K7 (1X bit-identity — no 1X
+    // remains to be identical to), K8 (scale snap after
+    // toggles — no toggles, no slew state) and K9
+    // (toggle-edge click-freedom — no edge exists).
     {
         auto t90of = [&](const std::vector<float>& tr) {
             float settled = tr.back();
@@ -1277,8 +1371,8 @@ int main() {
                 if (tr[i] >= 0.9f * settled) return (double)i / kFs * 1000.0;
             return -1.0;
         };
-        auto relTimes = [&](bool relFast, bool comp, bool x2, double& t50, double& t90) {
-            auto tr = grRelease(relFast, 7.0, comp, x2);
+        auto relTimes = [&](bool relFast, bool comp, double& t50, double& t90) {
+            auto tr = grRelease(relFast, 7.0, comp);
             float g0 = tr[100];
             t50 = -1; t90 = -1;
             for (size_t i = 0; i < tr.size(); ++i) {
@@ -1286,70 +1380,66 @@ int main() {
                 if (tr[i] <= 0.1f * g0) { t90 = (double)i / kFs; break; }
             }
         };
+        auto nearRef = [](double v, double ref, double frac) {
+            return v > ref * (1.0 - frac) && v < ref * (1.0 + frac);
+        };
         for (bool comp : { false, true }) {
             const char* mn = comp ? "COMP" : "LIMIT";
-            // K1: attack FAST, full step.
-            double a1 = t90of(grStep(true, false, 0.75f, 0.5f, 1.2, comp, false));
-            double a2 = t90of(grStep(true, false, 0.75f, 0.5f, 1.2, comp, true));
-            std::snprintf(d, sizeof d, "%s t90 %.3f -> %.3f ms, ratio %.3f", mn, a1, a2, a2 / a1);
-            check(a2 / a1 > 1.70 && a2 / a1 < 2.30,
-                  comp ? "K1-COMP 2X attack FAST t90 ~2x (calibrated seat)"
-                       : "K1 2X attack FAST t90 ~2x (calibrated seat)", d);
+            // K1: attack FAST, full step (the calibrated seat).
+            double a = t90of(grStep(true, false, 0.75f, 0.5f, 1.2, comp));
+            double aRef = comp ? 1.521 : 1.125;
+            std::snprintf(d, sizeof d, "%s t90 %.3f ms vs 1.3.0-at-2X ref %.3f ms", mn, a, aRef);
+            check(nearRef(a, aRef, 0.15),
+                  comp ? "K1-COMP baked attack FAST t90 == 1.3.0-at-2X (calibrated seat)"
+                       : "K1 baked attack FAST t90 == 1.3.0-at-2X (calibrated seat)", d);
             // K2: attack SLOW, full step.
-            double s1 = t90of(grStep(false, false, 0.75f, 0.5f, 1.2, comp, false));
-            double s2 = t90of(grStep(false, false, 0.75f, 0.5f, 1.2, comp, true));
-            std::snprintf(d, sizeof d, "%s t90 %.2f -> %.2f ms, ratio %.3f", mn, s1, s2, s2 / s1);
-            check(s2 / s1 > 1.70 && s2 / s1 < 2.30,
-                  comp ? "K2-COMP 2X attack SLOW full-step t90 ~2x"
-                       : "K2 2X attack SLOW full-step t90 ~2x", d);
+            double s = t90of(grStep(false, false, 0.75f, 0.5f, 1.2, comp));
+            double sRef = comp ? 21.15 : 15.06;
+            std::snprintf(d, sizeof d, "%s t90 %.2f ms vs 1.3.0-at-2X ref %.2f ms", mn, s, sRef);
+            check(nearRef(s, sRef, 0.15),
+                  comp ? "K2-COMP baked attack SLOW full-step t90 == 1.3.0-at-2X"
+                       : "K2 baked attack SLOW full-step t90 == 1.3.0-at-2X", d);
             // K3: attack SLOW, small step (the T4-shaped seat).
-            double m1 = t90of(grStep(false, false, 0.75f, 0.12f, 1.2, comp, false));
-            double m2 = t90of(grStep(false, false, 0.75f, 0.12f, 1.2, comp, true));
-            std::snprintf(d, sizeof d, "%s t90 %.2f -> %.2f ms, ratio %.3f", mn, m1, m2, m2 / m1);
-            check(m2 / m1 > 1.70 && m2 / m1 < 2.30,
-                  comp ? "K3-COMP 2X attack SLOW small-step t90 ~2x"
-                       : "K3 2X attack SLOW small-step t90 ~2x", d);
+            double m = t90of(grStep(false, false, 0.75f, 0.12f, 1.2, comp));
+            double mRef = comp ? 24.71 : 24.15;
+            std::snprintf(d, sizeof d, "%s t90 %.2f ms vs 1.3.0-at-2X ref %.2f ms", mn, m, mRef);
+            check(nearRef(m, mRef, 0.15),
+                  comp ? "K3-COMP baked attack SLOW small-step t90 == 1.3.0-at-2X"
+                       : "K3 baked attack SLOW small-step t90 == 1.3.0-at-2X", d);
             // K4: release FAST (SINGLE), 50% and 90%.
-            double f50a, f90a, f50b, f90b;
-            relTimes(true, comp, false, f50a, f90a);
-            relTimes(true, comp, true, f50b, f90b);
-            std::snprintf(d, sizeof d, "%s 50%% %.4f -> %.4f (x%.3f), 90%% %.4f -> %.4f (x%.3f)",
-                          mn, f50a, f50b, f50b / f50a, f90a, f90b, f90b / f90a);
-            check(f50b / f50a > 1.70 && f50b / f50a < 2.30
-               && f90b / f90a > 1.70 && f90b / f90a < 2.30,
-                  comp ? "K4-COMP 2X release SINGLE 50/90% ~2x"
-                       : "K4 2X release SINGLE 50/90% ~2x", d);
-            // K5: release SLOW (DUAL), 50% and 90%. The 90%
-            // band widens to [1.65, 2.35]: the tail pole's
-            // T4 stretch is set by the stress the 1 s hold
-            // happened to charge, and the scaled memory
-            // charges less of it in the same hold (measured
-            // 1.73 LIMIT / 1.78 COMP — the mechanism, not
-            // slop; see the build report). The LIMIT 50%
-            // reading is additionally split-sensitive (the
-            // settled DUAL share grazes the 50% line); it
-            // lands at 1.97 on this tree and is asserted in
-            // the plain band, with the sensitivity on record.
-            double d50a, d90a, d50b, d90b;
-            relTimes(false, comp, false, d50a, d90a);
-            relTimes(false, comp, true, d50b, d90b);
-            std::snprintf(d, sizeof d, "%s 50%% %.4f -> %.4f (x%.3f), 90%% %.3f -> %.3f (x%.3f)",
-                          mn, d50a, d50b, d50b / d50a, d90a, d90b, d90b / d90a);
-            check(d50b / d50a > 1.70 && d50b / d50a < 2.30
-               && d90b / d90a > 1.65 && d90b / d90a < 2.35,
-                  comp ? "K5-COMP 2X release DUAL 50% ~2x, 90% ~2x (T4 band)"
-                       : "K5 2X release DUAL 50% ~2x, 90% ~2x (T4 band)", d);
+            double f50, f90;
+            relTimes(true, comp, f50, f90);
+            double f50Ref = comp ? 0.0553 : 0.0470;
+            double f90Ref = comp ? 0.1144 : 0.0935;
+            std::snprintf(d, sizeof d, "%s 50%% %.4f (ref %.4f), 90%% %.4f (ref %.4f)",
+                          mn, f50, f50Ref, f90, f90Ref);
+            check(nearRef(f50, f50Ref, 0.15) && nearRef(f90, f90Ref, 0.15),
+                  comp ? "K4-COMP baked release SINGLE 50/90% == 1.3.0-at-2X"
+                       : "K4 baked release SINGLE 50/90% == 1.3.0-at-2X", d);
+            // K5: release SLOW (DUAL), 50% and 90% — the 90%
+            // band is the widened T4 band of the v62 pin
+            // (the tail pole's stretch is charged during the
+            // hold; the absolute figure is mechanism-set).
+            double d50, d90;
+            relTimes(false, comp, d50, d90);
+            double d50Ref = comp ? 0.1428 : 0.2160;
+            double d90Ref = comp ? 3.915 : 4.663;
+            std::snprintf(d, sizeof d, "%s 50%% %.4f (ref %.4f), 90%% %.3f (ref %.3f)",
+                          mn, d50, d50Ref, d90, d90Ref);
+            check(nearRef(d50, d50Ref, 0.15) && nearRef(d90, d90Ref, 0.175),
+                  comp ? "K5-COMP baked release DUAL 50/90% == 1.3.0-at-2X (T4 band)"
+                       : "K5 baked release DUAL 50/90% == 1.3.0-at-2X (T4 band)", d);
         }
     }
     {
-        // K6: T4 memory at 2X (C5 protocol): the brief/long
-        // contrast survives the time-scale, and both holds'
-        // recoveries run ~2x their 1X figures.
-        auto relAfter = [&](double holdSec, bool x2) {
+        // K6: T4 memory, baked (C5 protocol): both holds'
+        // recoveries at their 1.3.0-at-2X values, and the
+        // brief/long contrast survives.
+        auto relAfter = [&](double holdSec) {
             osc72::Ba6aLimiter lim;
             lim.prepare(kFs); lim.setKnob(0.85f);
             lim.setAttackFast(true); lim.setReleaseFast(false);
-            lim.setTimesTwo(x2); lim.reset();
+            lim.reset();
             const int loud = (int)(holdSec * kFs);
             const int tail = (int)(9.0 * kFs);
             float g0 = 0; double t90 = -1;
@@ -1362,100 +1452,123 @@ int main() {
             }
             return t90;
         };
-        double b1 = relAfter(0.3, false), l1 = relAfter(8.0, false);
-        double b2 = relAfter(0.3, true),  l2 = relAfter(8.0, true);
-        std::snprintf(d, sizeof d, "brief %.2f -> %.2f (x%.3f), long %.2f -> %.2f (x%.3f), 2X contrast %.2f",
-                      b1, b2, b2 / b1, l1, l2, l2 / l1, l2 / b2);
-        check(b2 / b1 > 1.65 && b2 / b1 < 2.35 && l2 / l1 > 1.65 && l2 / l1 < 2.35
-              && l2 / b2 > 1.35,
-              "K6 2X T4 memory: both holds ~2x, contrast survives", d);
+        double b = relAfter(0.3), l = relAfter(8.0);
+        std::snprintf(d, sizeof d, "brief %.2f (ref 4.45), long %.2f (ref 6.65), contrast %.2f",
+                      b, l, l / b);
+        check(b > 4.45 * 0.825 && b < 4.45 * 1.175
+           && l > 6.65 * 0.825 && l < 6.65 * 1.175 && l / b > 1.35,
+              "K6 baked T4 memory: both holds == 1.3.0-at-2X, contrast survives", d);
     }
     {
-        // K7: 1X BIT-IDENTITY — a Chain whose selector was
-        // never touched vs one explicitly set to 1X, MOD in
-        // (A flavour), programme in lockstep: every sample
-        // identical. The settled scale is exactly 1.0f, so
-        // every scaled tau is multiplied by an IEEE
-        // identity; this pin is the proof, not the argument.
-        osc72::Chain cA, cB;
-        for (auto* c : { &cA, &cB }) {
-            c->prepare(kFs); c->setKnob(0.75f); c->setModIn(true); c->reset();
-        }
-        cB.setTimesTwo(false);
-        ProgGen pg;
-        int diffs = 0;
-        const int total = (int)(4.0 * kFs);
-        for (int i = 0; i < total; ++i) {
-            float l, r; pg.sample(i, l, r);
-            float aL, aR, bL, bR;
-            cA.process(l, r, aL, aR);
-            cB.process(l, r, bL, bR);
-            if (aL != bL || aR != bR) ++diffs;
-        }
-        std::snprintf(d, sizeof d, "%d differing samples of %d", diffs, total);
-        check(diffs == 0, "K7 1X bit-identical to the untouched path (MOD in)", d);
-    }
-    {
-        // K8: the scale SNAPS — after a mid-stream toggle
-        // and 0.2 s of audio the slewed scale is EXACTLY
-        // the target in both directions (this is what
-        // restores bit-identity after a 2X excursion).
-        osc72::Ba6aLimiter lim;
-        lim.prepare(kFs); lim.setKnob(0.75f); lim.reset();
-        auto run = [&](int n, int start) {
-            for (int i = 0; i < n; ++i) {
-                float s = 0.5f * (float)std::sin(2.0 * kPi * 1000.0 * (start + i) / kFs);
-                float oL, oR; lim.process(s, s, oL, oR);
+        // K7: BAKED-2X BIT-IDENTITY — programme renders
+        // hashed per sample (outL, outR, GR) against the
+        // reference table captured from the 1.3.0 tree
+        // with 2X engaged AND SETTLED before sample 0
+        // (setTimesTwo(true) ahead of the final reset —
+        // the v62 suite protocol; harness preserved with
+        // the 1.3.1 release staging). The render sequence
+        // below mirrors that capture exactly: setters,
+        // reset (limiter settled: knob + law + the baked
+        // scale), then setModIn LAST — the inserts'
+        // reset() parks their state machines off (target_
+        // survives), so engaging after the reset gives
+        // their true fresh-engage fade, identical in both
+        // trees. Grouped as five checks (MOD out per knob,
+        // MOD in per flavour); the detail names the first
+        // mismatching configuration.
+        auto fnvF = [](uint64_t h, float f) {
+            uint32_t u;
+            std::memcpy(&u, &f, 4);
+            for (int bn = 0; bn < 4; ++bn) {
+                h ^= (u >> (8 * bn)) & 0xFFu;
+                h *= 1099511628211ull;
             }
+            return h;
         };
-        run((int)(0.2 * kFs), 0);
-        bool ok = lim.timeScale() == 1.0f;
-        lim.setTimesTwo(true);
-        run((int)(0.2 * kFs), (int)(0.2 * kFs));
-        ok = ok && lim.timeScale() == 2.0f;
-        lim.setTimesTwo(false);
-        run((int)(0.2 * kFs), (int)(0.4 * kFs));
-        ok = ok && lim.timeScale() == 1.0f;
-        check(ok, "K8 timing scale snaps exactly to 1.0 / 2.0 after toggles", "");
-    }
-    {
-        // K9: the 1X<->2X edge is click-free mid-tone (A3
-        // method: edge-window max step vs the settled
-        // configurations' steady reference).
-        auto steadyStep = [&](bool x2) {
-            osc72::Chain c;
-            c.prepare(kFs);
-            c.setKnob(0.6f);
-            c.setTimesTwo(x2);
-            c.reset();
-            float prev = 0, mx = 0;
-            for (int i = 0; i < (int)(2.0 * kFs); ++i) {
-                float s = 0.4f * (float)std::sin(2.0 * kPi * 997.0 * i / kFs);
-                float oL, oR; c.process(s, s, oL, oR);
-                if (i > (int)(0.5 * kFs)) mx = std::max(mx, std::fabs(oL - prev));
-                prev = oL;
+        struct Cfg { const char* name; float knob; bool comp, att, rel; int mod; double secs; uint64_t want; };
+        const Cfg cfgs[] = {
+            // MOD out, knob 0.50 (4 s each)
+            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0x3134f7039c664566ull },
+            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0xecc5716b12aa6f75ull },
+            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x0b34448eea00e2e2ull },
+            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0xa103e10d96416003ull },
+            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0xca9748ef94e85fc9ull },
+            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x45fbc2c3395712b6ull },
+            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0x3894004a1d524cdcull },
+            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0xf831d5217d75f05eull },
+            // MOD out, knob 0.75
+            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x295c29140c6be1deull },
+            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0xc2bae345c899a337ull },
+            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0xc39a83e0a8311ce4ull },
+            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0xe2aa49d2281c11d7ull },
+            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0x815dea68e02e954aull },
+            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x06df3f4062b41557ull },
+            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x989c5fdeea4d1b33ull },
+            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x098e814e0200068full },
+            // MOD out, knob 1.00
+            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x01eca22d63eadf62ull },
+            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0xcdeb6acea39888c0ull },
+            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x65132f24aa2b9937ull },
+            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x00f9a0b47010f9e2ull },
+            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x04b56f7ebb819022ull },
+            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x9811b190869ae5a9ull },
+            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0xdbf200172511f40eull },
+            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0xd2a49fac238987fbull },
+            // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xc7e8fd615cbff5a8ull },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0xb8f38ee720e62706ull },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x2b8dbe97968f0224ull },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x595f8a0016ae8c2full },
+            // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0xdc22812fe4b5cb3eull },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x9ecc93d6234e0587ull },
+        };
+        auto renderHash = [&](const Cfg& c) {
+            osc72::Chain ch;
+            ch.prepare(kFs);
+            ch.setKnob(c.knob);
+            ch.setCompMode(c.comp);
+            ch.setAttackFast(c.att);
+            ch.setReleaseFast(c.rel);
+            ch.setModPhaser(c.mod == 2);
+            ch.reset();
+            ch.setModIn(c.mod != 0);
+            ProgGen pg;
+            uint64_t h = 1469598103934665603ull;
+            const int total = (int)(c.secs * kFs);
+            for (int i = 0; i < total; ++i) {
+                float l, r; pg.sample(i, l, r);
+                float oL, oR; ch.process(l, r, oL, oR);
+                h = fnvF(h, oL);
+                h = fnvF(h, oR);
+                h = fnvF(h, ch.gainReductionDb());
             }
-            return mx;
+            return h;
         };
-        const float steadyRef = std::max(steadyStep(false), steadyStep(true));
-        osc72::Chain ch;
-        ch.prepare(kFs);
-        ch.setKnob(0.6f);
-        float prevL = 0, edgeMax = 0;
-        const int edges[] = { (int)(0.7 * kFs), (int)(1.7 * kFs) };
-        const int total = (int)(2.7 * kFs);
-        for (int i = 0; i < total; ++i) {
-            float s = 0.4f * (float)std::sin(2.0 * kPi * 997.0 * i / kFs);
-            if (i == edges[0]) ch.setTimesTwo(true);
-            if (i == edges[1]) ch.setTimesTwo(false);
-            float oL, oR; ch.process(s, s, oL, oR);
-            bool nearEdge = false;
-            for (int e : edges) if (std::abs(i - e) < (int)(0.03 * kFs)) nearEdge = true;
-            if (i > 100 && nearEdge) edgeMax = std::max(edgeMax, std::fabs(oL - prevL));
-            prevL = oL;
+        struct Group { const char* pin; int first, last; };
+        const Group groups[] = {
+            { "K7a baked-2X bit-identity: MOD out, knob 0.50 (8 cfgs)", 0, 8 },
+            { "K7b baked-2X bit-identity: MOD out, knob 0.75 (8 cfgs)", 8, 16 },
+            { "K7c baked-2X bit-identity: MOD out, knob 1.00 (8 cfgs)", 16, 24 },
+            { "K7d baked-2X bit-identity: MOD in A/ADT (4 cfgs)", 24, 28 },
+            { "K7e baked-2X bit-identity: MOD in P/Phase 90 (2 cfgs)", 28, 30 },
+        };
+        for (const Group& g : groups) {
+            bool ok = true;
+            char bad[160] = "";
+            for (int i = g.first; i < g.last; ++i) {
+                uint64_t got = renderHash(cfgs[i]);
+                if (got != cfgs[i].want) {
+                    ok = false;
+                    std::snprintf(bad, sizeof bad, "%s: got %016llx want %016llx",
+                                  cfgs[i].name, (unsigned long long)got,
+                                  (unsigned long long)cfgs[i].want);
+                    break;
+                }
+            }
+            std::snprintf(d, sizeof d, "%s", ok ? "all hashes match the 1.3.0-at-2X reference" : bad);
+            check(ok, g.pin, d);
         }
-        std::snprintf(d, sizeof d, "edge-window max step %.4f vs steady ref %.4f", edgeMax, steadyRef);
-        check(edgeMax < 1.5f * steadyRef + 0.02f, "K9 1X<->2X toggles click-free mid-tone", d);
     }
 
     std::printf("\n%s (%d checks, %d failures)\n",

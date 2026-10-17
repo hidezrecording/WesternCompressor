@@ -56,7 +56,8 @@ void Ba6aLimiter::reset()
         osHighL_[i] = osHighR_[i] = 0.0f;
     osHighPos_ = 0;
     lawSlope_ = lawSlopeT_; lawToe_ = lawToeT_; lawSense_ = lawSenseT_;
-    timeScaleS_ = timeScaleT_;  // v62: reset settles the timing scale, like the law
+    // v64: no timing-scale state to settle — the 2X scale
+    // is the kBa6aTimeScale constant, live from sample 0.
     ironInL_.reset();  ironInR_.reset();
     ironMidL_.reset(); ironMidR_.reset();
     ironOutL_.reset(); ironOutR_.reset();
@@ -184,18 +185,15 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
     lawToe_   += (lawToeT_   - lawToe_)   * lawCoef_;
     lawSense_ += (lawSenseT_ - lawSense_) * lawCoef_;
 
-    // 1X/2X timing scale (v62): glides on the same ~5 ms
-    // coefficient as the law slew (a timing toggle never
-    // steps the ballistics mid-programme), then snaps to
-    // the exact target — a settled scale is exactly 1.0f
-    // or 2.0f, which is what keeps 1X bit-identical to
-    // 1.2.0 (every * ts below is then an IEEE identity).
-    timeScaleS_ += (timeScaleT_ - timeScaleS_) * lawCoef_;
-    if (std::fabs(timeScaleS_ - timeScaleT_) < kBa6aTimeScaleSnap)
-        timeScaleS_ = timeScaleT_;
-    const float ts = timeScaleS_;
-    // FAST attack chain calibration (v62): exactly 1.0f at
-    // 1X, 3.0f at 2X — see kBa6aAttFastCalib.
+    // Baked timing scale (v64 / 1.3.1): the v62 selector's
+    // settled 2X value, now a compile-time constant — the
+    // exact float the slewed scale snapped to in 1.3.0,
+    // so every * ts below is bit-identical to 1.3.0 with
+    // 2X engaged, from the first sample (the selector's
+    // ~46 ms load glide is gone with the selector).
+    const float ts = kBa6aTimeScale;
+    // FAST attack chain calibration (v62): 3.0f at the
+    // baked scale — see kBa6aAttFastCalib.
     const float fastAttScale = 1.0f + (ts - 1.0f) * kBa6aAttFastCalib;
 
     // Knob smoothing (5 ms): the attenuator is stepped on the
