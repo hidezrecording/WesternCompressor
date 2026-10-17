@@ -85,6 +85,7 @@ private:
     osc72::Chain chain_;
     bool compMode_ = false; // v53: 'limit' param repurposed (true = COMP); default LIMIT
     bool warbleOn_ = false;
+    bool modPhaser_ = false; // v55: MOD flavour — false = A (ADT, default), true = P (Phase 90)
     bool attackFast_ = true;    // v4: stock detector (default FAST)
     bool releaseFast_ = false;  // v4: DUAL recovery (default SLOW)
     float scCutoffHz_ = 10.0f;  // v41: detector sidechain low-cut (default = bottom stop, filter out)

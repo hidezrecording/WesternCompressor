@@ -6,6 +6,9 @@
 //   black          = v18 black-pot variant (gloss black knob +
 //                    flange) + beaten-up case
 //   warble         = 'mod' toggle IN (default: out)
+//   phaser         = MOD flavour P selected (default: A) —
+//                    gui-v53: the A/P mini toggle's lever
+//                    toward P ('modPhaser' true).
 //   limitout       = 'limit' toggle OUT (default: in)
 //                    v53: the toggle is the RATIO mode switch —
 //                    IN (default here) renders COMP (lever up),
@@ -248,6 +251,56 @@
 // columns keep exactly the v48 shading. The ramp's
 // colour stops, the closing masks, the fin span, the
 // geometry and the lit law do not move.
+// v51 shots: gui-v51-a.png ("knob=5 limitout" — the
+// default opening state, as v50-a) / gui-v51-b.png
+// ("knob=5 limitout gr=12" — driven at exactly 12 dB so
+// the new scale can be checked against the fronts).
+// v51 change (Nathan): a GR SCALE silk-screened under
+// the display — symmetric ticks + negative numerals
+// (0 / -6 / -12 / -20 / -28) positioned by the meter's
+// own lit law, so each tick stands where its dark front
+// comes to rest; the centre tick is the -28 meeting
+// point. Editor artwork only; the meter field, masks,
+// palette and law are untouched (build-report-v55.md).
+// v53 shots: gui-v53-a.png ("knob=5 limitout" — the
+// default opening state: INPUT 5, LIMIT, MOD out, the
+// new A/P mini toggle at A) / gui-v53-b.png ("knob=5
+// limitout phaser" — same, lever toward P).
+// v53 change (Nathan): the MOD section gains its A/P
+// flavour selector — a miniature silver bat toggle on
+// the MOD cluster's centre line, right of the IN/OUT
+// silk, 'A' lettered left / 'P' right, bound to
+// 'modPhaser' (A = the Reel ADT, default; P = the
+// Phase 90 of docs/mod-phaser-design.md). Editor
+// artwork + one component; the MOD word, jewel and
+// IN/OUT behaviour are unchanged, and nothing else on
+// the face moves (build-report-v57.md).
+// v54 shots: gui-v54-a.png ("knob=5 limitout" — the
+// default opening state, A/P lever at A) / gui-v54-b.png
+// ("knob=5 limitout phaser" — lever toward P).
+// v54 change (Nathan, correcting v53): the A/P mini
+// toggle moves off the MOD cluster's centre line up to
+// the MOD WORD's own line, reading as a continuation of
+// it — MOD, the panel's own tracked word space (5.45
+// virtual px, measured inside GAIN REDUCTION), 'A', the
+// toggle, 'P'. Same component, binding and legend; the
+// v53 slot by the module edge is plain panel again.
+// Editor artwork only (build-report-v58.md).
+// v52 shots: gui-v52-a.png ("knob=5 limitout") /
+// gui-v52-b.png ("knob=5 limitout gr=10" — fronts on
+// the -10 ticks) / gui-v52-c.png ("knob=5 limitout
+// gr=20" — fronts met at the centre, under the glyph).
+// v52 changes (Nathan, on v51): the arrangement is
+// approved but the RANGE is too big — the meter
+// rescales to 20 dB full-scale: display law
+// lit = (1 - gr/20)^0.85 (DISPLAY ONLY — the audio
+// path and real GR are untouched; deeper reduction
+// simply tops the meter out) and the scale set becomes
+// 0 / -5 / -10 / -15 / -20 under the same law, centre
+// tick -20. Addendum: the centre label is the INFINITY
+// glyph — a stroked vector lemniscate drawn in
+// PluginEditor, not text (the Smokum bake has no
+// U+221E). Editor artwork only (build-report-v56.md).
 // v48 shots: gui-v48-a.png / gui-v48-off.png ("poweroff") /
 // gui-v48-gr-{20,25}.png + gui-v48-display-crop.png
 // (the 0 dB display at 3x). v48 changes (Nathan, on the
@@ -336,6 +389,7 @@ int main(int argc, char* argv[]) {
     bool warbleOn = false;
     bool limitIn = true;
     bool powerOn = true;
+    bool phaserOn = false;     // gui-v53: 'modPhaser' (default A)
     float knobVal = 7.0f;      // v33: knob=<0..10> token
     float grOverride = 0.0f;   // v33: gr=<dB> token
     for (int i = 2; i < argc; ++i) {
@@ -355,6 +409,8 @@ int main(int argc, char* argv[]) {
             osc72gui::setBeatenUp(true);
         } else if (v == "warble") {
             warbleOn = true;
+        } else if (v == "phaser") {
+            phaserOn = true;
         } else if (v == "limitout") {
             limitIn = false;
         } else if (v == "poweroff") {
@@ -368,6 +424,8 @@ int main(int argc, char* argv[]) {
         p->setValueNotifyingHost(knobVal / 10.0f);
     if (auto* p = proc.apvts.getParameter("warble"))
         p->setValueNotifyingHost(warbleOn ? 1.0f : 0.0f);
+    if (auto* p = proc.apvts.getParameter("modPhaser"))
+        p->setValueNotifyingHost(phaserOn ? 1.0f : 0.0f);
     if (auto* p = proc.apvts.getParameter("limit"))
         p->setValueNotifyingHost(limitIn ? 1.0f : 0.0f);
     if (auto* p = proc.apvts.getParameter("power"))

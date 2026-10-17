@@ -1346,6 +1346,160 @@ void BatToggle::paintButton(juce::Graphics& g, bool, bool)
     }
 }
 
+// ── Mini bat toggle (gui-v53, Nathan 2026-10-17) ─────────────
+// The MOD flavour selector: BatToggle's rendering language
+// transposed to a horizontal throw and shrunk — authored in
+// a 52x40 space, scaled to the component bounds (25x20
+// device px, about half the big toggles' plate). flipT 0 =
+// lever toward A (left, the ADT), 1 = toward P (right, the
+// Phase 90); mid-flip the lever foreshortens exactly as the
+// vertical bats' do.
+MiniBatToggle::MiniBatToggle() : juce::Button(juce::String())
+{
+    setClickingTogglesState(true);
+    setWantsKeyboardFocus(false);
+}
+
+bool MiniBatToggle::advanceAnimation()
+{
+    const float target = getToggleState() ? 1.0f : 0.0f;
+    if (!snapped_) { flipT_ = target; snapped_ = true; return false; }
+    if (flipT_ == target) return false;
+    const float step = 0.30f;
+    flipT_ = target > flipT_ ? juce::jmin(target, flipT_ + step)
+                             : juce::jmax(target, flipT_ - step);
+    return true;
+}
+
+void MiniBatToggle::paintButton(juce::Graphics& g, bool, bool)
+{
+    if (!snapped_) { flipT_ = getToggleState() ? 1.0f : 0.0f; snapped_ = true; }
+    const auto realB = getLocalBounds().toFloat();
+    g.addTransform(juce::AffineTransform::scale(realB.getWidth() / 52.0f,
+                                                realB.getHeight() / 40.0f));
+    const float cxp = 26.0f, cyp = 20.0f;
+    const float t = flipT_ * flipT_ * (3.0f - 2.0f * flipT_); // eased
+    const float sgn = 2.0f * t - 1.0f;    // -1 = A (left), +1 = P (right)
+    const float dirX = sgn >= 0.0f ? 1.0f : -1.0f;
+
+    // Escutcheon: the big plate's language at miniature
+    // scale — near-black bakelite, faint top light catch,
+    // four tiny corner screws, sharp corners.
+    {
+        const juce::Rectangle<float> plate(cxp - 20.0f, cyp - 15.0f, 40.0f, 30.0f);
+        juce::ColourGradient pg(juce::Colour(0xff1b1c1b), plate.getX(), plate.getY(),
+                                juce::Colour(0xff070808), plate.getX(), plate.getBottom(), false);
+        g.setGradientFill(pg);
+        g.fillRect(plate);
+        g.setColour(juce::Colour(0xff000000));
+        g.drawRect(plate, 1.2f);
+        g.setColour(juce::Colour(0x2affffff));
+        g.drawLine(plate.getX() + 3.0f, plate.getY() + 1.0f,
+                   plate.getRight() - 3.0f, plate.getY() + 1.0f, 1.0f);
+        for (float sx : { -15.5f, 15.5f })
+            for (float sy : { -10.5f, 10.5f }) {
+                g.setColour(juce::Colour(0xff454845));
+                g.fillEllipse(cxp + sx - 1.5f, cyp + sy - 1.5f, 3.0f, 3.0f);
+                g.setColour(juce::Colour(0xcc101110));
+                g.drawLine(cxp + sx - 1.0f, cyp + sy - 0.35f,
+                           cxp + sx + 1.0f, cyp + sy + 0.35f, 0.7f);
+            }
+    }
+
+    // Slot recess the lever travels in: deep black, with a
+    // faint rim catch along its top edge.
+    {
+        g.setColour(juce::Colour(0xff020202));
+        g.fillRoundedRectangle(cxp - 11.0f, cyp - 3.2f, 22.0f, 6.4f, 3.2f);
+        g.setColour(juce::Colour(0x26ffffff));
+        g.drawLine(cxp - 9.0f, cyp - 3.2f, cxp + 9.0f, cyp - 3.2f, 0.8f);
+    }
+
+    // Collar at the pivot: the dark steel washer, as the
+    // big toggles wear.
+    {
+        juce::ColourGradient wg(juce::Colour(0xff43463f), cxp - 6.75f, cyp - 6.75f,
+                                juce::Colour(0xff0e100e), cxp + 6.75f, cyp + 6.75f, false);
+        g.setGradientFill(wg);
+        g.fillEllipse(cxp - 6.75f, cyp - 6.75f, 13.5f, 13.5f);
+        g.setColour(juce::Colour(0x38ffffff));
+        g.drawEllipse(cxp - 6.75f, cyp - 6.75f, 13.5f, 13.5f, 1.0f);
+        g.setColour(juce::Colour(0x30000000));
+        g.drawEllipse(cxp - 4.45f, cyp - 4.45f, 8.9f, 8.9f, 1.1f);
+    }
+
+    // The lever: the big bats' heavy silver teardrop laid
+    // on its side — narrow at the pivot, swelling to a bulb
+    // before the rounded end, its drawn length
+    // foreshortening through the flip (|sgn| -> 0).
+    {
+        const float len = 5.5f + 8.5f * std::fabs(sgn);
+        auto halfW = [](float u) {   // u: 0 at pivot -> 1 at tip
+            return 2.3f + 1.9f * std::sin(u * 2.05f) * (1.0f - 0.18f * u);
+        };
+        auto leverPath = [&](juce::Point<float> off) {
+            juce::Path p;
+            const int steps = 10;
+            for (int i = 0; i <= steps; ++i) {
+                const float u = (float)i / (float)steps;
+                const float px = cxp + dirX * len * u + off.x;
+                const float py = cyp - halfW(u) + off.y;
+                if (i == 0) p.startNewSubPath(px, py); else p.lineTo(px, py);
+            }
+            // Rounded bulb cap
+            p.quadraticTo(cxp + dirX * (len + 2.6f) + off.x, cyp + off.y,
+                          cxp + dirX * len + off.x, cyp + halfW(1.0f) + off.y);
+            for (int i = steps - 1; i >= 0; --i) {
+                const float u = (float)i / (float)steps;
+                p.lineTo(cxp + dirX * len * u + off.x,
+                         cyp + halfW(u) + off.y);
+            }
+            p.closeSubPath();
+            return p;
+        };
+        // Cast shadow on the plate
+        g.setColour(juce::Colour(0x59000000));
+        g.fillPath(leverPath({ 1.3f, 2.2f }));
+        // The lever body: the v19 silver — bright silver at
+        // the light, through a mid steel to gunmetal at the
+        // shadow side, light raking from the upper left.
+        juce::ColourGradient bg(juce::Colour(0xfff4f5f7), cxp - 5.0f, cyp - 4.0f,
+                                juce::Colour(0xff565b61), cxp + 5.0f, cyp + 5.0f, false);
+        bg.addColour(0.35, juce::Colour(0xffb7bcc2));
+        bg.addColour(0.72, juce::Colour(0xff83888f));
+        g.setGradientFill(bg);
+        g.fillPath(leverPath({ 0.0f, 0.0f }));
+        // Specular streak along the bulb's upper flank, rim
+        // light along the lower — the big lever's pair.
+        {
+            juce::Path streak;
+            for (int i = 1; i <= 9; ++i) {
+                const float u = (float)i / 10.0f;
+                const float px = cxp + dirX * len * u;
+                const float py = cyp - halfW(u) * 0.52f;
+                if (i == 1) streak.startNewSubPath(px, py); else streak.lineTo(px, py);
+            }
+            g.setColour(juce::Colour(0x59ffffff));
+            g.strokePath(streak, juce::PathStrokeType(1.2f));
+
+            juce::Path rim;
+            for (int i = 1; i <= 9; ++i) {
+                const float u = (float)i / 10.0f;
+                const float px = cxp + dirX * len * u;
+                const float py = cyp + halfW(u) * 0.86f;
+                if (i == 1) rim.startNewSubPath(px, py); else rim.lineTo(px, py);
+            }
+            g.setColour(juce::Colour(0x263a3e44));
+            g.strokePath(rim, juce::PathStrokeType(0.8f));
+        }
+        // Pivot cap — deep gunmetal, as the big bats.
+        g.setColour(juce::Colour(0xff4a4f55));
+        g.fillEllipse(cxp - 2.4f, cyp - 2.4f, 4.8f, 4.8f);
+        g.setColour(juce::Colour(0x66ffffff));
+        g.drawLine(cxp - 1.4f, cyp - 1.5f, cxp + 0.2f, cyp - 1.9f, 0.8f);
+    }
+}
+
 // ── GR display frame (v4, Nathan 2026-10-15) ────────────────
 // The magic eye's aged-gold RETAINING BEZEL, carried over at
 // Nathan's direction and reshaped from the round ring into
@@ -1872,6 +2026,16 @@ juce::Image Osc72Editor::buildGrFieldImage()
 //   ~16/39 ms display ballistics), mono or stereo alike.
 //   POWER off: the window is dead — frame stays (hardware
 //   doesn't go anywhere), no green at all.
+// v52 (Nathan, on v51): the 28 dB range is too big — "we
+//   don't need to see more than 20 dB of gain reduction."
+//   The law keeps its 0.85 shape; only the range constant
+//   moves 28 -> 20: lit = (1 - gr/20)^0.85 clamped — 10 dB
+//   leaves ~55% of the width lit, 15 dB ~31%, 20 dB+ none
+//   (the fronts meet at the centre). DISPLAY LAW ONLY —
+//   the audio path and the real GR are untouched; actual
+//   reduction beyond 20 dB simply tops the meter out. The
+//   silk scale under the display rescales in step (see
+//   paint()). Audit in build-report-v56.md.
 // Geometry (virtual): frame (124, 41, 192, 70), centre
 // (220, 76) — tucked BETWEEN the ATTACK/RELEASE toggle
 // plates (x 73..113 / 327..367): 11 px of air each side.
@@ -1894,8 +2058,9 @@ void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
     const float cy = frame.getCentreY();
 
     // Lit fraction from GR (the converging-darkness law).
+    // v52: full scale is 20 dB (was 28 through v51).
     const float lit = dark ? 0.0f
-        : std::pow(osc72::clampf(1.0f - grDb / 28.0f, 0.0f, 1.0f), 0.85f);
+        : std::pow(osc72::clampf(1.0f - grDb / 20.0f, 0.0f, 1.0f), 0.85f);
 
     // Phosphor glow spilling onto the panel — scales with how
     // much of the field is lit. (Skipped when dark.)
@@ -2057,7 +2222,8 @@ void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
                 const float halfLit = field.getWidth() * lit * 0.5f;
                 const float frontL = fCx - halfLit, frontR = fCx + halfLit;
                 // When the fronts nearly meet, an opaque
-                // centre underlay keeps 28 dB+ fully dark
+                // centre underlay keeps full-scale (20 dB+,
+                // v52; 28 dB+ through v51) fully dark
                 // (the two feathers alone sum to 75% there).
                 // v45: the underlay takes the INNER colour —
                 // it is the point where the two leading
@@ -2139,6 +2305,15 @@ Osc72Editor::Osc72Editor(Osc72Processor& p) : AudioProcessorEditor(&p), proc_(p)
     addAndMakeVisible(modToggle_);
     modAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         proc_.apvts, "warble", modToggle_);
+    // gui-v53 (Nathan; placement corrected in gui-v54):
+    // the MOD flavour mini toggle — a miniature silver bat
+    // riding the MOD word's line at its right, bound to
+    // 'modPhaser' (false = A, the Reel ADT, the default;
+    // true = P, the Phase 90). It selects a flavour only;
+    // engaging MOD remains the big toggle's business.
+    addAndMakeVisible(phaserToggle_);
+    phaserAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        proc_.apvts, "modPhaser", phaserToggle_);
     // POWER toggle (v19): the strip's third BatToggle — a full
     // switch cluster matching LIMIT/MOD — bound to 'power'.
     addAndMakeVisible(powerToggle_);
@@ -2257,6 +2432,8 @@ void Osc72Editor::timerCallback()
         repaint(limitToggle_.getBounds());
     if (modToggle_.advanceAnimation())
         repaint(modToggle_.getBounds());
+    if (phaserToggle_.advanceAnimation())
+        repaint(phaserToggle_.getBounds());
     if (powerToggle_.advanceAnimation())
         repaint(powerToggle_.getBounds());
     if (attackToggle_.advanceAnimation())
@@ -2372,6 +2549,7 @@ void Osc72Editor::resized()
     knob_.setBounds(148, 238, 188, 188);            // centre (242, 332) = virtual (220, 302)
     limitToggle_.setBounds(72, 410, 44, 60);        // centre (94, 440) = virtual (85, 400) — v32: back down to the flange-bottom line (v31: virtual (93, 76))
     modToggle_.setBounds(368, 410, 44, 60);         // centre (390, 440) = virtual (355, 400) — v32: back down to the flange-bottom line (v31: virtual (347, 76))
+    phaserToggle_.setBounds(417, 384, 25, 20);      // centre (429.5, 394) = virtual (390.5, 358.2) — gui-v54: the A/P mini toggle on the MOD WORD's line, its plate centre on the word's cap centre (358.4), reading MOD A [toggle] P (see paint())
     powerToggle_.setBounds(572, 54, 44, 60);        // centre (594, 84) = virtual (540, 76) — on the display centre line (76)
     // v4: ATTACK / RELEASE toggles flank the GR display at the
     // v31 span, centres on the same y-76 line.
@@ -2611,6 +2789,120 @@ void Osc72Editor::paint(juce::Graphics& g)
     // build-report-v38.md.
     drawTrackedText(g, "GAIN REDUCTION", capsFont(14.5f), 0.6f,
                     mcx, 33.0f, Anchor::centre);
+
+    // ── v51 (Nathan): the GR SCALE under the display ─────────
+    // "Gain reduction markers with zero being centered
+    // directly under the center of the meter and negative
+    // values going out either direction" — a symmetric silk
+    // scale in the bare band between the display frame
+    // (bottom 106.2) and the ATTACK / RELEASE word line
+    // (ink top ~139.5). Ticks sit at the meter's OWN lit
+    // law — the same law drawGrDisplay closes the masks
+    // with, lit = (1 - gr/28)^0.85 over the field half
+    // width (84.5) — so each tick stands exactly where its
+    // dark front comes to rest: read the meter by the tick
+    // the front has reached. The fronts MEET at the centre
+    // at full reduction, so the centre tick is the -28 end
+    // of the scale and 0 stands at both outer ends, where
+    // the fronts rest at no reduction.
+    //   Value set 0 / 6 / 12 / 20 / 28 — the sparse set the
+    //   law leaves legible at panel size (the law crowds
+    //   ~2.6 px/dB near the edges against ~4+ near the
+    //   centre; a 3 dB set would pack its labels ~8 px
+    //   apart under ~21 px-wide two-digit silk). Computed
+    //   offsets from the field centre (220):
+    //     0 -> 84.50   6 -> 68.84   12 -> 52.51
+    //     20 -> 29.13   28 -> 0 (the centre tick)
+    //   i.e. tick x pairs 135.50/304.50, 151.16/288.84,
+    //   167.49/272.51, 190.87/249.13 and 220.
+    //   Silk: the FAST/SLOW size language — capsFont(14),
+    //   tracking 0.4, pure #FFFFFF — ticks 1.3 wide, tops at
+    //   y 109 (2.8 under the frame), 6 tall; the centre
+    //   tick stands 8.5 tall (the meeting point). Numerals
+    //   on baseline 130, ~9.5 clear of the word line's ink.
+    //   ONE spacing compromise, measured on the real face:
+    //   at 14 pt the -6 and -12 labels (14.0 / 20.8 wide)
+    //   would meet ink-to-ink (~0.2 px) between their
+    //   on-law centres, so those two labels shift 1 px
+    //   apart (-6 outward, -12 inward, mirrored) — the
+    //   TICKS stay exactly on the law; only the glyphs
+    //   breathe. Audit in build-report-v55.md.
+    // v52 (Nathan, on v51): the arrangement is approved but
+    //   the RANGE is too big — the scale rescales with the
+    //   display law to 20 dB full-scale (see drawGrDisplay).
+    //   Value set 0 / 5 / 10 / 15 / 20; the centre tick is
+    //   now the -20 meeting point. Computed offsets from
+    //   the field centre (220) under lit = (1 - gr/20)^0.85:
+    //     0 -> 84.50   5 -> 66.17   10 -> 46.88
+    //     15 -> 26.01   20 -> 0 (the centre tick)
+    //   i.e. tick x pairs 135.50/304.50, 153.83/286.17,
+    //   173.12/266.88, 193.99/246.01 and 220. The even 5 dB
+    //   set stays legible: the tightest neighbours (-10 /
+    //   -15, centres 20.87 apart) were verified ink-to-ink
+    //   on the render — see build-report-v56.md. No label
+    //   nudges are carried in the table unless that audit
+    //   puts one there.
+    //   Addendum (Nathan, later the same day): "make the
+    //   center an infinity symbol — that will really tie
+    //   it together." The centre label is the INFINITY
+    //   glyph, not "-20" — drawn as a STROKED VECTOR PATH
+    //   (a Bernoulli lemniscate), not text: the shipping
+    //   Smokum bake carries no U+221E, so a text glyph
+    //   would fall back to a system font — off-style and
+    //   machine-dependent. A lemniscate (a = 6.8, y-stretch
+    //   1.45 for the glyph's ~1.9:1 aspect) stroked at 1.2
+    //   — a touch over the numerals' stem weight (measured
+    //   ~0.9), the optical bump a symbol needs against the
+    //   emboldened digits — inks 14.5 x 8.2 against the
+    //   digits' ~7.3 cap height, centred on their optical
+    //   line (cy 126.0; digit ink ~122.4..129.8). The tick
+    //   and the law do not move: the centre still means
+    //   the fronts have met at -20; only the numeral is
+    //   replaced.
+    {
+        const float fieldCx = 220.0f;          // drawGrDisplay's field centre
+        const float halfW = 169.0f * 0.5f;     // field (135.5, 57.3, 169, 37.4)
+        struct GrMark { float gr; const char* label; float towardCentre; bool infinity; };
+        static constexpr GrMark marks[] = {
+            {  0.0f, "0",    0.0f, false },
+            {  5.0f, "-5",   0.0f, false },
+            { 10.0f, "-10",  0.0f, false },
+            { 15.0f, "-15",  0.0f, false },
+            { 20.0f, "-20",  0.0f, true  },
+        };
+        g.setColour(kSilk);
+        for (const auto& m : marks) {
+            const float lit = std::pow(osc72::clampf(1.0f - m.gr / 20.0f, 0.0f, 1.0f), 0.85f);
+            const float off = halfW * lit;
+            for (int side = -1; side <= 1; side += 2) {
+                if (side > 0 && off < 0.01f) break;   // centre tick drawn once
+                const float tx = fieldCx + (float) side * off;
+                const float tickH = (off < 0.01f) ? 8.5f : 6.0f;
+                g.fillRect(tx - 0.65f, 109.0f, 1.3f, tickH);
+                if (m.infinity) {
+                    juce::Path p;
+                    const float A = 6.8f, cy = 126.0f;
+                    for (int i = 0; i <= 96; ++i) {
+                        const float t = (float) i / 96.0f * 6.2831853f;
+                        const float sn = std::sin(t), cs = std::cos(t);
+                        const float den = 1.0f + sn * sn;
+                        const float px = tx + A * cs / den;
+                        const float py = cy + 1.45f * A * sn * cs / den;
+                        if (i == 0) p.startNewSubPath(px, py);
+                        else        p.lineTo(px, py);
+                    }
+                    p.closeSubPath();
+                    g.strokePath(p, juce::PathStrokeType(1.2f,
+                        juce::PathStrokeType::curved,
+                        juce::PathStrokeType::rounded));
+                    continue;
+                }
+                const float lx = tx - (float) side * m.towardCentre;
+                drawTrackedText(g, m.label, capsFont(14.0f), 0.4f,
+                                lx, 130.0f, Anchor::centre);
+            }
+        }
+    }
 
     // ── Module: knob skirt flange + numerals (v9; rotating v10) ──
     // From Nathan's reference photo (a vintage decade box): the
@@ -2890,6 +3182,28 @@ void Osc72Editor::paint(juce::Graphics& g)
                     378.0f, 397.0f, Anchor::left);
     drawTrackedText(g, "OUT", capsFont(14.0f), 0.4f,
                     378.0f, 415.0f, Anchor::left);
+    // gui-v54 (Nathan, correcting v53): "the toggle
+    // should be just to the right of the label MOD" —
+    // the A/P assembly leaves the toggle centre line and
+    // rides the MOD WORD's own line (baseline 363),
+    // reading as a continuation of it: MOD, a word space,
+    // 'A', the mini toggle, 'P'. The gap between the MOD
+    // ink (ends x 366.8) and the A ink is the panel's own
+    // word space — the tracked space inside GAIN
+    // REDUCTION (same capsFont 14.5 / tracking 0.6),
+    // measured at 5.45 virtual px ink-to-ink on the
+    // render — so the A lands where the next word would
+    // start. The plate (phaserToggle_, virtual x
+    // 381.7..399.2, plate centre on the word's cap
+    // centre 358.4) keeps the panel's ~2 air on both
+    // flanks; the legend (capsFont 12.5, as v53)
+    // sits on baseline 362.9 so its caps centre on the
+    // word's cap line. Measured gaps in
+    // build-report-v58.
+    drawTrackedText(g, "A", capsFont(12.5f), 0.4f,
+                    379.4f, 362.9f, Anchor::right);
+    drawTrackedText(g, "P", capsFont(12.5f), 0.4f,
+                    401.3f, 362.9f, Anchor::left);
 
     // ── v4 (Nathan): ATTACK / RELEASE clusters flanking the
     //    GR display at the v31 positions (toggle centres

@@ -955,6 +955,305 @@ int main() {
         check(std::fabs(lfDef.meanGr - lf10.meanGr) < 1.0e-4f, "I3 bottom stop = default path (filter out)", d);
     }
 
+    std::printf("\n=== J. PHASER (MOD FLAVOUR P, v55) ===\n");
+    {
+        // The Phase 90 model (docs/mod-phaser-design.md):
+        // four ganged one-pole allpass stages + 50/50 dry
+        // sum, script-era (no feedback), LFO 0.30 Hz, stage
+        // break sweeping 600 Hz-6 kHz in the log domain.
+        // With the LFO frozen the filter is LTI, and the
+        // bilinear stage law predicts the notch frequencies
+        // in the warped domain exactly:
+        //   tan(pi f/fs) = tan(a) * tan(pi fb/fs),
+        // a = 22.5 deg (notch 1, cascade phase -180) and
+        // 67.5 deg (notch 2, -540).
+        auto notchPred = [](double fb, double aDeg) {
+            double t = std::tan(aDeg * kPi / 360.0) * std::tan(kPi * fb / kFs);
+            return std::atan(t) / kPi * kFs;
+        };
+        auto phaserGain = [](double freq, float phase) {
+            osc72::Phaser90 ph;
+            ph.prepare(kFs);
+            ph.setEnabled(true);
+            ph.setLfoFrozen(true);
+            ph.setLfoPhase(phase);
+            const int total = (int)(0.30 * kFs);
+            double s = 0; int cnt = 0;
+            for (int i = 0; i < total; ++i) {
+                float x = 0.5f * (float)std::sin(2.0 * kPi * freq * i / kFs);
+                float oL, oR; ph.process(x, x, oL, oR);
+                if (i >= total / 2) { s += (double)oL * oL; ++cnt; }
+            }
+            double rms = std::sqrt(s / cnt);
+            return 20.0 * std::log10(rms / (0.5 / std::sqrt(2.0)));
+        };
+        // Fine local scan for the measured minimum near a
+        // predicted notch (1% steps over +/-50%).
+        auto findNotch = [&](float phase, double pred) {
+            double bestF = pred, bestG = 1e9;
+            for (double f = pred / 1.5; f <= pred * 1.5; f *= 1.01) {
+                double g = phaserGain(f, phase);
+                if (g < bestG) { bestG = g; bestF = f; }
+            }
+            return std::pair<double, double>(bestF, bestG);
+        };
+        char d[512];
+        // J1: notch frequencies at both LFO extremes.
+        // Phase 0.75 -> sweep bottom (break 600 Hz);
+        // phase 0.25 -> sweep top (break 6000 Hz).
+        bool j1 = true;
+        for (float phase : { 0.75f, 0.25f }) {
+            const double fb = phase == 0.75f ? 600.0 : 6000.0;
+            for (double aDeg : { 45.0, 135.0 }) {
+                const double pred = notchPred(fb, aDeg);
+                auto found = findNotch(phase, pred);
+                double err = std::fabs(found.first - pred) / pred;
+                std::printf("      break %4.0f Hz: notch pred %7.1f Hz, measured %7.1f Hz (%+.1f%%), depth %.0f dB\n",
+                            fb, pred, found.first, 100.0 * (found.first - pred) / pred, found.second);
+                if (err > 0.05) j1 = false;
+            }
+        }
+        check(j1, "J1 notch frequencies at LFO extremes match the stage law (+/-5%)", "");
+        // J2: notch depth at the predicted frequencies
+        // (the algebraic null; float residue only).
+        double worstDepth = -1e9;
+        for (float phase : { 0.75f, 0.25f }) {
+            const double fb = phase == 0.75f ? 600.0 : 6000.0;
+            for (double aDeg : { 45.0, 135.0 })
+                worstDepth = std::max(worstDepth, phaserGain(notchPred(fb, aDeg), phase));
+        }
+        std::snprintf(d, sizeof d, "shallowest notch %.0f dB (want < -40)", worstDepth);
+        check(worstDepth < -40.0, "J2 notch depth: > 40 dB at both notches, both extremes (50/50 mix)", d);
+        // J2b: notch COUNT at the sweep bottom — a full-range
+        // scan finds exactly two minima deeper than -20 dB.
+        // A basin counts only with > 10 dB of prominence
+        // below its preceding peak (a bare minimum tracker
+        // mistakes notch 1's recovery slope for a basin).
+        {
+            int deep = 0;
+            double prevG = 1e9, peak = -1e9, basinPeak = -1e9, runMin = 1e9;
+            bool inBasin = false;
+            for (double f = 100.0; f <= 18000.0; f *= 1.02) {
+                double g = phaserGain(f, 0.75f);
+                if (!inBasin) {
+                    peak = std::max(peak, g);
+                    if (g < prevG) { inBasin = true; basinPeak = peak; runMin = g; }
+                } else {
+                    runMin = std::min(runMin, g);
+                    if (g > runMin + 1.0) {
+                        if (runMin < -20.0 && basinPeak - runMin > 10.0) ++deep;
+                        inBasin = false; peak = g;
+                    }
+                }
+                prevG = g;
+            }
+            if (inBasin && runMin < -20.0 && basinPeak - runMin > 10.0) ++deep;
+            std::snprintf(d, sizeof d, "deep minima in 100 Hz-18 kHz: %d (want 2)", deep);
+            check(deep == 2, "J2b exactly two notches (4 stages, 50/50 sum)", d);
+        }
+        // J3: LFO rate + break travel (introspection over
+        // 14 s of running machine).
+        {
+            osc72::Phaser90 ph;
+            ph.prepare(kFs);
+            ph.setEnabled(true);
+            float mn = 1e9f, mx = 0;
+            double prev = 0, lastCross = -1, perSum = 0; int crosses = 0;
+            const double mid = std::sqrt(600.0 * 6000.0);
+            for (int i = 0; i < (int)(14.0 * kFs); ++i) {
+                float oL, oR; ph.process(0.0f, 0.0f, oL, oR);
+                float br = ph.breakHz();
+                if (i > (int)(1.0 * kFs)) {
+                    mn = std::min(mn, br); mx = std::max(mx, br);
+                    if (prev < mid && br >= mid) {
+                        double tNow = i / kFs;
+                        if (lastCross > 0) { perSum += tNow - lastCross; ++crosses; }
+                        lastCross = tNow;
+                    }
+                }
+                prev = br;
+            }
+            double rate = crosses ? crosses / perSum : 0.0;
+            std::snprintf(d, sizeof d, "break %.0f..%.0f Hz, period %.2f s -> %.3f Hz",
+                          mn, mx, crosses ? perSum / crosses : 0.0, rate);
+            check(mn < 650.0f && mx > 5500.0f && rate > 0.27 && rate < 0.33,
+                  "J3 LFO 0.30 Hz, break sweeps the full 600 Hz-6 kHz decade", d);
+        }
+        // J4: the 50/50 mix's peaks sit at unity — at the
+        // break the cascade phase is -360 deg (wet in phase
+        // with dry), and far above the top notch the comb
+        // recovers toward unity too.
+        {
+            double atFb = phaserGain(600.0, 0.75f);
+            double atHf = phaserGain(15000.0, 0.75f);
+            std::snprintf(d, sizeof d, "gain at fb=600 Hz %+.2f dB, at 15 kHz %+.2f dB", atFb, atHf);
+            check(std::fabs(atFb) < 0.25 && atHf > -1.0,
+                  "J4 50/50 mix: comb peaks at unity (no level bump)", d);
+        }
+        // J5: stereo coherence — one LFO, one coefficient:
+        // identical inputs give bit-identical outputs, and
+        // the left path never hears the right input (the
+        // pedal is mono; the image stays put).
+        {
+            osc72::Phaser90 ph;
+            ph.prepare(kFs);
+            ph.setEnabled(true);
+            bool same = true, indep = true;
+            osc72::Phaser90 a, b;
+            a.prepare(kFs); b.prepare(kFs);
+            a.setEnabled(true); b.setEnabled(true);
+            for (int i = 0; i < (int)(3.0 * kFs); ++i) {
+                float x = 0.4f * (float)std::sin(2.0 * kPi * 440.0 * i / kFs)
+                        + 0.1f * (float)std::sin(2.0 * kPi * 3000.0 * i / kFs);
+                float oL, oR; ph.process(x, x, oL, oR);
+                if (oL != oR) same = false;
+                float aL, aR, bL, bR;
+                a.process(x, 0.0f, aL, aR);
+                b.process(x, x, bL, bR);
+                if (aL != bL) indep = false;
+            }
+            check(same && indep, "J5 stereo: linked LFO — identical in = identical out, channels independent", "");
+        }
+        // J6: off is bit-exact dry, and so is the machine
+        // again once a disable fade has settled.
+        {
+            osc72::Phaser90 ph;
+            ph.prepare(kFs);
+            bool exact = true;
+            auto tone = [](int i) {
+                return 0.4f * (float)std::sin(2.0 * kPi * 440.0 * i / kFs);
+            };
+            for (int i = 0; i < (int)(0.5 * kFs); ++i) {
+                float oL, oR; ph.process(tone(i), tone(i), oL, oR);
+                if (oL != tone(i) || oR != tone(i)) exact = false;
+            }
+            ph.setEnabled(true);
+            for (int i = 0; i < (int)(1.0 * kFs); ++i) { float oL, oR; ph.process(tone(i), tone(i), oL, oR); }
+            ph.setEnabled(false);
+            for (int i = 0; i < (int)(1.5 * kFs); ++i) {
+                float oL, oR; ph.process(tone(i), tone(i), oL, oR);
+                if (i >= (int)(0.5 * kFs) && (oL != tone(i) || oR != tone(i))) exact = false;
+            }
+            check(exact, "J6 phaser off / settled-off is bit-exact dry", "");
+        }
+        // J7: Chain latency follows the flavour — MOD in:
+        // A = 992 (ADT base + OS), P = 32 (OS alone).
+        {
+            osc72::Chain ch;
+            ch.prepare(kFs);
+            bool ok = ch.latencySamples() == 32;
+            ch.setModPhaser(true);
+            ok = ok && ch.latencySamples() == 32;   // MOD still out
+            ch.setModIn(true);
+            ok = ok && ch.latencySamples() == 32;   // MOD in, P
+            ch.setModPhaser(false);
+            ok = ok && ch.latencySamples() == 992;  // MOD in, A
+            ch.setModIn(false);
+            ok = ok && ch.latencySamples() == 32;
+            std::snprintf(d, sizeof d, "states 32 / 32 / 32(P in) / 992(A in) / 32: %d", (int)ok);
+            check(ok, "J7 Chain latency: 32 base, +960 only for MOD-in A flavour", d);
+        }
+        // J8: with MOD in + P, the wet path arrives at the
+        // base latency — cross-correlation of the chain IR
+        // against the MOD-out IR peaks at lag 0 and the
+        // peaks share a sample (+/-2).
+        {
+            auto fireIr = [](bool modIn, bool phaser) {
+                osc72::Chain ch;
+                ch.prepare(kFs);
+                ch.setKnob(0.0f);
+                ch.setModPhaser(phaser);
+                ch.setModIn(modIn);
+                std::vector<float> ir(400, 0.0f);
+                for (int i = 0; i < (int)(1.5 * kFs) + 400; ++i) {
+                    float oL, oR;
+                    ch.process(i == (int)(1.5 * kFs) ? 0.5f : 0.0f,
+                               i == (int)(1.5 * kFs) ? 0.5f : 0.0f, oL, oR);
+                    if (i >= (int)(1.5 * kFs)) ir[(size_t)(i - (int)(1.5 * kFs))] = oL;
+                }
+                return ir;
+            };
+            auto irOut = fireIr(false, false);
+            auto irP = fireIr(true, true);
+            auto argmax = [](const std::vector<float>& v) {
+                int at = 0; float best = -1;
+                for (size_t i = 0; i < v.size(); ++i)
+                    if (std::fabs(v[i]) > best) { best = std::fabs(v[i]); at = (int)i; }
+                return at;
+            };
+            int aOut = argmax(irOut), aP = argmax(irP);
+            int bestLag = 0; double bestC = -1e30;
+            for (int lag = -8; lag <= 8; ++lag) {
+                double s = 0;
+                for (int i = 16; i < 200; ++i)
+                    s += (double)irOut[(size_t)i] * irP[(size_t)(i + lag)];
+                if (s > bestC) { bestC = s; bestLag = lag; }
+            }
+            std::snprintf(d, sizeof d, "IR peaks: MOD out @%d, MOD in+P @%d; xcorr lag %+d", aOut, aP, bestLag);
+            check(bestLag == 0 && std::abs(aP - aOut) <= 2,
+                  "J8 MOD-in P flavour: wet arrival at the base latency (no bulk delay)", d);
+        }
+        // J9: flavour toggles are click-free mid-tone (A3
+        // methodology: edge-window steps against the steady
+        // reference of both flavours).
+        {
+            auto steadyStep = [&](bool phaser) {
+                osc72::Chain c;
+                c.prepare(kFs);
+                c.setKnob(0.6f);
+                c.setModIn(true);
+                c.setModPhaser(phaser);
+                float prev = 0, mx = 0;
+                for (int i = 0; i < (int)(2.0 * kFs); ++i) {
+                    float s = 0.4f * (float)std::sin(2.0 * kPi * 997.0 * i / kFs);
+                    float oL, oR; c.process(s, s, oL, oR);
+                    if (i > (int)(0.5 * kFs)) mx = std::max(mx, std::fabs(oL - prev));
+                    prev = oL;
+                }
+                return mx;
+            };
+            const float steadyRef = std::max(steadyStep(false), steadyStep(true));
+            osc72::Chain ch;
+            ch.prepare(kFs);
+            ch.setKnob(0.6f);
+            ch.setModIn(true);
+            float prevL = 0, edgeMax = 0;
+            const int edges[] = { (int)(0.7 * kFs), (int)(1.4 * kFs) };
+            const int total = (int)(2.2 * kFs);
+            for (int i = 0; i < total; ++i) {
+                float s = 0.4f * (float)std::sin(2.0 * kPi * 997.0 * i / kFs);
+                if (i == edges[0]) ch.setModPhaser(true);
+                if (i == edges[1]) ch.setModPhaser(false);
+                float oL, oR; ch.process(s, s, oL, oR);
+                bool nearEdge = false;
+                for (int e : edges) if (std::abs(i - e) < (int)(0.03 * kFs)) nearEdge = true;
+                if (i > 100 && nearEdge) edgeMax = std::max(edgeMax, std::fabs(oL - prevL));
+                prevL = oL;
+            }
+            std::snprintf(d, sizeof d, "edge-window max step %.4f vs steady ref %.4f", edgeMax, steadyRef);
+            check(edgeMax < 1.5f * steadyRef + 0.02f, "J9 A<->P flavour toggles click-free mid-tone", d);
+        }
+        // J10: the P flavour keeps a mono source mono
+        // through the whole chain (no ADT-style widening):
+        // L and R stay bit-identical.
+        {
+            osc72::Chain ch;
+            ch.prepare(kFs);
+            ch.setKnob(0.5f);
+            ch.setModIn(true);
+            ch.setModPhaser(true);
+            ProgGen pg;
+            bool ident = true;
+            for (int i = 0; i < (int)(4.0 * kFs); ++i) {
+                float l, r; pg.sample(i, l, r);
+                float m = 0.5f * (l + r);
+                float oL, oR; ch.process(m, m, oL, oR);
+                if (i >= (int)(2.0 * kFs) && oL != oR) ident = false;
+            }
+            check(ident, "J10 MOD-in P: mono in stays bit-identical L/R (image stays put)", "");
+        }
+    }
+
     std::printf("\n%s (%d checks, %d failures)\n",
                 failures == 0 ? "ALL TESTS PASSED" : "FAILURES PRESENT",
                 checks, failures);

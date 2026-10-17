@@ -840,6 +840,63 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.2.0 — 20 dB METER SCALE + MOD A/P PHASE 90
+SELECTOR (reports docs/build-report-v55.md,
+docs/build-report-v56.md, docs/build-report-v57.md,
+docs/build-report-v58.md; design
+docs/mod-phaser-design.md). Three changes over
+1.1.9. (1) METER RESCALED TO 20 dB + GR SCALE: the
+display's full scale drops 28 -> 20 dB (lit law keeps
+its 0.85 shape, range constant only; the driver
+clamps at 20 so the two dark fronts meet at the
+centre at -20; display law only — the audio path and
+real GR are untouched, deeper reduction simply tops
+the meter out). Under the display, a mirrored scale
+in the FAST/SLOW silk: 0 at both outer ends, then
+-5 / -10 / -15 stepping inward, and the centre tick
+lettered with an infinity glyph instead of -20
+(Nathan: "that will really tie it together") — the
+ticks stand on the same lit-law formula as the masks,
+so each front comes to rest on its own value (the
+thermometer reading Nathan approved). The glyph is a
+stroked vector lemniscate in the same white silk: no
+Smokum bake contains U+221E, so a text glyph would
+have fallen back to a machine-dependent system font.
+(2) MOD A/P FLAVOUR SELECTOR: the MOD section gains
+a second flavour beside the Reel ADT — P is an MXR
+Phase 90 (Nathan's "cosmic country" target: George
+Harrison, Waylon Jennings, Link Wray). Script-era
+voicing: four one-pole allpass stages per channel
+sharing ONE LFO coefficient (the pedal is mono; the
+stereo image cannot wander), NO feedback loop (the
+regeneration resistor is a block-logo addition),
+50/50 dry+phased mix (two notches, comb peaks exactly
+at unity). Rate fixed at 0.30 Hz; break sweeps one
+decade 600 Hz-6 kHz, so the first notch travels
+~250 Hz-2.5 kHz. Measured: notch frequencies within
++0.3% of the stage-law prediction at both LFO
+extremes, notch depth -138 dB, LFO 0.300 Hz. New
+APVTS bool `modPhaser` (false = A, the default; the
+A bench output is bit-identical to 1.1.9). Latency
+tracks the flavour truthfully: MOD in reads 992
+samples (A) vs 32 (P) at 48 kHz, and the dry-tap
+blend crossfade follows A<->P edges exactly as it
+follows MOD edges (P10 pins). CPU unchanged within
+run-to-run noise. (3) THE MINI TOGGLE: a tiny silver
+bat toggle (MiniBatToggle — the big bats' rendering
+language at miniature scale) sits on the MOD word's
+own line, reading MOD · A · [toggle] · P typeset like
+text: the A lands one word space (the GAIN REDUCTION
+space, 5.45 vp; measured MOD->A gap 5.00) after the
+MOD ink. v53 first placed it right of the IN/OUT silk
+on the y-400 line — Nathan rejected that ("The toggle
+should be just to the right of the label MOD"); v54
+(gui-v54, the shipping face) is the corrected home.
+Suites: DSP 56/56, processor 41/41; snapshots
+byte-identical to docs/gui-v54-a.png (default opening
+state: INPUT 5, LIMIT, lever at A) and
+docs/gui-v54-b.png (lever toward P).
+
 v1.1.9 — OVERSAMPLED CORE + INPUT DEFAULT 5 +
 RATIO MODE SWITCH (diagnosis
 docs/harshness-diagnosis.md; report

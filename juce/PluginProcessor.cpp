@@ -40,6 +40,16 @@ Osc72Processor::createParameterLayout()
     // Default OUT; when out the insert is bit-transparent.
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID { "warble", 1 }, "Warble", false));
+    // MOD flavour (Nathan, 2026-10-17, v55): the A/P mini
+    // toggle beside the MOD cluster (GUI follow-on; see
+    // docs/mod-phaser-design.md). false = A, the Reel ADT
+    // exactly as shipped (the default); true = P, a script-
+    // era MXR Phase 90 (the 'cosmic country' sweep). Only
+    // meaningful while MOD is in; the flavour edge changes
+    // the reported latency (992 <-> 32 @ 48 kHz) and the
+    // dry tap follows via the v44 crossfade machinery.
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID { "modPhaser", 1 }, "Mod Phaser", false));
     // Ratio mode (v53, Nathan): the old limit in/out bypass
     // toggle repurposed — true = COMP, false = LIMIT, and the
     // section is always engaged. Default LIMIT (false), the
@@ -131,6 +141,8 @@ void Osc72Processor::prepareToPlay(double sampleRate, int)
     chain_.setCompMode(compMode_);
     warbleOn_ = apvts.getRawParameterValue("warble")->load() > 0.5f;
     chain_.setModIn(warbleOn_);
+    modPhaser_ = apvts.getRawParameterValue("modPhaser")->load() > 0.5f;
+    chain_.setModPhaser(modPhaser_);
     attackFast_ = apvts.getRawParameterValue("attackFast")->load() > 0.5f;
     chain_.setAttackFast(attackFast_);
     releaseFast_ = apvts.getRawParameterValue("releaseFast")->load() > 0.5f;
@@ -181,6 +193,19 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
     {
         warbleOn_ = wantWarble;
         chain_.setModIn(warbleOn_);
+        setLatencySamples(powerOn_ ? chain_.latencySamples() : 0);
+    }
+    // v55 MOD flavour edge (A <-> P): the chain's flavour
+    // blend crossfades over 30 ms inside Chain::process, and
+    // the reported latency tracks the newly selected flavour
+    // at once (992 <-> 32 @ 48 kHz with MOD in) — the v44
+    // dry-tap offset crossfade below follows it, exactly as
+    // it follows a MOD edge.
+    const bool wantPhaser = apvts.getRawParameterValue("modPhaser")->load() > 0.5f;
+    if (wantPhaser != modPhaser_)
+    {
+        modPhaser_ = wantPhaser;
+        chain_.setModPhaser(modPhaser_);
         setLatencySamples(powerOn_ ? chain_.latencySamples() : 0);
     }
     // v4 ballistics toggles: no latency consequence; the

@@ -462,6 +462,94 @@ void AdtChain::process(float inL, float inR, float& outL, float& outR)
 }
 
 // ═════════════════════════════════════════════════════════════
+// Phaser90 (v55) — see the header for the circuit basis.
+// One-pole allpass stage: H(z) = (z^-1 - c) / (1 - c z^-1),
+// the bilinear image of the analogue stage (s - wb)/(s + wb)
+// with c = (1 - t)/(1 + t), t = tan(pi * fb / fs): the stage
+// phase is exactly -90 degrees at the break fb, 0 at DC and
+// -180 at Nyquist. Four ganged stages sum 50/50 with the dry:
+// notches where the cascade phase is -180 / -540 degrees,
+// i.e. at fb * tan(22.5 deg) and fb * tan(67.5 deg) in the
+// warped domain (0.4142 / 2.4142 x fb before warping).
+// ═════════════════════════════════════════════════════════════
+
+void Phaser90::prepare(double sampleRate)
+{
+    fs_ = sampleRate > 0.0 ? sampleRate : 48000.0;
+    reset();
+}
+
+void Phaser90::reset()
+{
+    state_ = State::off;
+    fadeGain_ = 0.0f;
+    lfoPhase_ = 0.0f;
+    breakHz_ = kPhaserBreakLoHz;
+    for (int ch = 0; ch < 2; ++ch)
+        for (int st = 0; st < 4; ++st)
+            sx_[ch][st] = sy_[ch][st] = 0.0f;
+}
+
+void Phaser90::setEnabled(bool on)
+{
+    if (on == target_) return;
+    target_ = on;
+    state_ = on ? State::fadingIn : State::fadingOut;
+}
+
+void Phaser90::process(float inL, float inR, float& outL, float& outR)
+{
+    // The LFO turns continuously, engaged or not (the
+    // pedal's oscillator never stops), and the stages track
+    // the input every sample so engaging fades into a live
+    // machine — the ADT transports' discipline, mirrored.
+    if (!lfoFrozen_) {
+        lfoPhase_ += kPhaserRateHz / (float)fs_;
+        if (lfoPhase_ >= 1.0f) lfoPhase_ -= 1.0f;
+    }
+    // Log-domain sweep: the break travels its decade at a
+    // constant pitch rate, bottom to top and back per cycle.
+    const float s = std::sin(lfoPhase_ * 6.283185307179586f);
+    breakHz_ = kPhaserBreakLoHz
+        * std::pow(kPhaserBreakHiHz / kPhaserBreakLoHz,
+                   0.5f * (s + 1.0f));
+    // One coefficient for all eight stage instances: ganged
+    // breaks, one LFO, both channels — the pedal is mono.
+    const float t = (float)std::tan(3.14159265358979323846
+                                    * (double)breakHz_ / fs_);
+    const float c = (1.0f - t) / (1.0f + t);
+
+    float wetL = inL, wetR = inR;
+    for (int st = 0; st < 4; ++st) {
+        wetL = stage(wetL, 0, st, c);
+        wetR = stage(wetR, 1, st, c);
+    }
+    // The pedal's output mixer: phased path summed 50/50
+    // with the dry. |(1 + e^jphi)/2| <= 1 everywhere, so the
+    // mix never exceeds the dry level on a steady tone.
+    const float mixL = 0.5f * (inL + wetL);
+    const float mixR = 0.5f * (inR + wetR);
+
+    if (state_ == State::off) {
+        outL = inL;
+        outR = inR;
+        return;
+    }
+    const float step = 1.0f / (kPhaserFadeSec * (float)fs_);
+    if (state_ == State::fadingIn) {
+        fadeGain_ += step;
+        if (fadeGain_ >= 1.0f) { fadeGain_ = 1.0f; state_ = State::on; }
+    } else if (state_ == State::fadingOut) {
+        fadeGain_ -= step;
+        if (fadeGain_ <= 0.0f) { fadeGain_ = 0.0f; state_ = State::off; }
+    }
+    // Subtractive blend: exact dry at g=0, exact mix at g=1.
+    const float g = fadeGain_;
+    outL = inL + (mixL - inL) * g;
+    outR = inR + (mixR - inR) * g;
+}
+
+// ═════════════════════════════════════════════════════════════
 // Chain
 // ═════════════════════════════════════════════════════════════
 
@@ -470,6 +558,7 @@ void Chain::prepare(double sampleRate)
     fs_ = sampleRate > 0.0 ? sampleRate : 48000.0;
     limiter_.prepare(fs_);
     adt_.prepare(fs_);
+    phaser_.prepare(fs_);
     reset();
 }
 
@@ -477,6 +566,8 @@ void Chain::reset()
 {
     limiter_.reset();
     adt_.reset();
+    phaser_.reset();
+    modBlend_ = modPhaser_ ? 1.0f : 0.0f;
 }
 
 void Chain::process(float inL, float inR, float& outL, float& outR)
@@ -486,8 +577,32 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // which lives inside the limiter's gain computer).
     float midL, midR;
     limiter_.process(inL, inR, midL, midR);
-    // ADT insert (bit-exact copy when mod is out).
-    adt_.process(midL, midR, outL, outR);
+    // MOD insert: both machines run continuously; the
+    // flavour blend selects between them. While MOD is out
+    // each returns its input bit-exact once settled (the ADT
+    // by its state machine, the phaser likewise), so the
+    // blend is bit-exact dry in either flavour.
+    float aL, aR, pL, pR;
+    adt_.process(midL, midR, aL, aR);
+    phaser_.process(midL, midR, pL, pR);
+    const float target = modPhaser_ ? 1.0f : 0.0f;
+    if (modBlend_ != target) {
+        const float step = 1.0f / (kAdtFadeSec * (float)fs_);
+        modBlend_ = target > modBlend_
+            ? std::min(target, modBlend_ + step)
+            : std::max(target, modBlend_ - step);
+    }
+    // Hard-select at the extremes: a settled flavour is its
+    // own output, bit-for-bit (the subtractive blend is the
+    // transition law, as in the inserts themselves).
+    if (modBlend_ <= 0.0f) {
+        outL = aL; outR = aR;
+    } else if (modBlend_ >= 1.0f) {
+        outL = pL; outR = pR;
+    } else {
+        outL = aL + (pL - aL) * modBlend_;
+        outR = aR + (pR - aR) * modBlend_;
+    }
 }
 
 } // namespace osc72

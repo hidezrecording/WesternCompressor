@@ -23,6 +23,11 @@
 //          the 960-sample chain latency), mix=0.5 the exact
 //          mean of aligned dry and wet, POWER off bypassing
 //          regardless of mix
+//   P10    MOD flavour A/P (v55): the 'modPhaser' param —
+//          latency matrix (992 only for MOD-in A), mix=0 /
+//          impulse alignment in the P flavour, A<->P mid-
+//          stream toggle crossfades, POWER-off bit-exactness
+//          and mono-stays-mono with P selected
 //   P9     MIX ALIGNMENT at impulse level (v44 diagnosis):
 //          P7's pins took the nominal latency as their own
 //          reference, so a wet path arriving a sample early
@@ -91,7 +96,7 @@ struct DiffMeas { double diffDb; double outRms; double sideRatio; bool bitExact;
 // MOD-on path is DELAYED by the 20 ms ADT base offset, so the
 // sample difference is large by design — the pins below use
 // difference level (audibility) and side energy (width).
-static DiffMeas runPair(int mode, float knob, bool limitIn = true) {
+static DiffMeas runPair(int mode, float knob, bool limitIn = true, bool phaser = false) {
     Osc72Processor pOff, pOn;
     for (auto* p : { &pOff, &pOn }) {
         p->prepareToPlay(kFs, 512);
@@ -100,6 +105,8 @@ static DiffMeas runPair(int mode, float knob, bool limitIn = true) {
         p->apvts.getParameter("power")->setValueNotifyingHost(1.0f);
     }
     pOn.apvts.getParameter("warble")->setValueNotifyingHost(1.0f);
+    if (phaser)
+        pOn.apvts.getParameter("modPhaser")->setValueNotifyingHost(1.0f);
 
     Material mat{ mode };
     const int block = 512;
@@ -605,6 +612,265 @@ int main() {
                           pk0, at0 - midImp, pk960, at960 - midImp);
             check(pk0 > 0.22f && at0 == midImp + 32 && at960 == midImp + 992,
                   "P9e dry tap crossfades its offset on MOD toggle (no step)", b);
+        }
+    }
+
+    // ── P10. MOD flavour A/P (v55): the 'modPhaser' param ────
+    // A (false, default) = the Reel ADT exactly as shipped;
+    // P (true) = the script-era Phase 90. Latency must track
+    // the flavour truthfully (992 <-> 32 with MOD in), the
+    // v44 dry-tap crossfade must carry A<->P edges exactly as
+    // it carries MOD edges, and the POWER-off / mix=1
+    // invariants must hold in the P flavour too.
+    {
+        char b[256];
+        // P10a: param exists, default A (false).
+        {
+            Osc72Processor p;
+            p.prepareToPlay(kFs, 512);
+            auto* pm = p.apvts.getParameter("modPhaser");
+            std::snprintf(b, sizeof b, "exists=%d default=%.3f (want 0.000 = A)",
+                          (int)(pm != nullptr), pm ? (double)pm->getValue() : -1.0);
+            check(pm && pm->getValue() < 0.5f,
+                  "P10a modPhaser param exists, default A (ADT)", b);
+        }
+        // P10b: reported latency across the state matrix,
+        // edges consumed in processBlock one at a time.
+        {
+            Osc72Processor p;
+            p.prepareToPlay(kFs, 512);
+            juce::AudioBuffer<float> buf(2, 512);
+            juce::MidiBuffer midi;
+            auto edge = [&](const char* id, float v) {
+                p.apvts.getParameter(id)->setValueNotifyingHost(v);
+                buf.clear();
+                p.processBlock(buf, midi);
+                return p.getLatencySamples();
+            };
+            const int s0 = p.getLatencySamples();              // A, MOD out
+            const int s1 = edge("warble", 1.0f);               // A, MOD in
+            const int s2 = edge("modPhaser", 1.0f);            // P, MOD in
+            const int s3 = edge("warble", 0.0f);               // P, MOD out
+            const int s4 = edge("modPhaser", 0.0f);            // A, MOD out
+            const int s5 = edge("warble", 1.0f);               // A, MOD in again
+            std::snprintf(b, sizeof b, "latencies %d / %d / %d / %d / %d / %d (want 32/992/32/32/32/992)",
+                          s0, s1, s2, s3, s4, s5);
+            check(s0 == 32 && s1 == 992 && s2 == 32 && s3 == 32 && s4 == 32 && s5 == 992,
+                  "P10b proc: latency follows flavour — 992 only for MOD-in A", b);
+        }
+        // P10c: mix=0 with MOD in + P returns the input
+        // delayed by exactly the P-flavour latency (32) —
+        // the dry tap aligns to the phaser's zero bulk delay.
+        {
+            Osc72Processor p;
+            p.prepareToPlay(kFs, 512);
+            p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.5f);
+            p.apvts.getParameter("warble")->setValueNotifyingHost(1.0f);
+            p.apvts.getParameter("modPhaser")->setValueNotifyingHost(1.0f);
+            p.apvts.getParameter("mix")->setValueNotifyingHost(0.0f);
+            Material mat{ 2 };
+            const int block = 512;
+            const int total = ((int)(1.5 * kFs) / block) * block;
+            std::vector<float> inL((size_t)total), inR((size_t)total),
+                               outL((size_t)total), outR((size_t)total);
+            juce::MidiBuffer midi;
+            for (int base = 0; base + block <= total; base += block) {
+                juce::AudioBuffer<float> buf(2, block);
+                for (int j = 0; j < block; ++j) {
+                    float L, R; mat.sample(base + j, L, R);
+                    inL[(size_t)(base + j)] = L; inR[(size_t)(base + j)] = R;
+                    buf.setSample(0, j, L); buf.setSample(1, j, R);
+                }
+                p.processBlock(buf, midi);
+                for (int j = 0; j < block; ++j) {
+                    outL[(size_t)(base + j)] = buf.getSample(0, j);
+                    outR[(size_t)(base + j)] = buf.getSample(1, j);
+                }
+            }
+            bool exact = true;
+            for (int i = (int)(0.5 * kFs); i < total; ++i)
+                if (outL[(size_t)i] != inL[(size_t)(i - 32)] || outR[(size_t)i] != inR[(size_t)(i - 32)])
+                    exact = false;
+            std::snprintf(b, sizeof b, "settled mix=0 (MOD in, P) == input delayed 32 exactly: %d", (int)exact);
+            check(exact, "P10c MIX=0 returns the input delayed by 32 (MOD in, P flavour)", b);
+        }
+        // P10d: impulse alignment with MOD in + P (P9
+        // methodology at the 32-sample latency): blended
+        // impulse peak exactly at +32, coincident, and the
+        // wet/dry cross-correlation offset is 0.
+        {
+            auto runImpP = [](float mix, int impAt, int total) {
+                Osc72Processor p;
+                p.prepareToPlay(kFs, 512);
+                p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.0f);
+                p.apvts.getParameter("warble")->setValueNotifyingHost(1.0f);
+                p.apvts.getParameter("modPhaser")->setValueNotifyingHost(1.0f);
+                p.apvts.getParameter("mix")->setValueNotifyingHost(mix);
+                juce::MidiBuffer midi;
+                std::vector<float> out((size_t)total, 0.0f);
+                const int block = 512;
+                for (int base = 0; base + block <= total; base += block) {
+                    juce::AudioBuffer<float> buf(2, block);
+                    for (int j = 0; j < block; ++j) {
+                        const float s = (base + j == impAt) ? 0.5f : 0.0f;
+                        buf.setSample(0, j, s); buf.setSample(1, j, s);
+                    }
+                    p.processBlock(buf, midi);
+                    for (int j = 0; j < block; ++j) out[(size_t)(base + j)] = buf.getSample(0, j);
+                }
+                return out;
+            };
+            auto peakAt = [](const std::vector<float>& y, int centre, int halfWin, int& at) {
+                float best = -1.0f; at = centre;
+                for (int i = centre - halfWin; i <= centre + halfWin; ++i)
+                    if (std::fabs(y[(size_t)i]) > best) { best = std::fabs(y[(size_t)i]); at = i; }
+                return best;
+            };
+            const int total = (int)(1.5 * kFs), impAt = (int)(0.5 * kFs);
+            auto dry = runImpP(0.0f, impAt, total);
+            auto wet = runImpP(1.0f, impAt, total);
+            auto half = runImpP(0.5f, impAt, total);
+            int atDry = 0, atWet = 0, atHalf = 0;
+            const float pkDry = peakAt(dry, impAt + 32, 200, atDry);
+            const float pkWet = peakAt(wet, impAt + 32, 200, atWet);
+            const float pkHalf = peakAt(half, impAt + 32, 200, atHalf);
+            std::snprintf(b, sizeof b, "P flavour: peaks dry@%+d wet@%+d half@%+d (want +32, wet +/-1)",
+                          atDry - impAt, atWet - impAt, atHalf - impAt);
+            // The dry and blended peaks sit exactly at +32.
+            // The WET peak reads +31: the allpass cascade's
+            // own impulse response carries a negative lobe
+            // one sample in (-4c^3(1-c^2) ~= -0.46 at the
+            // sweep bottom), which pulls the composite peak
+            // a sample early — comb physics, not a delay
+            // error: the response onset and the correlation
+            // centroid stay at the latency (P10f, and J8 at
+            // DSP level measures the same +31 / lag 0 pair).
+            check(atDry == impAt + 32 && atHalf == impAt + 32 && std::abs(atWet - (impAt + 32)) <= 1,
+                  "P10d blended impulse peak at +32 (MOD in, P flavour; wet peak +/-1, allpass lobe)", b);
+            const float meanPk = 0.5f * (pkDry + pkWet);
+            std::snprintf(b, sizeof b, "half peak %.4f vs mean-of-peaks %.4f", pkHalf, meanPk);
+            check(std::fabs(pkHalf - meanPk) < 0.03f * meanPk,
+                  "P10e blend peak coincides (no split) (MOD in, P flavour)", b);
+            int bestLag = 0; double bestC = -1e30;
+            for (int lag = -16; lag <= 16; ++lag) {
+                double s = 0.0;
+                for (int i = 0; i < 600; ++i)
+                    s += (double)dry[(size_t)(impAt + 32 - 200 + i)]
+                       * wet[(size_t)(impAt + 32 - 200 + i + lag)];
+                if (s > bestC) { bestC = s; bestLag = lag; }
+            }
+            std::snprintf(b, sizeof b, "xcorr(dry, wet) peak lag %+d (want 0 +/-1)", bestLag);
+            check(std::abs(bestLag) <= 1, "P10f wet/dry cross-correlation offset ~0 (MOD in, P flavour)", b);
+        }
+        // P10g/P10h: flavour toggles MID-STREAM at mix 0.5
+        // (the P9e pattern on the new edges). An impulse
+        // fired 5 ms into the flip must ride the crossfades —
+        // never a full-weight copy stepped to either offset.
+        // The two directions differ geometrically (the ADT's
+        // 960-sample pipe reads out late on A->P); each
+        // direction's assertions are spelled out at the
+        // checks themselves.
+        auto flipTest = [&](bool toPhaser, const char* name) {
+            Osc72Processor p;
+            p.prepareToPlay(kFs, 512);
+            p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.0f);
+            p.apvts.getParameter("warble")->setValueNotifyingHost(1.0f);
+            if (!toPhaser) // P->A: start settled in P
+                p.apvts.getParameter("modPhaser")->setValueNotifyingHost(1.0f);
+            p.apvts.getParameter("mix")->setValueNotifyingHost(0.5f);
+            juce::MidiBuffer midi;
+            const int tot = 96000, flipBlock = 48128, midImp = flipBlock + 240;
+            std::vector<float> out((size_t)tot, 0.0f);
+            const int block = 512;
+            for (int base = 0; base + block <= tot; base += block) {
+                if (base == flipBlock)
+                    p.apvts.getParameter("modPhaser")->setValueNotifyingHost(toPhaser ? 1.0f : 0.0f);
+                juce::AudioBuffer<float> buf(2, block);
+                for (int j = 0; j < block; ++j) {
+                    const int idx = base + j;
+                    const float s = (idx == midImp) ? 0.5f : 0.0f;
+                    buf.setSample(0, j, s); buf.setSample(1, j, s);
+                }
+                p.processBlock(buf, midi);
+                for (int j = 0; j < block; ++j) out[(size_t)(base + j)] = buf.getSample(0, j);
+            }
+            auto peakAt = [](const std::vector<float>& y, int centre, int halfWin, int& at) {
+                float best = -1.0f; at = centre;
+                for (int i = centre - halfWin; i <= centre + halfWin; ++i)
+                    if (std::fabs(y[(size_t)i]) > best) { best = std::fabs(y[(size_t)i]); at = i; }
+                return best;
+            };
+            int at32 = 0, at992 = 0;
+            const float pk32 = peakAt(out, midImp + 32, 48, at32);
+            const float pk992 = peakAt(out, midImp + 992, 96, at992);
+            char bb[256];
+            std::snprintf(bb, sizeof bb, "mid-flip impulse: +32 peak %.3f @%+d, +992 peak %.3f @%+d",
+                          pk32, at32 - midImp, pk992, at992 - midImp);
+            if (toPhaser) {
+                // A->P geometry: the impulse's ADT copy can
+                // only leave the 960-sample pipe AFTER the
+                // 30 ms flavour blend has mostly left A, and
+                // the dry tap's old-offset weight has fallen
+                // with it — so mid-flip the energy is SHARED
+                // between the offsets (measured 0.054 / 0.050),
+                // neither copy anywhere near the settled
+                // height (~0.28-0.40). The pin asserts exactly
+                // that: both copies present at crossfade
+                // scale, both at their exact offsets, no
+                // full-weight copy at either — i.e. no step.
+                check(pk32 > 0.03f && pk992 > 0.03f && pk32 < 0.15f && pk992 < 0.15f
+                      && at32 == midImp + 32 && at992 == midImp + 992, name, bb);
+            } else {
+                // P->A geometry (the P9e shape): the old
+                // offset (+32) still dominates the early
+                // crossfade (measured 0.230), and the new
+                // offset already carries a real share (0.294,
+                // mostly the dry tap's late read at its
+                // rising weight).
+                check(pk32 > 0.22f && pk992 > 0.03f && at32 == midImp + 32, name, bb);
+            }
+        };
+        flipTest(true,  "P10g dry tap + blend crossfade on A->P toggle (no step)");
+        flipTest(false, "P10h dry tap + blend crossfade on P->A toggle (no step)");
+        // P10i: POWER off is bit-exact bypass with MOD in +
+        // P selected (the P5 invariant in the new flavour).
+        {
+            Osc72Processor p;
+            p.prepareToPlay(kFs, 512);
+            p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.7f);
+            p.apvts.getParameter("warble")->setValueNotifyingHost(1.0f);
+            p.apvts.getParameter("modPhaser")->setValueNotifyingHost(1.0f);
+            p.apvts.getParameter("power")->setValueNotifyingHost(0.0f);
+            Material mat{ 2 };
+            const int block = 512;
+            bool exact = true;
+            juce::MidiBuffer midi;
+            for (int base = 0; base < (int)(2.0 * kFs); base += block) {
+                juce::AudioBuffer<float> buf(2, block);
+                std::vector<float> inL(block), inR(block);
+                for (int j = 0; j < block; ++j) {
+                    mat.sample(base + j, inL[(size_t)j], inR[(size_t)j]);
+                    buf.setSample(0, j, inL[(size_t)j]);
+                    buf.setSample(1, j, inR[(size_t)j]);
+                }
+                p.processBlock(buf, midi);
+                if (base >= (int)(1.0 * kFs))
+                    for (int j = 0; j < block; ++j)
+                        if (buf.getSample(0, j) != inL[(size_t)j] || buf.getSample(1, j) != inR[(size_t)j])
+                            exact = false;
+            }
+            std::snprintf(b, sizeof b, "settled power-off (MOD in, P) == input exactly: %d", (int)exact);
+            check(exact, "P10i proc: POWER off is bit-exact bypass (MOD in, P flavour)", b);
+        }
+        // P10j: the P flavour is audible end-to-end on MONO
+        // material — and, unlike the ADT, it does NOT widen:
+        // the mono source stays mono (side/out ~ 0).
+        {
+            DiffMeas m = runPair(0, 5.0f, true, true);
+            std::snprintf(b, sizeof b, "mono + P: bit-exact=%d, diff=%.2f dB, side/out=%.4f (ADT: >0.20)",
+                          (int)m.bitExact, m.diffDb, m.sideRatio);
+            check(!m.bitExact && m.diffDb > -20.0 && m.sideRatio < 0.01,
+                  "P10j proc MOD flavour P: mono — phaser audible, no widening", b);
         }
     }
 

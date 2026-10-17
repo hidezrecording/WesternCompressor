@@ -637,6 +637,95 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────
+// Phaser90 — the MOD insert's second flavour (v55, Nathan):
+// an MXR Phase 90 emulation in its SCRIPT-era (1974) voicing,
+// selected by the A/P mini toggle on the panel (A = the Reel
+// ADT above, the default; P = this phaser). Nathan's target
+// sounds are the 'cosmic country' phaser records — George
+// Harrison, Waylon Jennings, Link Wray: a slow, vocal sweep,
+// NOT a jet flange. Design note: docs/mod-phaser-design.md.
+//
+// Circuit basis (documented): four JFET phase-shift stages
+// (47 nF caps, the JFET a voltage-controlled resistor in
+// parallel with 24 kΩ), ganged under one LFO (~0.1–10 Hz on
+// the pedal's SPEED knob); the phased path sums 50/50 with
+// the dry at the output mixer, giving TWO notches. The
+// script original has NO feedback resistor — the 24 kΩ R28
+// regeneration path (and its harder, more pronounced sweep)
+// is a block-logo addition, so this model has no feedback
+// loop at all. Each stage is modelled as the textbook
+// one-pole allpass the stage reduces to, with the break
+// frequency placed exactly by the bilinear (tan) mapping;
+// the four breaks are ganged to one coefficient, one LFO —
+// the pedal is MONO, so both channels share the same sweep
+// state and the stereo image cannot wander.
+//
+// Voicing choices (reconstructions, labelled in the design
+// note): the SPEED knob is fixed at 0.30 Hz; the break
+// sweeps one decade, 600 Hz–6 kHz, in the log domain (a
+// sine LFO), putting the first notch's travel at
+// ~250 Hz–2.5 kHz and the second's at ~1.45–14.5 kHz —
+// the few-hundred-Hz to few-kHz notch travel published
+// analyses describe. Like the ADT beside it, the machine
+// runs continuously (LFO turning, stages tracking the input)
+// and engaging crossfades over 30 ms in the same
+// subtractive form — bit-exact dry while off, bit-exact the
+// settled flavour while on. The phaser contributes NO bulk
+// delay: with P selected the chain latency falls back to
+// the limiter's oversampling figure alone.
+// ─────────────────────────────────────────────────────────────────────
+inline constexpr float kPhaserRateHz     = 0.30f;   // fixed SPEED (reconstruction)
+inline constexpr float kPhaserBreakLoHz  = 600.0f;  // stage break, LFO bottom
+inline constexpr float kPhaserBreakHiHz  = 6000.0f; // stage break, LFO top
+inline constexpr float kPhaserFadeSec    = 0.030f;  // engage fade (ADT's span)
+
+class Phaser90 {
+public:
+    void prepare(double sampleRate);
+    void reset();
+
+    void setEnabled(bool on);
+    bool enabled() const { return target_; }
+    bool active() const { return state_ != State::off; }
+    // No bulk delay in either state — the flavour's latency
+    // contribution is zero by construction.
+    int latencySamples() const { return 0; }
+
+    void process(float inL, float inR, float& outL, float& outR);
+
+    // Introspection (tests)
+    float rateHz() const { return kPhaserRateHz; }
+    float lfoPhase() const { return lfoPhase_; }
+    float breakHz() const { return breakHz_; }
+    float fadeGain() const { return fadeGain_; }
+    // Test seams: hold the LFO at a fixed phase so the
+    // (then LTI) filter's static response can be measured.
+    void setLfoFrozen(bool frozen) { lfoFrozen_ = frozen; }
+    void setLfoPhase(float cycles) { lfoPhase_ = cycles - std::floor(cycles); }
+
+private:
+    enum class State { off, fadingIn, on, fadingOut };
+    float stage(float x, int ch, int st, float c) {
+        float& x1 = sx_[ch][st];
+        float& y1 = sy_[ch][st];
+        const float y = x1 - c * x + c * y1;
+        x1 = x;
+        y1 = y;
+        return y;
+    }
+
+    double fs_ = 48000.0;
+    bool target_ = false;
+    State state_ = State::off;
+    float fadeGain_ = 0.0f;
+    float lfoPhase_ = 0.0f;
+    bool lfoFrozen_ = false;
+    float breakHz_ = kPhaserBreakLoHz;
+    float sx_[2][4] = {};
+    float sy_[2][4] = {};
+};
+
+// ─────────────────────────────────────────────────────────────────────
 // Chain — the plugin's complete signal path (v4): input ->
 // BA-6A limiter (bypassable via the 'limit' toggle) -> ADT
 // insert (the 'mod' toggle). Same guarantees as every engine
@@ -648,6 +737,13 @@ private:
 //  * The magic-eye readout follows the limit fade:
 //    gainReductionDb() is 0 whenever limit is out.
 //  * Latency: 0 unless mod is in; then the ADT base offset.
+// v55: the MOD insert has two flavours (A = ADT, P = the
+// Phase 90 above). Both machines run continuously; a 30 ms
+// flavour blend crossfades between their outputs, hard-
+// selecting at the extremes so a settled flavour is its own
+// output bit-for-bit. Latency follows the SELECTED flavour:
+// the ADT base offset with A, the oversampling figure alone
+// with P.
 // ─────────────────────────────────────────────────────────────────────
 
 class Chain {
@@ -669,16 +765,25 @@ public:
     bool compMode() const { return limiter_.compMode(); }
     void setScCutoff(float hz) { limiter_.setScCutoff(hz); }
     float scCutoff() const { return limiter_.scCutoff(); }
-    void setModIn(bool in) { adt_.setEnabled(in); }
+    void setModIn(bool in) { adt_.setEnabled(in); phaser_.setEnabled(in); }
     bool modIn() const { return adt_.enabled(); }
+
+    // MOD flavour (v55): false = A (Reel ADT, the default),
+    // true = P (Phase 90). The blend slews over 30 ms in
+    // process(); the reported latency follows the selected
+    // flavour immediately, as it does for the MOD toggle.
+    void setModPhaser(bool phaser) { modPhaser_ = phaser; }
+    bool modPhaser() const { return modPhaser_; }
 
     int latencySamples() const
     {
         // v53: the limiter's oversampling delay is always in
         // the path (the section is always engaged); the ADT
-        // base delay adds when MOD is in.
+        // base delay adds when MOD is in. v55: only in the A
+        // flavour — the phaser adds no bulk delay.
         return limiter_.osDelaySamples()
-             + (adt_.enabled() ? adt_.latencySamples() : 0);
+             + (adt_.enabled() && !modPhaser_
+                    ? adt_.latencySamples() : 0);
     }
     float gainReductionDb() const
     {
@@ -686,6 +791,7 @@ public:
     }
     const Ba6aLimiter& limiter() const { return limiter_; }
     const AdtChain& adt() const { return adt_; }
+    const Phaser90& phaser() const { return phaser_; }
 
     void process(float inL, float inR, float& outL, float& outR);
 
@@ -693,6 +799,9 @@ private:
     double fs_ = 48000.0;
     Ba6aLimiter limiter_;
     AdtChain adt_;
+    Phaser90 phaser_;
+    bool modPhaser_ = false;   // v55: false = A (ADT), true = P (phaser)
+    float modBlend_ = 0.0f;    // v55: flavour blend, 0 = A .. 1 = P
 };
 
 } // namespace osc72

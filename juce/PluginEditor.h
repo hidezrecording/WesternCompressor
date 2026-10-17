@@ -300,6 +300,35 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────
+// Mini bat toggle (gui-v53; placement corrected in
+// gui-v54, Nathan 2026-10-17): the MOD section's A/P
+// flavour selector — a MINIATURE silver bat with a
+// HORIZONTAL throw, sitting on the MOD WORD's own line,
+// reading as a continuation of it: MOD, a word space,
+// 'A', the toggle, 'P'. Lever toward A (left) = the
+// Reel ADT,
+// toward P (right) = the Phase 90 (APVTS 'modPhaser',
+// false = A, the default). Same rendering language as
+// BatToggle — black escutcheon plate, silver teardrop
+// lever foreshortening through the flip, editor-timer
+// animation — authored in a 52x40 space and scaled to its
+// (much smaller) bounds. The 'A' / 'P' silk is drawn by
+// the editor around it, like the other toggles' labels.
+// ─────────────────────────────────────────────────────────────────────
+class MiniBatToggle : public juce::Button
+{
+public:
+    MiniBatToggle();
+    // Same contract as BatToggle::advanceAnimation.
+    bool advanceAnimation();
+    void paintButton(juce::Graphics& g, bool highlighted, bool down) override;
+
+private:
+    float flipT_ = 0.0f;      // 0 = A (left), 1 = P (right)
+    bool snapped_ = false;    // first paint snaps to the real state
+};
+
+// ─────────────────────────────────────────────────────────────────────
 // Small output knob (v12): the H2 002's little black O/P LEVEL
 // knobs — a small black fluted knob with a single white pointer
 // line, read against the dot markers the editor silk-screens
@@ -389,8 +418,9 @@ private:
     // framed by the eye's aged-gold bezel reshaped rectangular.
     // grDb 0 -> the full green ribbed field lit (the photo);
     // as GR rises the field's edges go black and the darkness
-    // closes symmetrically toward the centre; 28 dB -> totally
-    // dark. Driven by the single overall GR, mono or stereo.
+    // closes symmetrically toward the centre; 20 dB -> totally
+    // dark (v52 range; 28 dB through v51). Driven by the
+    // single overall GR, mono or stereo.
     // dark = POWER off: a dead display — no green at all.
     void drawGrDisplay(juce::Graphics& g, float grDb, bool dark = false);
 
@@ -416,6 +446,10 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> att_;
     BatToggle limitToggle_, modToggle_, powerToggle_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> limitAtt_, modAtt_, powerAtt_;
+    // gui-v53 (Nathan): the MOD flavour mini toggle (A/P),
+    // bound to 'modPhaser' — see MiniBatToggle above.
+    MiniBatToggle phaserToggle_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> phaserAtt_;
     // v4: ATTACK / RELEASE ballistics toggles flanking the GR
     // display at the v31 positions (no jewels on these two).
     // v35: the pair drops down — words on the line the GAIN
