@@ -262,6 +262,20 @@
 // comes to rest; the centre tick is the -28 meeting
 // point. Editor artwork only; the meter field, masks,
 // palette and law are untouched (build-report-v55.md).
+// v56 shots: gui-v56-a.png ("knob=5 limitout warble" —
+// MOD in, A selected, the A lamp lit) / gui-v56-b.png
+// ("knob=5 limitout warble phaser" — MOD in, P selected,
+// the P lamp lit) + gui-v56-mod-crop.png (2x MOD corner).
+// v56 changes (Nathan): the A/P selector becomes a round
+// PUSH BUTTON (MiniPushButton — the v53-v55 mini bat is
+// dropped: "let's just make it a push button"), the whole
+// assembly shifts +6.36 virtual px right so the A ink's
+// left edge stands in the IN/OUT labels' ink column
+// (378.18), and the ACTIVE flavour's letter lights steady
+// in the jewels' amber while MOD is in and POWER is on
+// (the MOD jewel's own logic — no pulsing; Nathan dropped
+// the in-sync flashing). Editor artwork only
+// (build-report-v60.md).
 // v53 shots: gui-v53-a.png ("knob=5 limitout" — the
 // default opening state: INPUT 5, LIMIT, MOD out, the
 // new A/P mini toggle at A) / gui-v53-b.png ("knob=5

@@ -882,20 +882,26 @@ tracks the flavour truthfully: MOD in reads 992
 samples (A) vs 32 (P) at 48 kHz, and the dry-tap
 blend crossfade follows A<->P edges exactly as it
 follows MOD edges (P10 pins). CPU unchanged within
-run-to-run noise. (3) THE MINI TOGGLE: a tiny silver
-bat toggle (MiniBatToggle — the big bats' rendering
-language at miniature scale) sits on the MOD word's
-own line, reading MOD · A · [toggle] · P typeset like
-text: the A lands one word space (the GAIN REDUCTION
-space, 5.45 vp; measured MOD->A gap 5.00) after the
-MOD ink. v53 first placed it right of the IN/OUT silk
-on the y-400 line — Nathan rejected that ("The toggle
+run-to-run noise. (3) THE A/P SELECTOR: a small round
+metal push button (MiniPushButton) sits on the MOD
+word's own line, reading MOD · A · [button] · P
+typeset like text. History: v53 first placed a
+miniature bat toggle right of the IN/OUT silk on the
+y-400 line — Nathan rejected that ("The toggle
 should be just to the right of the label MOD"); v54
-(gui-v54, the shipping face) is the corrected home.
-Suites: DSP 56/56, processor 41/41; snapshots
-byte-identical to docs/gui-v54-a.png (default opening
-state: INPUT 5, LIMIT, lever at A) and
-docs/gui-v54-b.png (lever toward P).
+moved the assembly onto the word line (the A one word
+space — the GAIN REDUCTION space, 5.45 vp — after the
+MOD ink); gui-v56 (the current face) replaces the bat
+with the push button ("let's just make it a push
+button"), shifts the whole assembly +6.36 vp right so
+the A ink's left edge stands in the IN/OUT labels'
+ink column (measured 378.64 vs the column's 378.18),
+and lights the ACTIVE flavour's letter steady in the
+jewels' amber while MOD is in and POWER is on (the
+section jewels' logic; no pulsing). Suites: DSP
+56/56, processor 41/41; snapshots byte-identical to
+docs/gui-v56-a.png (INPUT 5, LIMIT, MOD in, A lit)
+and docs/gui-v56-b.png (P lit).
 
 v1.1.9 — OVERSAMPLED CORE + INPUT DEFAULT 5 +
 RATIO MODE SWITCH (diagnosis
