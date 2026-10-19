@@ -390,6 +390,14 @@ int main() {
         // the frozen ones — the doubling lives in the
         // baked scale (kBa6aTimeScale + the FAST
         // calibration), never in the constants.
+        // AB2 pin move (cause: Nathan's AB2 ballistics
+        // directive, 2026-10-19 — TEST BUILD): the FAST
+        // seat is re-timed to his 3.0 ms target via the
+        // per-seat scale kBa6aAttFastScale = 10.5. LIMIT
+        // reads exactly 3.000 ms (band = ref +/-15%);
+        // COMP reads 4.438 ms through the shared constants
+        // (the mode offset is intrinsic to the law map;
+        // flagged in the AB2 report, band = ref +/-15%).
         for (bool comp : { false, true }) {
             auto tr = grStep(true, false, 0.75f, 0.5f, 1.2, comp);
             float settled = tr.back();
@@ -398,9 +406,9 @@ int main() {
                 if (tr[i] >= 0.9f * settled) { t90 = (double)i / kFs * 1000.0; break; }
             std::snprintf(d, sizeof d, "%s settled GR %.1f dB, t90 %.3f ms",
                           comp ? "COMP" : "LIMIT", settled, t90);
-            check(comp ? (t90 > 1.29 && t90 < 1.75) : (t90 > 0.95 && t90 < 1.30),
-                  comp ? "C1-COMP attack FAST: t90 1.29-1.75 ms (baked 2X, ref 1.521, v64)"
-                       : "C1 attack FAST: t90 0.95-1.30 ms (baked 2X, ref 1.125, v64)", d);
+            check(comp ? (t90 > 3.77 && t90 < 5.10) : (t90 > 2.55 && t90 < 3.45),
+                  comp ? "C1-COMP attack FAST: t90 3.77-5.10 ms (AB2, ref 4.438)"
+                       : "C1 attack FAST: t90 2.55-3.45 ms (AB2 target 3.0, ref 3.000)", d);
         }
     }
     {
@@ -426,8 +434,15 @@ int main() {
         // separation survives doubled (15.06 / 1.125 =
         // 13.4x the FAST reading), so the >= 8x condition
         // is kept verbatim.
-        check(tS > 12.8 && tS < 17.3 && tS >= 8.0 * tF,
-              "C2 attack SLOW: GR t90 12.8-17.3 ms (baked 2X, ref 15.06, v64)", d);
+        // AB2 pin move (cause as C1): Nathan's refinement
+        // sets the SLOW target at 15.0 ms (between the
+        // LA-2A's 10 ms and the Sta-Level Double's 25 ms);
+        // the seat reads 14.958 ms (band = ref +/-15%).
+        // The separation clause is re-based >= 8x -> >= 4x:
+        // with the seats at 3 / 15 ms BY DIRECTIVE the
+        // separation is 5.0x by design, not by drift.
+        check(tS > 12.7 && tS < 17.2 && tS >= 4.0 * tF,
+              "C2 attack SLOW: GR t90 12.7-17.2 ms (AB2 target 15.0, ref 14.958)", d);
         // v53: the SLOW constants take one common x1.25
         // toward the restated LA-2A reference (attack
         // ~10 ms) — in COMP (the near-shipped law) the full
@@ -478,8 +493,13 @@ int main() {
         // 1.3.0 at 2X (50% 0.0470 s, 90% 0.0935 s); bands
         // = refs +/-15% (C3b, one-sided at 1X, gains its
         // lower edge from the same reference).
-        check(t90 > 0.079 && t90 < 0.108, "C3 release SINGLE: 90% recovery 79-108 ms (baked 2X, ref 0.0935, v64)", d);
-        check(t50 > 0.040 && t50 < 0.054, "C3b release SINGLE: 50% recovery 40-54 ms (baked 2X, ref 0.0470, v64)", d);
+        // AB2 pin move (cause as C1): the SINGLE seat is
+        // re-timed to Nathan's 1.0 s target (kBa6aRelSingle
+        // Scale = 30.2); reads 90% 0.9986 s / 50% 0.3176 s
+        // in LIMIT (COMP 1.0092 / 0.3282 — inside its band
+        // too); bands = refs +/-15%.
+        check(t90 > 0.849 && t90 < 1.148, "C3 release SINGLE: 90% recovery 0.849-1.148 s (AB2 target 1.0, ref 0.9986)", d);
+        check(t50 > 0.270 && t50 < 0.365, "C3b release SINGLE: 50% recovery 0.270-0.365 s (AB2, ref 0.3176)", d);
     }
     {
         // C4: release SLOW = DUAL — the opto two-stage shape
@@ -505,7 +525,13 @@ int main() {
         // the T4 band); the LIMIT 50% crossing is the K5
         // reference 0.2160 s (band +/-15%).
         check(at03 > 0.40f * g0 && at03 < 0.56f * g0, "C4a DUAL tail holds 40-56% of GR at 0.3 s (baked 2X, v64)", d);
-        check(t90 > 3.85 && t90 < 5.47, "C4b DUAL 90% recovery 3.85-5.47 s (baked 2X, ref 4.663, v64)", d);
+        // AB2 pin move (cause as C1): the DUAL seat is
+        // re-timed to Nathan's 3.0 s fresh target
+        // (kBa6aRelDualScale = 1.29, T4 memory scaled with
+        // it and still in circuit); reads 90% 3.144 s in
+        // LIMIT (band = ref +/-17.5%, the T4 band). C4a
+        // above passes UNMOVED (43% at 0.3 s).
+        check(t90 > 2.59 && t90 < 3.69, "C4b DUAL 90% recovery 2.59-3.69 s (AB2 target 3.0, ref 3.144)", d);
         // v53 pin move (cause: law re-voice, constants
         // untouched): in LIMIT the working depth is deeper
         // (GR0 22.3 vs 17.1), the T4 stress state charges
@@ -513,7 +539,11 @@ int main() {
         // 0.110 s. In COMP the same constants read 0.069 s,
         // inside the manuals' band (C4d). The 90% tail and
         // the 0.3 s hold stay in their bands in both modes.
-        check(t50 > 0.184 && t50 < 0.248, "C4c DUAL 50% recovery 184-248 ms in LIMIT (baked 2X, ref 0.2160, v64)", d);
+        // AB2 pin move (cause as C4b): the LIMIT 50%
+        // crossing reads 0.1136 s at the faster DUAL scale
+        // (the fast pole carries more of the early
+        // recovery); band = ref +/-15%.
+        check(t50 > 0.097 && t50 < 0.131, "C4c DUAL 50% recovery 97-131 ms in LIMIT (AB2, ref 0.1136)", d);
         auto trC = grRelease(false, 6.5, true);
         float g0C = trC[100];
         double t50C = -1, t90C = -1;
@@ -525,8 +555,12 @@ int main() {
         // v64 pin move (cause as C1): the K5-COMP
         // references from 1.3.0 at 2X (50% 0.1428 s, band
         // +/-15%; 90% 3.915 s, band +/-17.5%).
-        check(t50C > 0.121 && t50C < 0.164 && t90C > 3.23 && t90C < 4.60,
-              "C4d DUAL in COMP: 50% 121-164 ms, 90% 3.23-4.60 s (baked 2X, refs 0.1428/3.915, v64)", d);
+        // AB2 pin move (cause as C4b): COMP reads 50%
+        // 0.1043 s / 90% 2.625 s at the shared DUAL scale —
+        // the 90% figure inside the +/-15% target band
+        // (2.55-3.45 s); bands = refs +/-15% / +/-17.5%.
+        check(t50C > 0.089 && t50C < 0.120 && t90C > 2.17 && t90C < 3.08,
+              "C4d DUAL in COMP: 50% 89-120 ms, 90% 2.17-3.08 s (AB2, refs 0.1043/2.625)", d);
     }
     {
         // C5: T4 MEMORY — same level, same depth, different
@@ -570,8 +604,13 @@ int main() {
         // figure 1.3.0's own K6 pin shipped. The memory
         // substance (long hold releases materially slower,
         // contrast 1.49) is asserted unchanged.
-        check(tBrief > 3.7 && tBrief < 5.2 && tLong > 1.35 * tBrief && tLong > 5.5 && tLong < 7.8,
-              "C5 DUAL memory: holds at 1.3.0-at-2X refs, long >= 1.35x slower (baked 2X, v64)", d);
+        // AB2 pin move (cause as C4b): at the AB2 DUAL
+        // scale the holds read 2.998 s (0.3 s hold) and
+        // 4.220 s (8 s hold), bands +/-17.5%; the memory
+        // contrast survives at 1.41x (pin >= 1.35x) — the
+        // T4 memory stays in circuit, scaled with the seat.
+        check(tBrief > 2.47 && tBrief < 3.52 && tLong > 1.35 * tBrief && tLong > 3.48 && tLong < 4.96,
+              "C5 DUAL memory: holds at AB2 refs 2.998/4.220 s, long >= 1.35x slower", d);
     }
 
     // ═══════════════ D. AUTO MAKE-UP (Nathan's pin) ═══════════════
@@ -1362,6 +1401,25 @@ int main() {
     // remains to be identical to), K8 (scale snap after
     // toggles — no toggles, no slew state) and K9
     // (toggle-edge click-freedom — no edge exists).
+    // AB2 RE-BASE (2026-10-19, TEST BUILD — Nathan's AB2
+    // ballistics directive): the one baked scale is
+    // replaced by per-seat calibrated scales
+    // (kBa6aAttFastScale 10.5, kBa6aAttSlowScale 1.996,
+    // kBa6aRelSingleScale 30.2, kBa6aRelDualScale 1.29;
+    // detector decay held at its 1.3.1 effective 2.0).
+    // K1–K6 below now assert the AB2 references measured
+    // on this tree: the calibrated LIMIT seats carry the
+    // brief's +/-10% band about the measured reference,
+    // COMP and the report-only figures +/-15% (+/-17.5%
+    // for the K5 90% tail and K6, the T4 band as before).
+    // COMP attack figures land outside the brief's +/-15%
+    // target band through the mode-shared constants
+    // (K1-COMP 4.438 vs 3.0 target; K2-COMP 21.021 vs
+    // 15.0) — flagged with numbers in the AB2 report; the
+    // pins assert the measured values so any FURTHER
+    // drift still fails. K7's reference table is
+    // re-captured at the AB2 timings (all five groups —
+    // see the deviation note at K7).
     {
         auto t90of = [&](const std::vector<float>& tr) {
             float settled = tr.back();
@@ -1384,55 +1442,67 @@ int main() {
         for (bool comp : { false, true }) {
             const char* mn = comp ? "COMP" : "LIMIT";
             // K1: attack FAST, full step (the calibrated seat).
+            // AB2 refs: LIMIT 3.000 (the brief's target,
+            // +/-10% band); COMP 4.438 (flagged, +/-15%).
             double a = t90of(grStep(true, false, 0.75f, 0.5f, 1.2, comp));
-            double aRef = comp ? 1.521 : 1.125;
-            std::snprintf(d, sizeof d, "%s t90 %.3f ms vs 1.3.0-at-2X ref %.3f ms", mn, a, aRef);
-            check(nearRef(a, aRef, 0.15),
-                  comp ? "K1-COMP baked attack FAST t90 == 1.3.0-at-2X (calibrated seat)"
-                       : "K1 baked attack FAST t90 == 1.3.0-at-2X (calibrated seat)", d);
+            double aRef = comp ? 4.438 : 3.000;
+            std::snprintf(d, sizeof d, "%s t90 %.3f ms vs AB2 ref %.3f ms", mn, a, aRef);
+            check(nearRef(a, aRef, comp ? 0.15 : 0.10),
+                  comp ? "K1-COMP AB2 attack FAST t90 == AB2 ref (flagged vs target)"
+                       : "K1 AB2 attack FAST t90 == 3.0 ms target (calibrated seat)", d);
             // K2: attack SLOW, full step.
+            // AB2 refs: LIMIT 14.958 (target 15.0, +/-10%);
+            // COMP 21.021 (flagged, +/-15%).
             double s = t90of(grStep(false, false, 0.75f, 0.5f, 1.2, comp));
-            double sRef = comp ? 21.15 : 15.06;
-            std::snprintf(d, sizeof d, "%s t90 %.2f ms vs 1.3.0-at-2X ref %.2f ms", mn, s, sRef);
-            check(nearRef(s, sRef, 0.15),
-                  comp ? "K2-COMP baked attack SLOW full-step t90 == 1.3.0-at-2X"
-                       : "K2 baked attack SLOW full-step t90 == 1.3.0-at-2X", d);
+            double sRef = comp ? 21.021 : 14.958;
+            std::snprintf(d, sizeof d, "%s t90 %.2f ms vs AB2 ref %.2f ms", mn, s, sRef);
+            check(nearRef(s, sRef, comp ? 0.15 : 0.10),
+                  comp ? "K2-COMP AB2 attack SLOW full-step t90 == AB2 ref (flagged vs target)"
+                       : "K2 AB2 attack SLOW full-step t90 == 15.0 ms target", d);
             // K3: attack SLOW, small step (the T4-shaped seat).
+            // AB2 refs: 24.000 / 24.542 (report-only, +/-15%).
             double m = t90of(grStep(false, false, 0.75f, 0.12f, 1.2, comp));
-            double mRef = comp ? 24.71 : 24.15;
-            std::snprintf(d, sizeof d, "%s t90 %.2f ms vs 1.3.0-at-2X ref %.2f ms", mn, m, mRef);
+            double mRef = comp ? 24.542 : 24.000;
+            std::snprintf(d, sizeof d, "%s t90 %.2f ms vs AB2 ref %.2f ms", mn, m, mRef);
             check(nearRef(m, mRef, 0.15),
-                  comp ? "K3-COMP baked attack SLOW small-step t90 == 1.3.0-at-2X"
-                       : "K3 baked attack SLOW small-step t90 == 1.3.0-at-2X", d);
+                  comp ? "K3-COMP AB2 attack SLOW small-step t90 == AB2 ref"
+                       : "K3 AB2 attack SLOW small-step t90 == AB2 ref", d);
             // K4: release FAST (SINGLE), 50% and 90%.
+            // AB2 refs: LIMIT 0.3176 / 0.9986 (target 1.0 s,
+            // +/-10%); COMP 0.3282 / 1.0092 (+/-15%) — the
+            // COMP 90% lands inside its target band too.
             double f50, f90;
             relTimes(true, comp, f50, f90);
-            double f50Ref = comp ? 0.0553 : 0.0470;
-            double f90Ref = comp ? 0.1144 : 0.0935;
+            double f50Ref = comp ? 0.3282 : 0.3176;
+            double f90Ref = comp ? 1.0092 : 0.9986;
             std::snprintf(d, sizeof d, "%s 50%% %.4f (ref %.4f), 90%% %.4f (ref %.4f)",
                           mn, f50, f50Ref, f90, f90Ref);
-            check(nearRef(f50, f50Ref, 0.15) && nearRef(f90, f90Ref, 0.15),
-                  comp ? "K4-COMP baked release SINGLE 50/90% == 1.3.0-at-2X"
-                       : "K4 baked release SINGLE 50/90% == 1.3.0-at-2X", d);
+            check(nearRef(f50, f50Ref, comp ? 0.15 : 0.10) && nearRef(f90, f90Ref, comp ? 0.15 : 0.10),
+                  comp ? "K4-COMP AB2 release SINGLE 50/90% == AB2 refs"
+                       : "K4 AB2 release SINGLE 50/90% == AB2 refs (90% target 1.0 s)", d);
             // K5: release SLOW (DUAL), 50% and 90% — the 90%
             // band is the widened T4 band of the v62 pin
             // (the tail pole's stretch is charged during the
             // hold; the absolute figure is mechanism-set).
+            // AB2 refs: LIMIT 0.1136 / 3.144 (target 3.0 s);
+            // COMP 0.1043 / 2.625 (90% inside the +/-15%
+            // target band 2.55-3.45 s).
             double d50, d90;
             relTimes(false, comp, d50, d90);
-            double d50Ref = comp ? 0.1428 : 0.2160;
-            double d90Ref = comp ? 3.915 : 4.663;
+            double d50Ref = comp ? 0.1043 : 0.1136;
+            double d90Ref = comp ? 2.625 : 3.144;
             std::snprintf(d, sizeof d, "%s 50%% %.4f (ref %.4f), 90%% %.3f (ref %.3f)",
                           mn, d50, d50Ref, d90, d90Ref);
             check(nearRef(d50, d50Ref, 0.15) && nearRef(d90, d90Ref, 0.175),
-                  comp ? "K5-COMP baked release DUAL 50/90% == 1.3.0-at-2X (T4 band)"
-                       : "K5 baked release DUAL 50/90% == 1.3.0-at-2X (T4 band)", d);
+                  comp ? "K5-COMP AB2 release DUAL 50/90% == AB2 refs (T4 band)"
+                       : "K5 AB2 release DUAL 50/90% == AB2 refs (90% target 3.0 s, T4 band)", d);
         }
     }
     {
-        // K6: T4 memory, baked (C5 protocol): both holds'
-        // recoveries at their 1.3.0-at-2X values, and the
-        // brief/long contrast survives.
+        // K6: T4 memory (C5 protocol): both holds'
+        // recoveries at their AB2 values (the memory taus
+        // ride the DUAL seat scale), and the brief/long
+        // contrast survives.
         auto relAfter = [&](double holdSec) {
             osc72::Ba6aLimiter lim;
             lim.prepare(kFs); lim.setKnob(0.85f);
@@ -1451,11 +1521,11 @@ int main() {
             return t90;
         };
         double b = relAfter(0.3), l = relAfter(8.0);
-        std::snprintf(d, sizeof d, "brief %.2f (ref 4.45), long %.2f (ref 6.65), contrast %.2f",
+        std::snprintf(d, sizeof d, "brief %.2f (AB2 ref 2.998), long %.2f (AB2 ref 4.220), contrast %.2f",
                       b, l, l / b);
-        check(b > 4.45 * 0.825 && b < 4.45 * 1.175
-           && l > 6.65 * 0.825 && l < 6.65 * 1.175 && l / b > 1.35,
-              "K6 baked T4 memory: both holds == 1.3.0-at-2X, contrast survives", d);
+        check(b > 2.998 * 0.825 && b < 2.998 * 1.175
+           && l > 4.220 * 0.825 && l < 4.220 * 1.175 && l / b > 1.35,
+              "K6 AB2 T4 memory: both holds == AB2 refs, contrast survives", d);
     }
     {
         // K7: BAKED-2X BIT-IDENTITY — programme renders
@@ -1474,6 +1544,18 @@ int main() {
         // trees. Grouped as five checks (MOD out per knob,
         // MOD in per flavour); the detail names the first
         // mismatching configuration.
+        // FULL-CANDIDATE RE-BASE (2026-10-19, TEST BUILD —
+        // the AB2 ballistics merge): configs 0–27 carry
+        // the AB2 tree's reference table verbatim — and
+        // this harness REPRODUCED all 28 exactly on the
+        // merged tree before the table was spliced (the
+        // merge cross-proof: AB2's limiter renders through
+        // AB3's chain at hard-selected mixes are the same
+        // bits). Configs 28/29 (P at modMix = 1, the pure
+        // cascade) are re-captured on the merged tree —
+        // no parent tree renders that state. K7f below
+        // re-proves the classic-pedal equivalence against
+        // the AB2 tree (same ballistics), see its verdict.
         auto fnvF = [](uint64_t h, float f) {
             uint32_t u;
             std::memcpy(&u, &f, 4);
@@ -1486,37 +1568,37 @@ int main() {
         struct Cfg { const char* name; float knob; bool comp, att, rel; int mod; double secs; uint64_t want; };
         const Cfg cfgs[] = {
             // MOD out, knob 0.50 (4 s each)
-            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0x3134f7039c664566ull },
-            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0xecc5716b12aa6f75ull },
-            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x0b34448eea00e2e2ull },
-            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0xa103e10d96416003ull },
-            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0xca9748ef94e85fc9ull },
-            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x45fbc2c3395712b6ull },
-            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0x3894004a1d524cdcull },
-            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0xf831d5217d75f05eull },
+            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0xed261a92f595aad5ull },
+            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0xbc5758ee4cc51170ull },
+            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x2b85f3626028121cull },
+            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0xc5ab87c84a4e747cull },
+            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0xe5ad27a01f19317aull },
+            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x3afec921da9e5684ull },
+            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0xb84b19a214ee4d97ull },
+            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x10937302cbc02f02ull },
             // MOD out, knob 0.75
-            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x295c29140c6be1deull },
-            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0xc2bae345c899a337ull },
-            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0xc39a83e0a8311ce4ull },
-            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0xe2aa49d2281c11d7ull },
-            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0x815dea68e02e954aull },
-            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x06df3f4062b41557ull },
-            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x989c5fdeea4d1b33ull },
-            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x098e814e0200068full },
+            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x45356f01c1adf3e9ull },
+            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x1d76e99003b4327full },
+            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x2c28992fc28e1d79ull },
+            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0x0b91c0350939e8b9ull },
+            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0x990964f90a2874bfull },
+            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0xc98125d4b125d9f3ull },
+            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x403b8a734e82b98eull },
+            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x9b6dc5c31146d4a0ull },
             // MOD out, knob 1.00
-            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x01eca22d63eadf62ull },
-            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0xcdeb6acea39888c0ull },
-            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x65132f24aa2b9937ull },
-            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x00f9a0b47010f9e2ull },
-            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x04b56f7ebb819022ull },
-            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x9811b190869ae5a9ull },
-            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0xdbf200172511f40eull },
-            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0xd2a49fac238987fbull },
+            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x2b24ce996d3a0463ull },
+            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0x36df34b01651b31cull },
+            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x3c84b55c57ff3f54ull },
+            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x715cc324edb61dcfull },
+            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x6a39ec42381aa53cull },
+            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x5327001398170cfcull },
+            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x590f33b1273277f1ull },
+            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x3fa4f284e016bca5ull },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xc7e8fd615cbff5a8ull },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0xb8f38ee720e62706ull },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x2b8dbe97968f0224ull },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x595f8a0016ae8c2full },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xa8ee2347e87e06e9ull },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x552f94dfc0ad324aull },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x67d439d16802015dull },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0xbebbf552d5fb9606ull },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -1525,8 +1607,11 @@ int main() {
             // two configs move to K7f, where they are pinned
             // at modMix = 0.5). New references captured from
             // this tree's first AB3 build.
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0xf4f0ecec9223095full },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x020469ea62e3ce46ull },
+            // FULL: re-captured again on the merged tree at
+            // the AB2 ballistics (pure cascade renders under
+            // the re-timed limiter).
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x8e6208a1926f3bbfull },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0xb2ac23b383918e41ull },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
@@ -1539,6 +1624,12 @@ int main() {
         // and are re-based in K7e with cause; K7f pins the
         // P flavour at modMix = 0.5 against the ORIGINAL
         // references (the classic-pedal identity).
+        // FULL: the table's references are now the AB2
+        // ballistics set for configs 0–27 (proven above)
+        // and this tree's own captures for 28/29; K7f pins
+        // the P flavour at modMix = 0.5 against references
+        // captured on THIS tree, with the classic-pedal
+        // equivalence re-proven against the AB2 tree.
         auto renderHash = [&](const Cfg& c, float modMix = 1.0f) {
             osc72::Chain ch;
             ch.prepare(kFs);
@@ -1584,31 +1675,34 @@ int main() {
                     break;
                 }
             }
-            std::snprintf(d, sizeof d, "%s", ok ? "all hashes match the 1.3.0-at-2X reference" : bad);
+            std::snprintf(d, sizeof d, "%s", ok ? "all hashes match the FULL-candidate references (AB2 ballistics x AB3 harness)" : bad);
             check(ok, g.pin, d);
         }
-        // K7f (AB3): the P flavour at modMix = 0.5 against
-        // the ORIGINAL 1.3.0 references (the values K7e
-        // carried before the re-base): the linear law at
-        // centre must reproduce the classic pedal — 0.5
-        // dry + 0.5 cascade against 1.3.1's internal
-        // 0.5 (in + cascade) through its engage fade.
-        // VERDICT (probe, this tree vs the pristine 1.3.1
-        // DSP, both K7 P configs rendered sample-for-
-        // sample): NOT bit-identical — 17.4 % / 17.6 % of
-        // samples differ — but every differing sample is
-        // within ONE float ulp: max |delta| = 1.19e-07
-        // (-138.5 dBFS) on both configs. The arithmetic
-        // does not allow closer: 1.3.1's value travelled
-        // through in + (mix - in) * g, the new chain's
-        // through (1-m)*dry + m*cascade; the two rounding
-        // paths part at the last bit and nowhere else.
-        // The pin therefore hashes THIS tree's renders
-        // (below), and the equivalence bound above is the
-        // recorded measurement, re-measurable with the
-        // two-tree probe protocol in the AB3 report.
+        // K7f (AB3; re-based FULL): the P flavour at
+        // modMix = 0.5 — the classic pedal. The pin hashes
+        // THIS tree's renders (below); the equivalence to
+        // the classic internal-50/50 output is the probe
+        // verdict recorded here.
+        // VERDICT (probe, this tree vs the AB2 tree — the
+        // classic chain at the SAME ballistics, so the
+        // limiter is held constant and only the blend
+        // arithmetic differs; both K7 P configs rendered
+        // sample-for-sample, 6 s each): NOT bit-identical
+        // — outL/outR differ on 17.67 % / 17.72 % (LIMIT)
+        // and 17.52 % / 17.63 % (COMP) of samples, but the
+        // largest absolute difference anywhere is
+        // 1.192e-07 = 2^-23 (one ulp of full-scale float;
+        // -138.5 dBFS), and the GR trace is bit-identical
+        // on both configs. Same rounding-path parting as
+        // AB3 measured against 1.3.1 (17.4 % / 17.6 %,
+        // same bound): (1-m)*dry + m*cascade cannot round
+        // identically to the classic in + (mix - in) * g.
+        // The AB2-side probe hashes reproduce AB2's own
+        // K7e references (f7dd0cbca857c8f4 /
+        // a1ff60de775fdc45), so the comparison chain is
+        // proven at both ends.
         {
-            const uint64_t wantP[2] = { 0xc68a7b7fb444552aull, 0xc95791a776f1def0ull };
+            const uint64_t wantP[2] = { 0x7a11fd2b4f8cb936ull, 0x963dbf00dac0bed5ull };
             bool ok = true;
             char bad[160] = "";
             for (int i = 0; i < 2; ++i) {
@@ -1621,8 +1715,8 @@ int main() {
                     break;
                 }
             }
-            std::snprintf(d, sizeof d, "%s", ok ? "both hashes match the AB3 references (1-ulp equivalence to 1.3.0, see above)" : bad);
-            check(ok, "K7f AB3: MOD-in P at modMix=0.5 == 1.3.0 P output to 1 ulp (classic pedal)", d);
+            std::snprintf(d, sizeof d, "%s", ok ? "both hashes match the FULL references (1-ulp equivalence to the AB2 classic pedal, see above)" : bad);
+            check(ok, "K7f FULL: MOD-in P at modMix=0.5 == AB2 classic P output to 1 ulp (classic pedal)", d);
         }
     }
 

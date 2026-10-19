@@ -410,54 +410,52 @@ inline constexpr float kBa6aMemChargeTauSec = 1.2f;
 inline constexpr float kBa6aMemDecayTauSec  = 8.0f;
 inline constexpr float kBa6aMemStretch      = 1.6f;
 inline constexpr float kBa6aMemRefDb        = 25.0f;   // GR depth counted as full stress
-// BAKED TIMING SCALE (v62 as a selector; baked permanent
-// in v64 / 1.3.1, Nathan): 1.3.0 shipped a 1X/2X panel
-// selector that multiplied every ballistics tau by a
-// slewed scale — 2X doubled the SELECTED attack and
-// release times. Nathan's ear verdict on 1.3.0: the 2X
-// timings "just sound so much better"; 1X is "just
-// crushing and wrecking all the transients" — so the 1X
-// speeds are done away with entirely: there is no
-// selector, no parameter and no 1X state. The scale is
-// this compile-time constant, applied at the same use
-// sites the selector drove: the detector charge (FAST
-// tau and the SLOW shaped tau), the detector decay, the
-// control attack pole, the SINGLE release tau, both
-// DUAL taus (the tail pole keeps its T4 stretch product
-// on top) and the T4 memory charge/decay taus — a
-// whole-loop time-scale, so both seats and both ratio
-// laws carry it together and the memory behaviour
-// scales with the release it shapes. NOT scaled, by
-// design: the B+ sag charge/recover (a power-supply
-// behaviour, not a selected timing), the make-up
-// average and slew, the knob and law slews, the
-// sidechain filter and every audio-path constant. The
-// audio is bit-identical to 1.3.0 with 2X engaged and
-// settled — that state IS the initial state now, from
-// the first sample (no load-time glide); pinned by
-// suite K7's programme hashes against reference renders
-// captured from the 1.3.0 tree (docs/build-report-v64.md).
-inline constexpr float kBa6aTimeScale = 2.0f;
-// FAST-attack calibration (v62, measured — the v46
-// method: factors calibrated, not nominal). The bench
-// step's t90 is affine in the scale: a fixed ~0.33 ms
-// (LIMIT) / ~0.27 ms (COMP) floor — the oversampling
-// resampler's step edge, the same artefact the C1 pin
-// documents — plus a scalable part (0.25 / 0.44 ms per
-// unit scale). A pure x2 on the FAST taus therefore
-// reads only 1.43x / 1.62x on the step, so the FAST
-// attack chain (detector FAST charge + the FAST control
-// pole) takes scale' = 1 + (scale - 1) x this constant:
-// with the baked scale the FAST taus run x3.0 and the
-// measured step t90 lands at 1.93x (LIMIT) / 2.15x
-// (COMP) of the retired 1X figures, inside the +/-15%
-// band in both modes (sweep: docs/build-report-v62.md).
-// The frozen FAST constants themselves are never
-// edited — the calibration lives entirely in this
-// multiplier. The SLOW seats and every release tau
-// take the plain scale — they measure 1.98-2.01x
-// uncalibrated.
-inline constexpr float kBa6aAttFastCalib = 2.0f;
+// PER-SEAT BALLISTICS SCALES (AB2 test build, 2026-10-19 —
+// NOT a release; Nathan's ear-trial timings). History: v62
+// shipped a 1X/2X panel selector multiplying every
+// ballistics tau by one slewed scale; v64 / 1.3.1 baked
+// the settled 2X value in as the single constant
+// kBa6aTimeScale = 2.0f, with the FAST attack chain taking
+// a calibrated x3.0 (kBa6aAttFastCalib — the bench step's
+// t90 is affine in scale with a fixed ~0.33/0.27 ms
+// oversampler-edge floor, so a plain x2 read only
+// 1.43x/1.62x). This build REPLACES that one whole-loop
+// scale with one calibrated scale per seat, so each seat
+// can be re-timed independently to Nathan's AB2 targets
+// on the standard step bench (LIMIT = the calibrated
+// mode; the constants stay mode-shared — COMP reads
+// wherever the shared taus land through its law):
+//   attack FAST  t90            = 3.0 ms  (1.3.1: 1.125)
+//   attack SLOW  t90 full-step  = 15.0 ms (1.3.1: 15.06 —
+//     re-based by Nathan's refinement: 15 ms sits between
+//     the LA-2A's 10 ms and the Sta-Level Double's 25 ms,
+//     the centre of the classic slow-attack cluster)
+//   release FAST (SINGLE) 90%   = 1.0 s   (1.3.1: 0.0935)
+//   release SLOW (DUAL) 90%     = 3.0 s fresh (1.3.1: 4.663)
+// The frozen seat constants themselves are never edited —
+// the calibration lives entirely in these multipliers,
+// exactly as in v62/v64. Sites: kBa6aAttFastScale feeds
+// the detector FAST charge tau and the FAST control pole;
+// kBa6aAttSlowScale feeds the SLOW shaped detector tau
+// (scaled as a whole — the grab/creep/dim proportions are
+// preserved) and the SLOW control pole; kBa6aRelSingleScale
+// feeds the SINGLE tau; kBa6aRelDualScale feeds both DUAL
+// taus (the tail pole keeps its T4 stretch product on top)
+// and the T4 memory charge/decay taus, so the memory
+// behaviour scales with the release it shapes. The
+// detector decay keeps its 1.3.1 effective scale (2.0) as
+// shared release-side infrastructure: it bounded the old
+// 0.09 s FAST release but bounds neither new target.
+// NOT scaled, by design (unchanged from v62/v64): the B+
+// sag charge/recover, the make-up average and slew, the
+// knob and law slews, the sidechain filter and every
+// audio-path constant. Ratio laws, statics, colour, drive,
+// MOD section and meter are untouched by this build.
+inline constexpr float kBa6aAttFastScale   = 10.5f;  // AB2 calibrated: bench FAST t90 3.000 ms LIMIT (COMP 4.438 — mode offset, see report)
+inline constexpr float kBa6aAttSlowScale   = 1.996f; // AB2 calibrated: bench SLOW full-step t90 14.958 ms LIMIT (COMP 21.021); small step 24.000 / 24.542
+inline constexpr float kBa6aRelSingleScale = 30.2f;  // AB2 calibrated: bench SINGLE 90% recovery 0.9986 s LIMIT / 1.0092 s COMP; 50% 0.3176 / 0.3282
+inline constexpr float kBa6aRelDualScale   = 1.29f;  // AB2 calibrated: bench DUAL 90% recovery 3.144 s LIMIT / 2.625 s COMP; 50% 0.1136 / 0.1043; T4 holds 2.998 s vs 4.220 s (contrast 1.41)
+inline constexpr float kBa6aDetDecayScale  = 2.0f;  // held at the 1.3.1 effective value
 // Auto make-up (v1.0.3 law carried per Nathan; design §3.2).
 inline constexpr float kBa6aMakeupAvgChargeTauSec = 0.080f;
 inline constexpr float kBa6aMakeupAvgDecayTauSec  = 0.300f;
@@ -484,11 +482,12 @@ public:
     void setReleaseFast(bool fast) { releaseFast_ = fast; }
     bool releaseFast() const { return releaseFast_; }
 
-    // Timing scale (v64 / 1.3.1): there is deliberately
-    // NO setter — the v62 selector is gone and the 2X
-    // ballistics are the unit's only ballistics, baked
-    // as kBa6aTimeScale (see its note). Nothing to glide,
-    // nothing to snap: the scale is 2.0f from the first
+    // Timing scales (v64 / 1.3.1; per-seat in the AB2
+    // test build): there is deliberately NO setter — the
+    // v62 selector is gone and the ballistics are the
+    // unit's only ballistics, baked as the per-seat scale
+    // constants (see their note). Nothing to glide,
+    // nothing to snap: the scales apply from the first
     // sample of the first block.
 
     // Ratio mode (v53): COMP (true) / LIMIT (false, the
@@ -830,10 +829,11 @@ public:
     void setReleaseFast(bool fast) { limiter_.setReleaseFast(fast); }
     bool releaseFast() const { return limiter_.releaseFast(); }
 
-    // Timing scale (v64 / 1.3.1): no selector survives at
-    // this level either — the limiter's ballistics are
-    // baked at the 2X scale (kBa6aTimeScale). No latency
-    // consequence; the ADT/phaser inserts are untouched.
+    // Timing scales (v64 / 1.3.1; per-seat in the AB2
+    // test build): no selector survives at this level
+    // either — the limiter's ballistics are baked as the
+    // per-seat scale constants. No latency consequence;
+    // the ADT/phaser inserts are untouched.
 
     // Ratio mode (v53): the section is always engaged —
     // the old limit in/out bypass is gone by design (see

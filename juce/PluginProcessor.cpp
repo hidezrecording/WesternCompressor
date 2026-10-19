@@ -82,7 +82,7 @@ Osc72Processor::createParameterLayout()
     // selector parameter (v62, shipped in 1.3.0). Nathan's
     // ear verdict retired the 1X speeds entirely — the 2X
     // ballistics are baked into the DSP as the unit's only
-    // ballistics (kBa6aTimeScale), so there is nothing left
+    // ballistics (per-seat scale constants), so there is nothing left
     // for a parameter to select. SESSION COMPATIBILITY:
     // the parameter is deleted outright rather than kept
     // as a hidden legacy stub. JUCE state restore

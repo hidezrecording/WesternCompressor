@@ -297,7 +297,15 @@ int main() {
         // the 1.1.0 law -> x1.024 now: 1.361 vs 1.393). The
         // direction — SLOW passes more transient — is what
         // the pin asserts. See build-report-v40.md.
-        check(pkSlow > pkFast * 1.015f, "P6b proc: SLOW attack lets the transient through", b);
+        // AB2 pin move (cause: Nathan's AB2 ballistics —
+        // TEST BUILD): with the seats re-timed to 3 / 15 ms
+        // the FAST seat grabs much later inside the 10 ms
+        // window, so both bursts ride the make-up ceiling
+        // to within 0.2% of each other (measured FAST 1.377
+        // vs SLOW 1.380, was x1.024 apart at 1.3.1). The
+        // 1.5% margin no longer exists to assert; the pin
+        // keeps the direction only.
+        check(pkSlow >= pkFast, "P6b proc: SLOW attack lets the transient through", b);
 
         // End-to-end release: after a loud passage ends, the
         // GR readout (the display feed) falls fast on SINGLE
@@ -338,8 +346,17 @@ int main() {
         // 33.7%. SINGLE's clause is unchanged and now passes
         // at 0.0 — the 1176-seat Single is fully home by
         // +0.35 s. See build-report-v45.md.
-        check(sgl.first > 5.0f && sgl.second < 0.45f * sgl.first && dul.second > 0.28f * dul.first,
-              "P6c proc: SINGLE releases fast, DUAL holds (readout)", b);
+        // AB2 pin move (cause: Nathan's AB2 ballistics —
+        // TEST BUILD): the seats swap their early/late
+        // relationship by design — SINGLE is now the 1.0 s
+        // seat (50% recovery at ~0.32 s on the bench), so
+        // at +0.35 s it has shed ~54% (readout 10.2 of
+        // 22.3 dB = 0.457 of peak; clause 0.45 -> 0.50),
+        // while DUAL's fast pole leads early and its 3 s
+        // tail still holds 7.7 of 22.3 dB (0.345) at
+        // +0.30 s — the DUAL clause passes UNMOVED.
+        check(sgl.first > 5.0f && sgl.second < 0.50f * sgl.first && dul.second > 0.28f * dul.first,
+              "P6c proc: SINGLE sheds most GR by +0.35 s, DUAL tail holds (readout, AB2)", b);
     }
 
     // ── P7. THE TWO MIX POTS (AB3: COMP MIX / MOD MIX) ─────
@@ -1063,6 +1080,12 @@ int main() {
         // same small-block readout method; the peak depth
         // it falls FROM is part of the pin. References from
         // the 1.3.0 tree's 2X arm: 0.103 s from 22.5 dB.
+        // AB2 pin move (cause: Nathan's AB2 ballistics —
+        // TEST BUILD): at the faster DUAL scale the same
+        // protocol reads 0.079 s from 22.3 dB (the depth
+        // moves 0.2 dB with the re-timed charge); the pin
+        // re-centres on the AB2 references, tolerance
+        // unchanged (one 64-sample block; 0.3 dB).
         auto grFallT50 = [&](float& peakGr) {
             Osc72Processor q;
             q.prepareToPlay(kFs, 64);
@@ -1092,10 +1115,10 @@ int main() {
         };
         float pk = 0;
         double f = grFallT50(pk);
-        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: baked %.3f s vs ref 0.103 s, peak %.1f dB (ref 22.5)",
+        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: AB2 %.3f s vs ref 0.079 s, peak %.1f dB (ref 22.3)",
                       f, pk);
-        check(std::fabs(f - 0.103) <= (64.0 / kFs) && std::fabs(pk - 22.5f) < 0.3f,
-              "P11c proc: baked DUAL release 50% recovery == 1.3.0-at-2X from the same depth", b);
+        check(std::fabs(f - 0.079) <= (64.0 / kFs) && std::fabs(pk - 22.3f) < 0.3f,
+              "P11c proc: AB2 DUAL release 50% recovery == AB2 ref from the same depth", b);
 
         // P11d: the reported latency is untouched by the
         // bake (MOD in A: 992; MOD out: 32).
