@@ -840,6 +840,31 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.4.1 — HOST RE-PREPARE FIX (diagnosis
+~/workspace/western-compressor-release-1.4.0/
+DIAGNOSIS-adt-power-toggle.md). No sound change:
+with no re-prepare event the renders are bit-identical
+to 1.4.0 (the K7 programme hashes pass unmoved). The
+fix is for hosts that re-call prepareToPlay on a live
+instance — Luna's top-bar power cycle does, through
+the JUCE AU wrapper: the re-call used to rebuild the
+chain under a live MOD engagement and park both
+inserts forever (their reset parked the engagement
+state off while the target survived, and the
+no-change setEnabled re-apply could never re-arm
+them — the MOD channel went sample-identical to the
+raw feed; what read as a "much shorter delay" was
+the doubling gone). Two changes: (1) a same-rate
+re-prepare now preserves all live chain state — the
+re-call is an inaudible non-event; a first prepare or
+a genuine rate change still rebuilds from scratch;
+(2) any reset whose engagement target is on re-arms
+the insert into its 30 ms fade-in, ADT and Phase 90
+alike. Regression pins: DSP section N and processor
+P12 — against the 1.4.0 DSP the new pins fail with
+exactly the diagnosed signature (fade 0.00, output
+sample-identical to the feed). Suites: DSP 92/92,
+processor 40/40; no pre-existing pin moved.
 v1.4.0 — THE MIXER-ARCHITECTURE RELEASE (FULL2
 candidate, approved by Nathan's ear 2026-10-19; staging
 report ~/workspace/western-compressor-full2-candidate/
