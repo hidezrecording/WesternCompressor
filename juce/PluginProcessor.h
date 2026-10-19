@@ -18,18 +18,24 @@
 // power off bypasses the whole unit in processBlock (dry
 // passthrough through a click-free fade, latency reported 0)
 // and every panel light goes out.
-// Since v38, a 'mix' pot (float 0..1, default 1.0 = fully
-// WET) sits on the strip under POWER: processBlock blends
-// the raw input with the chain's processed output. Signal
-// order: input -> [dry tap: a delay line read at the
-// chain's CURRENT latency, so dry and wet are time-aligned
-// at every mix position — 960 samples with MOD in, 0 with
-// it out] in parallel with [osc72::Chain -> O/P LEVEL
-// trims] -> wet/dry blend by 'mix' -> the v19 POWER fade
-// (settled off, the whole blend is out of the path and the
-// unit is bit-exact bypass whatever the mix). At mix == 1
-// the blend is skipped entirely: the pre-feature output,
-// bit-for-bit.
+// AB3 test build (gui-v60 round): the strip's two top
+// pots are repurposed — the ex-SIDECHAIN pot is COMP MIX
+// ('compMix', parallel compression) and the ex-MIX pot is
+// MOD MIX ('modMix', the MOD section's wet amount), both
+// float 0..1 defaulting to 0.5 (12 o'clock, Nathan's
+// call). The v38 'mix' parameter and the v41 'scCutoff'
+// parameter are deleted outright (no stubs; legacy state
+// values are orphaned and ignored — see the layout
+// comments in PluginProcessor.cpp for the session
+// consequences). BOTH blends live inside osc72::Chain as
+// two latency-aligned linear-crossfade stages around the
+// inserts; the processor's v38/v44 dry-tap machinery is
+// deleted with them. Signal order: input -> osc72::Chain
+// (comp stage -> inserts -> mod stage) -> O/P LEVEL trims
+// -> the v19 POWER fade (settled off, the whole unit is
+// out of the path and the bypass is bit-exact at any pot
+// setting). Reported latency is the chain's (32 / 992-A /
+// 32-P), independent of both pots.
 // All limiter/mod routing lives in osc72::Chain, so the tested
 // code is the shipped code.
 class Osc72Processor : public juce::AudioProcessor
@@ -88,35 +94,14 @@ private:
     bool modPhaser_ = false; // v55: MOD flavour — false = A (ADT, default), true = P (Phase 90)
     bool attackFast_ = true;    // v4: stock detector (default FAST)
     bool releaseFast_ = false;  // v4: DUAL recovery (default SLOW)
-    float scCutoffHz_ = 10.0f;  // v41: detector sidechain low-cut (default = bottom stop, filter out)
     bool powerOn_ = true;      // v19 strip POWER toggle (default ON)
     float powerMix_ = 1.0f;    // v19 bypass fade position, 1 = unit on
     float outGainL_ = 1.0f;   // smoothed O/P LEVEL gains (v12)
     float outGainR_ = 1.0f;
-    // v38 MIX: the smoothed wet/dry blend position (1 = fully
-    // wet) and the dry tap's delay lines. The lines are
-    // written every sample whatever the state, so the
-    // latency-aligned dry signal is always ready; the read
-    // offset follows the chain's current latency.
-    float mixCur_ = 1.0f;
-    std::vector<float> dryLineL_, dryLineR_;
-    int dryWrite_ = 0;
-    static constexpr int kDryLineSize = 16384;   // power of two; >> the 960-sample max chain latency
-    // v44 (mix-alignment diagnosis, docs/mix-alignment-
-    // diagnosis.md): the dry tap's read offset, crossfaded.
-    // dryDelayB_ is the current target (the chain's latency,
-    // or 0 while POWER is off); when the target changes (MOD
-    // or POWER edge), dryDelayA_ keeps the old offset and
-    // dryTapFade_ ramps 0 -> 1 over 30 ms — the ADT's own
-    // engagement time — so during the transition the blend's
-    // dry side follows the same crossfade law as the wet
-    // side's internal dry component, instead of stepping to
-    // the new offset instantly while the chain is still
-    // morphing (which weighted a mid-fade transient almost
-    // entirely at the new offset: a momentary flam at the
-    // toggle, measured in the diagnosis battery §5).
-    int dryDelayA_ = 0, dryDelayB_ = 0;
-    float dryTapFade_ = 1.0f;   // 1 = settled on dryDelayB_
+    // AB3: no mix state survives at this level — both pot
+    // values are read from APVTS and pushed into the chain
+    // per block; the slews, taps and offset crossfade are
+    // the chain's (see Osc72Dsp.h, Chain).
     std::atomic<float> displayedGrDb_ { 0.0f };
     std::atomic<float> grDisplayOverrideDb_ { -1.0f };
 

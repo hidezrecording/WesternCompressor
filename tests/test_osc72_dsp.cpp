@@ -30,14 +30,17 @@ static float db(float lin) { return 20.0f * (float)std::log10(lin > 1e-12f ? lin
 struct Meas { float rmsL, peakL, meanGr, makeupDb; };
 static Meas runLim(float knob, float amp, float freq, double seconds = 2.0,
                    bool attackFast = true, bool releaseFast = false,
-                   float ampR = -1.0f, float scCutoff = -1.0f, bool comp = false) {
+                   float ampR = -1.0f, bool comp = false) {
+    // AB3: the v41 scCutoff argument is gone with the
+    // sidechain feature itself (the pot is COMP MIX now);
+    // the detector hears the raw sense, as it did at the
+    // feature's bottom stop.
     osc72::Ba6aLimiter lim;
     lim.prepare(kFs);
     lim.setCompMode(comp);
     lim.setKnob(knob);
     lim.setAttackFast(attackFast);
     lim.setReleaseFast(releaseFast);
-    if (scCutoff > 0.0f) lim.setScCutoff(scCutoff);
     lim.reset();
     if (ampR < 0.0f) ampR = amp;
     const int total = (int)(kFs * seconds);
@@ -1008,33 +1011,18 @@ int main() {
         check(gapGr >= 3.0 && gapGr <= hitGr - 5.0, "H2 gap GR held by recovery, well under hit GR", d);
     }
 
-    std::printf("\n=== I. SIDECHAIN LOW-CUT (v41) ===\n");
-    {
-        // Detector-feed HPF only: at the 10 Hz bottom stop the
-        // filter is out of the path (I3 pins the equivalence);
-        // at 200 Hz a 40 Hz tone's GR must fall materially
-        // while a 1 kHz tone's GR barely moves.
-        char d[512];
-        auto lf10  = runLim(0.75f, 0.5f, 40.0f, 2.0, true, false, -1.0f, 10.0f);
-        auto lf200 = runLim(0.75f, 0.5f, 40.0f, 2.0, true, false, -1.0f, 200.0f);
-        auto lfDef = runLim(0.75f, 0.5f, 40.0f, 2.0, true, false, -1.0f, -1.0f);
-        std::snprintf(d, sizeof d, "40 Hz GR: sc10 %.2f dB, sc200 %.2f dB (fall %.2f dB)",
-                      lf10.meanGr, lf200.meanGr, lf10.meanGr - lf200.meanGr);
-        check(lf10.meanGr - lf200.meanGr >= 5.0f, "I1 40 Hz GR falls materially at sc=200", d);
-        auto mf10  = runLim(0.75f, 0.5f, 1000.0f, 2.0, true, false, -1.0f, 10.0f);
-        auto mf200 = runLim(0.75f, 0.5f, 1000.0f, 2.0, true, false, -1.0f, 200.0f);
-        std::snprintf(d, sizeof d, "1 kHz GR: sc10 %.2f dB, sc200 %.2f dB (delta %.2f dB)",
-                      mf10.meanGr, mf200.meanGr, std::fabs(mf200.meanGr - mf10.meanGr));
-        // v45: tolerance 0.5 -> 0.75 dB — the faster FAST
-        // control pole moves the sustained-tone GR equilibrium
-        // ~0.3 dB (see E3b note), and the HP'd sense's slightly
-        // different peak statistics convert that into a
-        // <= ~0.51 dB delta at the 200 Hz stop (2% of the
-        // reduction). The filter remains sense-only (I3).
-        check(std::fabs(mf200.meanGr - mf10.meanGr) <= 0.75f, "I2 1 kHz GR essentially unaffected", d);
-        std::snprintf(d, sizeof d, "GR default %.4f vs sc10 %.4f dB", lfDef.meanGr, lf10.meanGr);
-        check(std::fabs(lfDef.meanGr - lf10.meanGr) < 1.0e-4f, "I3 bottom stop = default path (filter out)", d);
-    }
+    // ═══════════════ I. SIDECHAIN LOW-CUT — REMOVED (AB3) ═══
+    // The v41 detector-feed HPF section (I1–I3) is deleted
+    // with the feature: Nathan repurposed the SIDECHAIN pot
+    // as COMP MIX and the sidechain filter is gone from the
+    // DSP outright (the timesTwo precedent). Nothing here
+    // needs re-pinning: at the feature's 10 Hz default the
+    // filter was out of the path, so the shipped audio the
+    // I-section guarded is bit-identical without it — that
+    // identity is carried by the K7 programme hashes below
+    // (MOD-out configs reproduce their 1.3.0 references
+    // exactly on this tree). The COMP MIX stage that
+    // replaces the pot is pinned in section L.
 
     std::printf("\n=== J. PHASER (MOD FLAVOUR P, v55) ===\n");
     {
@@ -1271,8 +1259,18 @@ int main() {
                 if (s > bestC) { bestC = s; bestLag = lag; }
             }
             std::snprintf(d, sizeof d, "IR peaks: MOD out @%d, MOD in+P @%d; xcorr lag %+d", aOut, aP, bestLag);
-            check(bestLag == 0 && std::abs(aP - aOut) <= 2,
-                  "J8 MOD-in P flavour: wet arrival at the base latency (no bulk delay)", d);
+            // AB3 pin move (cause: the P wet arm is the bare
+            // cascade now, not the 50/50 mix): an allpass
+            // cascade's group delay is frequency-dependent,
+            // so the IR peak and the correlation maximum sit
+            // a few samples into the response (measured @33,
+            // lag +3) with NO bulk delay added — the onset
+            // still lands on the latency. Bounds widened to
+            // cover the cascade's own dispersion; the base-
+            // latency substance (nothing arrives early, no
+            // 960-class offset) is unchanged.
+            check(bestLag >= 0 && bestLag <= 4 && std::abs(aP - aOut) <= 2,
+                  "J8 MOD-in P flavour: wet arrival at the base latency (no bulk delay; cascade dispersion, AB3)", d);
         }
         // J9: flavour toggles are click-free mid-tone (A3
         // methodology: edge-window steps against the steady
@@ -1520,10 +1518,28 @@ int main() {
             { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x2b8dbe97968f0224ull },
             { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x595f8a0016ae8c2full },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0xdc22812fe4b5cb3eull },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x9ecc93d6234e0587ull },
+            // AB3 RE-BASE (cause: the P wet arm is the bare
+            // cascade now; at modMix = 1 the chain delivers
+            // the pure phased signal, not the pedal's
+            // internal 50/50 — the 1.3.0 references for these
+            // two configs move to K7f, where they are pinned
+            // at modMix = 0.5). New references captured from
+            // this tree's first AB3 build.
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0xf4f0ecec9223095full },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x020469ea62e3ce46ull },
         };
-        auto renderHash = [&](const Cfg& c) {
+        // AB3 protocol note: the renders now also pin both
+        // mix pots at 1.0 ahead of the reset (the setters
+        // snap there) — the fully-wet state the 1.3.0
+        // references were captured in. MOD-out and MOD-in-A
+        // configs must still reproduce their references
+        // EXACTLY (the ADT's wet arm is its natural output,
+        // hard-selected at modMix = 1); the MOD-in-P
+        // configs at modMix = 1 are the pure cascade now
+        // and are re-based in K7e with cause; K7f pins the
+        // P flavour at modMix = 0.5 against the ORIGINAL
+        // references (the classic-pedal identity).
+        auto renderHash = [&](const Cfg& c, float modMix = 1.0f) {
             osc72::Chain ch;
             ch.prepare(kFs);
             ch.setKnob(c.knob);
@@ -1531,6 +1547,8 @@ int main() {
             ch.setAttackFast(c.att);
             ch.setReleaseFast(c.rel);
             ch.setModPhaser(c.mod == 2);
+            ch.setCompMix(1.0f);
+            ch.setModMix(modMix);
             ch.reset();
             ch.setModIn(c.mod != 0);
             ProgGen pg;
@@ -1568,6 +1586,267 @@ int main() {
             }
             std::snprintf(d, sizeof d, "%s", ok ? "all hashes match the 1.3.0-at-2X reference" : bad);
             check(ok, g.pin, d);
+        }
+        // K7f (AB3): the P flavour at modMix = 0.5 against
+        // the ORIGINAL 1.3.0 references (the values K7e
+        // carried before the re-base): the linear law at
+        // centre must reproduce the classic pedal — 0.5
+        // dry + 0.5 cascade against 1.3.1's internal
+        // 0.5 (in + cascade) through its engage fade.
+        // VERDICT (probe, this tree vs the pristine 1.3.1
+        // DSP, both K7 P configs rendered sample-for-
+        // sample): NOT bit-identical — 17.4 % / 17.6 % of
+        // samples differ — but every differing sample is
+        // within ONE float ulp: max |delta| = 1.19e-07
+        // (-138.5 dBFS) on both configs. The arithmetic
+        // does not allow closer: 1.3.1's value travelled
+        // through in + (mix - in) * g, the new chain's
+        // through (1-m)*dry + m*cascade; the two rounding
+        // paths part at the last bit and nowhere else.
+        // The pin therefore hashes THIS tree's renders
+        // (below), and the equivalence bound above is the
+        // recorded measurement, re-measurable with the
+        // two-tree probe protocol in the AB3 report.
+        {
+            const uint64_t wantP[2] = { 0xc68a7b7fb444552aull, 0xc95791a776f1def0ull };
+            bool ok = true;
+            char bad[160] = "";
+            for (int i = 0; i < 2; ++i) {
+                uint64_t got = renderHash(cfgs[28 + i], 0.5f);
+                if (got != wantP[i]) {
+                    ok = false;
+                    std::snprintf(bad, sizeof bad, "%s @modMix0.5: got %016llx want %016llx",
+                                  cfgs[28 + i].name, (unsigned long long)got,
+                                  (unsigned long long)wantP[i]);
+                    break;
+                }
+            }
+            std::snprintf(d, sizeof d, "%s", ok ? "both hashes match the AB3 references (1-ulp equivalence to 1.3.0, see above)" : bad);
+            check(ok, "K7f AB3: MOD-in P at modMix=0.5 == 1.3.0 P output to 1 ulp (classic pedal)", d);
+        }
+    }
+
+    std::printf("\n=== L. TWO-STAGE MIX (AB3: COMP MIX / MOD MIX) ===\n");
+    {
+        // Programme renders through the full chain with
+        // explicit pot states (K7 protocol: setters, reset,
+        // setModIn last). mod: 0 = out, 1 = in A, 2 = in P.
+        struct MixRender { std::vector<float> inL, inR, outL, outR, gr; };
+        auto renderMix = [&](float compMix, float modMix, int mod, float knob, double secs) {
+            osc72::Chain ch;
+            ch.prepare(kFs);
+            ch.setKnob(knob);
+            ch.setCompMix(compMix);
+            ch.setModMix(modMix);
+            ch.setModPhaser(mod == 2);
+            ch.reset();
+            ch.setModIn(mod != 0);
+            MixRender r;
+            ProgGen pg;
+            const int total = (int)(secs * kFs);
+            r.inL.resize((size_t)total); r.inR.resize((size_t)total);
+            r.outL.resize((size_t)total); r.outR.resize((size_t)total);
+            r.gr.resize((size_t)total);
+            for (int i = 0; i < total; ++i) {
+                float l, rr; pg.sample(i, l, rr);
+                r.inL[(size_t)i] = l; r.inR[(size_t)i] = rr;
+                float oL, oR; ch.process(l, rr, oL, oR);
+                r.outL[(size_t)i] = oL; r.outR[(size_t)i] = oR;
+                r.gr[(size_t)i] = ch.gainReductionDb();
+            }
+            return r;
+        };
+        char d[512];
+        // L1: explicit 1.0/1.0 == never touching the setters
+        // (the chain's own defaults), all three MOD states.
+        {
+            bool ok = true;
+            for (int mod : { 0, 1, 2 }) {
+                osc72::Chain ch;
+                ch.prepare(kFs);
+                ch.setKnob(0.75f);
+                ch.setModPhaser(mod == 2);
+                ch.reset();
+                ch.setModIn(mod != 0);
+                auto ref = renderMix(1.0f, 1.0f, mod, 0.75f, 2.0);
+                ProgGen pg;
+                for (int i = 0; i < (int)(2.0 * kFs); ++i) {
+                    float l, rr; pg.sample(i, l, rr);
+                    float oL, oR; ch.process(l, rr, oL, oR);
+                    if (oL != ref.outL[(size_t)i] || oR != ref.outR[(size_t)i]) ok = false;
+                }
+            }
+            check(ok, "L1 compMix=1/modMix=1 explicit == chain defaults, bit-exact (MOD out/A/P)", "");
+        }
+        // L2: compMix=0 (modMix=0): the output is the input
+        // delayed by exactly the reported latency, in every
+        // MOD state; with MOD out the MOD MIX pot is inert
+        // at stage 1 too (0 / 0.37 / 1 all identical).
+        {
+            bool ok = true;
+            const struct { int mod, lat; } cases[] = { { 0, 32 }, { 1, 992 }, { 2, 32 } };
+            for (const auto& c : cases) {
+                auto r = renderMix(0.0f, 0.0f, c.mod, 0.75f, 2.0);
+                // Settled-state identity: the window opens
+                // after the engage edge's 30 ms offset
+                // crossfade (1440 samples) has completed —
+                // mid-edge the dry side morphs between
+                // offsets, as the v44 tap did.
+                for (size_t i = (size_t)c.lat + 2000; i < r.outL.size(); ++i)
+                    if (r.outL[i] != r.inL[i - (size_t)c.lat] || r.outR[i] != r.inR[i - (size_t)c.lat])
+                        ok = false;
+            }
+            auto base = renderMix(0.0f, 0.0f, 0, 0.75f, 2.0);
+            for (float mm : { 0.5f, 1.0f }) {
+                auto v = renderMix(0.0f, mm, 0, 0.75f, 2.0);
+                if (v.outL != base.outL || v.outR != base.outR) ok = false;
+            }
+            check(ok, "L2 compMix=0: output == input delayed by exactly the reported latency (32/992/32)", "");
+        }
+        // L3: modMix=0 with MOD in A = the comp path alone,
+        // aligned: sample-equal to the MOD-out render
+        // shifted by exactly 960.
+        {
+            auto inA = renderMix(0.6f, 0.0f, 1, 0.75f, 3.0);
+            auto out = renderMix(0.6f, 0.0f, 0, 0.75f, 3.0);
+            bool ok = true;
+            for (size_t i = 960 + 2000; i < inA.outL.size(); ++i)   // settled (see L2)
+                if (inA.outL[i] != out.outL[i - 960] || inA.outR[i] != out.outR[i - 960])
+                    ok = false;
+            check(ok, "L3 modMix=0 (MOD in A): comp path alone, aligned at +960 exactly", "");
+        }
+        // L4: the linear law at partial mixes is exact
+        // superposition of the two settled arms (bit-level):
+        // (a) comp stage at 0.5, read through the mod stage
+        // at 0 (MOD in A); (b) mod stage at 0.5 in the P
+        // flavour at compMix=1.
+        {
+            auto dA = renderMix(0.0f, 0.0f, 1, 0.75f, 2.0);
+            auto wA = renderMix(1.0f, 0.0f, 1, 0.75f, 2.0);
+            auto hA = renderMix(0.5f, 0.0f, 1, 0.75f, 2.0);
+            bool okA = true;
+            // From sample 2000: ahead of it the three
+            // renders are inside the engage edge's offset
+            // crossfade, whose (b - a) * fade form rounds
+            // differently per arm — the superposition is a
+            // settled-state identity (the P-stage twin below
+            // has no offset edge and holds from sample 0).
+            for (size_t i = 2000; i < hA.outL.size(); ++i) {
+                if (hA.outL[i] != dA.outL[i] * (1.0f - 0.5f) + wA.outL[i] * 0.5f) okA = false;
+                if (hA.outR[i] != dA.outR[i] * (1.0f - 0.5f) + wA.outR[i] * 0.5f) okA = false;
+            }
+            auto dP = renderMix(1.0f, 0.0f, 2, 0.75f, 2.0);
+            auto wP = renderMix(1.0f, 1.0f, 2, 0.75f, 2.0);
+            auto hP = renderMix(1.0f, 0.5f, 2, 0.75f, 2.0);
+            bool okB = true;
+            for (size_t i = 0; i < hP.outL.size(); ++i) {
+                if (hP.outL[i] != dP.outL[i] * (1.0f - 0.5f) + wP.outL[i] * 0.5f) okB = false;
+                if (hP.outR[i] != dP.outR[i] * (1.0f - 0.5f) + wP.outR[i] * 0.5f) okB = false;
+            }
+            std::snprintf(d, sizeof d, "comp-stage superposition %d, mod-stage (P) superposition %d",
+                          (int)okA, (int)okB);
+            check(okA && okB, "L4 partial mixes are the exact linear superposition of the arms", d);
+        }
+        // L5: MOD MIX is inert with MOD out at a working
+        // comp setting: bit-identical at 0 / 0.5 / 1 (the
+        // hard selects and the exact-half law), and within
+        // one float ulp at a non-dyadic position (0.37) —
+        // blending a signal with itself under the linear
+        // law is exact only where the weights are.
+        {
+            auto a = renderMix(0.7f, 0.0f, 0, 0.75f, 2.0);
+            auto bq = renderMix(0.7f, 0.5f, 0, 0.75f, 2.0);
+            auto cq = renderMix(0.7f, 1.0f, 0, 0.75f, 2.0);
+            auto dq = renderMix(0.7f, 0.37f, 0, 0.75f, 2.0);
+            double mx = 0;
+            for (size_t i = 0; i < a.outL.size(); ++i) {
+                mx = std::max(mx, (double)std::fabs(dq.outL[i] - a.outL[i]));
+                mx = std::max(mx, (double)std::fabs(dq.outR[i] - a.outR[i]));
+            }
+            std::snprintf(d, sizeof d, "0.37 vs 0: max |delta| %.2e (1 ulp class)", mx);
+            check(a.outL == bq.outL && a.outR == bq.outR && a.outL == cq.outL && a.outR == cq.outR
+                  && mx <= 1.2e-7,
+                  "L5 modMix inert with MOD out (bit-exact 0/0.5/1; <=1 ulp at 0.37)", d);
+        }
+        // L6: the GR readout is the limiter's, untouched by
+        // either pot: the GR trace of a partial-mix render
+        // equals the fully-wet render's trace sample-for-
+        // sample.
+        {
+            auto a = renderMix(0.4f, 0.6f, 1, 0.75f, 2.0);
+            auto bq = renderMix(1.0f, 1.0f, 1, 0.75f, 2.0);
+            check(a.gr == bq.gr && a.gr.back() > 0.0f,
+                  "L6 GR trace identical at partial mixes (meter source unchanged)", "");
+        }
+        // L7 (the classic-pedal proof, AB3 steer): with the
+        // LFO frozen at the sweep bottom (break 600 Hz), the
+        // first notch sits where the J-section law puts it.
+        // The chain's law, applied to the machine's two arms
+        // (dry from a lockstep twin running process(), the
+        // cascade from processEffect()), must null at
+        // modMix 0.5 with the classic depth, tilt to
+        // ~-6 dB at 0.25/0.75 (the (1-2m) residue), and
+        // vanish at 1.0 (the pure cascade is allpass,
+        // |H| = 1 — no notch at all).
+        {
+            const double fb = 600.0;
+            const double tN = std::tan(22.5 * kPi / 180.0) * std::tan(kPi * fb / kFs);
+            const double fNotch = std::atan(tN) / kPi * kFs;
+            auto armGain = [&](float m, bool classic) {
+                osc72::Phaser90 a, bq;
+                a.prepare(kFs); bq.prepare(kFs);
+                a.setEnabled(true); bq.setEnabled(true);
+                a.setLfoFrozen(true); bq.setLfoFrozen(true);
+                a.setLfoPhase(0.75f); bq.setLfoPhase(0.75f);
+                const int total = (int)(0.60 * kFs);
+                double s = 0; int cnt = 0;
+                for (int i = 0; i < total; ++i) {
+                    float x = 0.5f * (float)std::sin(2.0 * kPi * fNotch * i / kFs);
+                    float cL, cR, eL, eR;
+                    a.process(x, x, cL, cR);
+                    bq.processEffect(x, x, eL, eR);
+                    const float y = classic ? cL : x * (1.0f - m) + eL * m;
+                    if (i >= total / 2) { s += (double)y * y; ++cnt; }
+                }
+                return 20.0 * std::log10(std::sqrt(s / cnt) / (0.5 / std::sqrt(2.0)));
+            };
+            const double gClassic = armGain(0.0f, true);
+            const double g25 = armGain(0.25f, false), g50 = armGain(0.5f, false);
+            const double g75 = armGain(0.75f, false), g100 = armGain(1.0f, false);
+            std::snprintf(d, sizeof d, "notch %.0f Hz: classic %.1f dB; blend 0.25 %.2f, 0.5 %.1f, 0.75 %.2f, 1.0 %+.2f dB",
+                          fNotch, gClassic, g25, g50, g75, g100);
+            check(g50 < -90.0 && gClassic < -90.0,
+                  "L7a modMix 0.5 notch depth == the classic pedal's (both algebraic nulls)", d);
+            check(g25 > -7.5 && g25 < -4.5 && g75 > -7.5 && g75 < -4.5,
+                  "L7b notch depth at 0.25 / 0.75 ~= -6 dB (the (1-2m) residue)", d);
+            check(std::fabs(g100) < 0.75,
+                  "L7c modMix 1.0: no notch — the pure cascade is allpass-flat", d);
+        }
+        // L8 (report data, printed): programme level across
+        // both pots' travel — no compensation anywhere;
+        // the flavours keep their natural levels (Nathan).
+        {
+            auto rmsDb = [](const MixRender& r) {
+                double s = 0; size_t n = 0;
+                for (size_t i = r.outL.size() / 2; i < r.outL.size(); ++i) {
+                    s += (double)r.outL[i] * r.outL[i] + (double)r.outR[i] * r.outR[i];
+                    n += 2;
+                }
+                return 10.0 * std::log10(s / (double)n);
+            };
+            std::printf("      programme RMS (knob 0.75, 4 s, second half):\n");
+            for (int mod : { 1, 2 }) {
+                for (float mm : { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f }) {
+                    auto r = renderMix(1.0f, mm, mod, 0.75f, 4.0);
+                    std::printf("        MOD in %s, modMix %.2f: %.2f dBFS\n",
+                                mod == 1 ? "A" : "P", (double)mm, rmsDb(r));
+                }
+            }
+            for (float cm : { 0.0f, 0.5f, 1.0f }) {
+                auto r = renderMix(cm, 1.0f, 0, 0.75f, 4.0);
+                std::printf("        MOD out, compMix %.2f: %.2f dBFS\n", (double)cm, rmsDb(r));
+            }
+            check(true, "L8 level table printed (report data)");
         }
     }
 

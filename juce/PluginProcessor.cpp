@@ -97,18 +97,33 @@ Osc72Processor::createParameterLayout()
     // Consequence, intended by the directive: a session
     // saved at 1X under 1.3.0 now plays with the 2X
     // ballistics; a session saved at 2X is bit-identical.
-    // Sidechain low-cut (Nathan, 2026-10-15, v41): the strip's
-    // SIDECHAIN pot — a high-pass in the BA-6A's DETECTOR feed
-    // only (audio path untouched), 10–200 Hz on a log taper.
-    // Default 10 Hz = the bottom stop, where the filter is out
-    // of the path and the shipped sound/ballistics hold
-    // exactly. Shown in Hz ("10 Hz".."200 Hz").
+    // REMOVED in the AB3 test build (gui-v60 round): the
+    // 'scCutoff' sidechain low-cut parameter (v41) — Nathan
+    // repurposed the strip's SIDECHAIN pot as COMP MIX
+    // (below) and the detector HPF feature is deleted
+    // outright (the timesTwo precedent: no legacy stub;
+    // APVTS restore ignores the orphaned value — pinned
+    // in the processor suite, P8). SESSION CONSEQUENCE,
+    // intended by the directive: a session saved with the
+    // sidechain raised above 10 Hz loses the detector
+    // HPF — the detector hears the full-range sense, as it
+    // always did at the 10 Hz default (where the shipped
+    // sound is unchanged, bit-for-bit).
+    // COMP MIX (AB3, Nathan): the strip's LEFT top pot —
+    // the parallel-compression blend: dry input (latency-
+    // aligned inside osc72::Chain) against the limiter's
+    // output, linear crossfade. Default 0.5 = 12 o'clock
+    // (Nathan's explicit call — the unit now OPENS at a
+    // half blend, a deliberate change of default sound vs
+    // 1.3.1; 1.0 is the shipped full-compression sound).
+    // Value strings are plain percents ("0".."100"), as
+    // the retired 'mix' pot's were.
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID { "scCutoff", 1 }, "Sidechain Cutoff",
-        juce::NormalisableRange<float>(10.0f, 200.0f, 0.01f, 0.4077f), 10.0f,
+        juce::ParameterID { "compMix", 1 }, "Compression Mix",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
-        [](float v, int) { return juce::String(juce::roundToInt(v)) + " Hz"; },
-        [](const juce::String& t) { return juce::jlimit(10.0f, 200.0f, t.getFloatValue()); }));
+        [](float v, int) { return juce::String(juce::roundToInt(v * 100.0f)); },
+        [](const juce::String& t) { return juce::jlimit(0.0f, 1.0f, t.getFloatValue() / 100.0f); }));
     // Output LINK (Nathan, 2026-10-15, v36): the strip's LINK
     // toggle under the OUTPUT caption. Default LINKED (link is
     // the normal state). EDITOR-SIDE control linkage only:
@@ -118,19 +133,30 @@ Osc72Processor::createParameterLayout()
     // output gains independently, exactly as it reads them.
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID { "outLink", 1 }, "Output Link", true));
-    // MIX (Nathan, 2026-10-15, v38): a wet/dry pot on the
-    // strip, centred under the POWER toggle — full left DRY
-    // (the raw input), full right WET (the full BA-6A
-    // chain). Default 1.0 (fully wet), so the pre-feature
-    // sound is the default sound and every existing pin
-    // holds. The value strings read as a percentage without
-    // the sign ("0".."100"), matching the pot's panel
-    // numerals. The blend itself lives in processBlock:
-    // the dry tap is delayed by the chain's current
-    // latency so the two sides never comb.
+    // REMOVED in the AB3 test build (gui-v60 round): the
+    // v38 whole-chain 'mix' parameter — its single dry/wet
+    // blend is superseded by the two-stage scheme (COMP
+    // MIX above, MOD MIX below), and the processor's dry
+    // tap machinery (v38/v44) is deleted with it: both
+    // blends now live inside osc72::Chain, aligned by
+    // construction. Deleted outright, no stub (the
+    // timesTwo precedent; orphan tolerance pinned, P8).
+    // SESSION CONSEQUENCE, intended by the directive: a
+    // session saved with mix < 1 (some dry blended in)
+    // loads with both new pots at their 0.5 defaults —
+    // NOT sonically equivalent; the old single blend has
+    // no exact two-stage translation, and the saved value
+    // is ignored rather than approximated.
+    // MOD MIX (AB3, Nathan): the strip's RIGHT top pot —
+    // the MOD section's wet amount: the post-comp signal
+    // against the engaged insert's wet arm (the ADT's
+    // natural output; the Phase 90's bare cascade, so 0.5
+    // is the classic pedal), linear crossfade, aligned
+    // inside the chain. Inert while MOD is out. Default
+    // 0.5 = 12 o'clock (Nathan: both pots open centred).
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID { "mix", 1 }, "Mix",
-        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 1.0f,
+        juce::ParameterID { "modMix", 1 }, "Mod Mix",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [](float v, int) { return juce::String(juce::roundToInt(v * 100.0f)); },
         [](const juce::String& t) { return juce::jlimit(0.0f, 1.0f, t.getFloatValue() / 100.0f); }));
@@ -154,6 +180,12 @@ Osc72Processor::createParameterLayout()
 
 void Osc72Processor::prepareToPlay(double sampleRate, int)
 {
+    // AB3: the mix targets go in BEFORE prepare() — its
+    // reset snaps the chain's slews to the held targets,
+    // so a restored session starts settled at its saved
+    // pot state from the first sample (no load glide).
+    chain_.setCompMix(apvts.getRawParameterValue("compMix")->load());
+    chain_.setModMix(apvts.getRawParameterValue("modMix")->load());
     chain_.prepare(sampleRate);
     chain_.setKnob(apvts.getRawParameterValue("allTheWay")->load() / 10.0f);
     compMode_ = apvts.getRawParameterValue("limit")->load() > 0.5f;
@@ -166,23 +198,12 @@ void Osc72Processor::prepareToPlay(double sampleRate, int)
     chain_.setAttackFast(attackFast_);
     releaseFast_ = apvts.getRawParameterValue("releaseFast")->load() > 0.5f;
     chain_.setReleaseFast(releaseFast_);
-    scCutoffHz_ = apvts.getRawParameterValue("scCutoff")->load();
-    chain_.setScCutoff(scCutoffHz_);
     outGainL_ = juce::Decibels::decibelsToGain(
         apvts.getRawParameterValue("outLevelL")->load());
     outGainR_ = juce::Decibels::decibelsToGain(
         apvts.getRawParameterValue("outLevelR")->load());
     powerOn_ = apvts.getRawParameterValue("power")->load() > 0.5f;
     powerMix_ = powerOn_ ? 1.0f : 0.0f;
-    // v38 MIX: start settled at the saved blend and clear
-    // the dry tap's delay lines.
-    mixCur_ = juce::jlimit(0.0f, 1.0f, apvts.getRawParameterValue("mix")->load());
-    dryLineL_.assign(kDryLineSize, 0.0f);
-    dryLineR_.assign(kDryLineSize, 0.0f);
-    dryWrite_ = 0;
-    // v44: the dry tap starts settled on the current target.
-    dryDelayA_ = dryDelayB_ = powerOn_ ? chain_.latencySamples() : 0;
-    dryTapFade_ = 1.0f;
     // Truthful latency: the limiter's oversampling delay
     // (32 samples, v53) always; the ADT insert's base delay
     // (20 ms) adds while mod is in. v19: 0 while POWER is
@@ -195,6 +216,11 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
 {
     juce::ScopedNoDenormals noDenormals;
     chain_.setKnob(apvts.getRawParameterValue("allTheWay")->load() / 10.0f);
+    // AB3: both mix pots ride into the chain every block
+    // (the chain slews them per sample on the retired
+    // whole-chain mix's law, snap included).
+    chain_.setCompMix(apvts.getRawParameterValue("compMix")->load());
+    chain_.setModMix(apvts.getRawParameterValue("modMix")->load());
 
     // Faceplate toggle edges. 'limit' selects the ratio mode
     // (v53: true = COMP / false = LIMIT; the law slews inside
@@ -217,9 +243,9 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
     // v55 MOD flavour edge (A <-> P): the chain's flavour
     // blend crossfades over 30 ms inside Chain::process, and
     // the reported latency tracks the newly selected flavour
-    // at once (992 <-> 32 @ 48 kHz with MOD in) — the v44
-    // dry-tap offset crossfade below follows it, exactly as
-    // it follows a MOD edge.
+    // at once (992 <-> 32 @ 48 kHz with MOD in) — AB3: the
+    // mod stage's offset crossfade inside the chain follows
+    // it, exactly as it follows a MOD edge.
     const bool wantPhaser = apvts.getRawParameterValue("modPhaser")->load() > 0.5f;
     if (wantPhaser != modPhaser_)
     {
@@ -242,15 +268,9 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
         releaseFast_ = wantReleaseFast;
         chain_.setReleaseFast(releaseFast_);
     }
-    // v41 sidechain low-cut: no latency consequence; the DSP
-    // filter's states track continuously, so moves never step
-    // the detector envelope.
-    const float wantSc = apvts.getRawParameterValue("scCutoff")->load();
-    if (wantSc != scCutoffHz_)
-    {
-        scCutoffHz_ = wantSc;
-        chain_.setScCutoff(scCutoffHz_);
-    }
+    // (AB3: the v41 sidechain edge is gone with the
+    // feature — the pot it served is COMP MIX now, pushed
+    // into the chain at the top of this function.)
     // POWER edge (v19): off pulls the whole unit out of the
     // path — reported latency drops to 0 even if MOD is in,
     // and the per-sample fade below takes the audio dry.
@@ -270,35 +290,14 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
     const float targetGainR = juce::Decibels::decibelsToGain(
         apvts.getRawParameterValue("outLevelR")->load());
 
-    // MIX (v38): the blend target for this block, and the dry
-    // tap's read offset — the chain's CURRENT latency, taken
-    // after the toggle edges above have settled it, so dry
-    // and wet are time-aligned at every mix position (MOD
-    // in: 960 samples; out: 0). v44: at the toggle instant
-    // itself the offset now crossfades over 30 ms instead of
-    // stepping (the dryDelayA_/B_ machinery below). The
-    // delay lines are sized defensively here too
-    // (prepareToPlay is the real init).
-    const float blendTarget = juce::jlimit(
-        0.0f, 1.0f, apvts.getRawParameterValue("mix")->load());
-    if ((int) dryLineL_.size() != kDryLineSize)
-    {
-        dryLineL_.assign(kDryLineSize, 0.0f);
-        dryLineR_.assign(kDryLineSize, 0.0f);
-        dryWrite_ = 0;
-    }
-    // v44: on a latency-target change (the MOD or POWER edges
-    // above), start the dry tap's 30 ms offset crossfade from
-    // the old offset to the new one — the same span the ADT
-    // itself takes to engage, so the blend's two sides morph
-    // together.
-    const int dryTarget = powerOn_ ? chain_.latencySamples() : 0;
-    if (dryTarget != dryDelayB_)
-    {
-        dryDelayA_ = dryDelayB_;
-        dryDelayB_ = dryTarget;
-        dryTapFade_ = 0.0f;
-    }
+    // AB3: the v38/v44 processor dry tap is DELETED — both
+    // blends (and the mod stage's offset crossfade, the
+    // v44 machinery's heir) live inside osc72::Chain now,
+    // where the two stages are aligned by construction.
+    // What remains here is the shipped order around the
+    // chain: chain -> O/P LEVEL trims -> the v19 POWER
+    // fade. POWER off is bit-exact bypass at ANY pot
+    // setting: settled off, the chain is skipped entirely.
 
     float* outL = buffer.getWritePointer(0);
     float* outR = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;
@@ -312,65 +311,21 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
     // trims included in the bypass.
     const double sr = getSampleRate() > 0.0 ? getSampleRate() : 48000.0;
     const float fadeCoef = 1.0f - std::exp(-1.0f / (0.025f * (float) sr));
-    const float tapStep = 1.0f / (0.030f * (float) sr);   // v44: dry-tap offset crossfade rate
     const float mixTarget = powerOn_ ? 1.0f : 0.0f;
     for (int i = 0; i < n; ++i)
     {
         outGainL_ += (targetGainL - outGainL_) * 0.0015f;
         outGainR_ += (targetGainR - outGainR_) * 0.0015f;
-        mixCur_ += (blendTarget - mixCur_) * 0.002f;
-        if (std::abs(blendTarget - mixCur_) < 2.0e-5f) mixCur_ = blendTarget;
         powerMix_ += (mixTarget - powerMix_) * fadeCoef;
         if (powerMix_ < 0.0001f) powerMix_ = mixTarget == 0.0f ? 0.0f : powerMix_;
         const float inL = outL[i];
         const float inR = outR ? outR[i] : inL;
-        // v38 MIX dry tap: the input is written to the delay
-        // lines EVERY sample — unit off included — so the
-        // latency-aligned dry signal is always ready for
-        // whatever the pot (or the POWER fade) does next.
-        dryLineL_[(size_t) dryWrite_] = inL;
-        dryLineR_[(size_t) dryWrite_] = inR;
-        // Read at the target offset; during a latency
-        // transition, crossfade from the old offset's read
-        // over 30 ms (v44 — see the header note).
-        const int readB = (dryWrite_ - dryDelayB_) & (kDryLineSize - 1);
-        float dryL = dryLineL_[(size_t) readB];
-        float dryR = dryLineR_[(size_t) readB];
-        if (dryTapFade_ < 1.0f)
-        {
-            const int readA = (dryWrite_ - dryDelayA_) & (kDryLineSize - 1);
-            const float aL = dryLineL_[(size_t) readA];
-            const float aR = dryLineR_[(size_t) readA];
-            dryL = aL + (dryL - aL) * dryTapFade_;
-            dryR = aR + (dryR - aR) * dryTapFade_;
-            dryTapFade_ = std::min(1.0f, dryTapFade_ + tapStep);
-        }
-        dryWrite_ = (dryWrite_ + 1) & (kDryLineSize - 1);
         if (powerMix_ == 0.0f)
             continue;   // unit off: input passes dry, untouched
         float oL, oR;
         chain_.process(inL, inR, oL, oR);
         oL *= outGainL_;
         oR *= outGainR_;
-        // v38 MIX blend: the latency-aligned dry tap against
-        // the full chain + trims path (the wet side). At
-        // mix == 1 the wet passes untouched — the
-        // pre-feature output, bit-for-bit; at mix == 0 the
-        // output is the dry tap alone (the input delayed by
-        // exactly the chain's current latency).
-        if (mixCur_ < 1.0f)
-        {
-            if (mixCur_ <= 0.0f)
-            {
-                oL = dryL;
-                oR = dryR;
-            }
-            else
-            {
-                oL = dryL + (oL - dryL) * mixCur_;
-                oR = dryR + (oR - dryR) * mixCur_;
-            }
-        }
         if (powerMix_ == 1.0f)
         {
             outL[i] = oL;

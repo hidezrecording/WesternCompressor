@@ -504,23 +504,15 @@ public:
     }
     bool compMode() const { return compMode_; }
 
-    // Sidechain low-cut (v41, Nathan): a one-pole high-pass
-    // in the DETECTOR FEED ONLY — per channel on the post-
-    // iron sense signal, ahead of the peak combine. The
-    // audio path never sees it; it only decides how much
-    // low end the 6H6 detector reacts to. 10 Hz is the
-    // bottom stop: there the filter is OUT of the path
-    // (the sense passes bit-identical), so the shipped
-    // 1.1.2 sound and every ballistics pin hold exactly
-    // at the default. The LP states track the sense even
-    // while bypassed, so sweeping up from the stop never
-    // steps the envelope.
-    void setScCutoff(float hz)
-    {
-        scCutoffHz_ = clampf(hz, 10.0f, 200.0f);
-        scCoef_ = tauCoef(1.0f / (6.283185307179586f * scCutoffHz_), fs_);
-    }
-    float scCutoff() const { return scCutoffHz_; }
+    // Sidechain low-cut: REMOVED in the AB3 test build
+    // (gui-v60 round, Nathan) — the strip's SIDECHAIN pot
+    // is repurposed as COMP MIX, so the detector-feed HPF
+    // feature, its setter and its states are deleted
+    // outright (the timesTwo precedent). The detector
+    // hears the raw post-iron sense exactly as it did at
+    // the feature's 10 Hz bottom stop, where the filter
+    // was out of the path — so the shipped 1.3.1 audio
+    // and every ballistics pin hold bit-exact.
 
     void process(float inL, float inR, float& outL, float& outR);
 
@@ -580,9 +572,6 @@ private:
     float lpL_ = 0.0f, lpR_ = 0.0f;
 
     float sag_ = 0.0f;                // B+ sag state (linked), 0..1 — v1.1.2 (study §2.3a)
-    float scCutoffHz_ = 10.0f;        // v41: detector sidechain low-cut (Hz)
-    float scCoef_ = 0.0f;             // v41: its one-pole LP coefficient
-    float scLpL_ = 0.0f, scLpR_ = 0.0f; // v41: per-channel LP states (HP = sense - LP)
     float detEnv_ = 0.0f;             // detector envelope (linear peak)
     float stress_ = 0.0f;             // v45: T4 memory state (dB of sustained GR)
     float lastPreL_ = 0.0f, lastPreR_ = 0.0f; // post-iron, pre-makeup (detector source)
@@ -748,6 +737,21 @@ public:
 
     void process(float inL, float inR, float& outL, float& outR);
 
+    // AB3 (gui-v60 round): the EFFECT-ONLY arm — the bare
+    // allpass cascade, with the same engage fade applied
+    // toward the cascade instead of toward the classic
+    // 50/50 mix (exact input at fade 0, exact cascade at
+    // fade 1). This is the wet arm the chain's MOD MIX
+    // stage blends against the post-comp signal: with the
+    // chain's linear crossfade, modMix 0.5 reproduces the
+    // classic pedal (0.5 dry + 0.5 cascade — the mix this
+    // class's process() has always made internally), 1.0
+    // is the pure phased signal and 0.25/0.75 tilt the
+    // comb either way. process() above is unchanged: the
+    // machine's classic self-contained output, still what
+    // the J-suite pins.
+    void processEffect(float inL, float inR, float& outL, float& outR);
+
     // Introspection (tests)
     float rateHz() const { return kPhaserRateHz; }
     float lfoPhase() const { return lfoPhase_; }
@@ -760,6 +764,12 @@ public:
 
 private:
     enum class State { off, fadingIn, on, fadingOut };
+    // One pass of the machine, both output arms (AB3):
+    // process() takes the classic arm, processEffect()
+    // the cascade arm; the state advances exactly once
+    // per call, identically for both.
+    void processImpl(float inL, float inR, float& outL, float& outR,
+                     float& effL, float& effR);
     float stage(float x, int ch, int st, float c) {
         float& x1 = sx_[ch][st];
         float& y1 = sy_[ch][st];
@@ -799,6 +809,14 @@ private:
 // output bit-for-bit. Latency follows the SELECTED flavour:
 // the ADT base offset with A, the oversampling figure alone
 // with P.
+// AB3 (gui-v60 test round): the path is restructured into
+// TWO aligned blend stages around the inserts — COMP MIX
+// (input delayed 32 vs the limiter output) ahead of them,
+// MOD MIX (the post-comp signal delayed by the inserts'
+// own latency vs the engaged flavour's wet arm) behind
+// them; see the setters in the class for the full note.
+// The reported latency is unchanged (32 / 992-A / 32-P)
+// and does not depend on either pot.
 // ─────────────────────────────────────────────────────────────────────
 
 class Chain {
@@ -823,8 +841,9 @@ public:
     // true, LIMIT = false.
     void setCompMode(bool comp) { limiter_.setCompMode(comp); }
     bool compMode() const { return limiter_.compMode(); }
-    void setScCutoff(float hz) { limiter_.setScCutoff(hz); }
-    float scCutoff() const { return limiter_.scCutoff(); }
+    // Sidechain low-cut: REMOVED in the AB3 test build
+    // with the limiter's (see Ba6aLimiter) — the pot is
+    // COMP MIX now (below); no pass-through survives.
     void setModIn(bool in) { adt_.setEnabled(in); phaser_.setEnabled(in); }
     bool modIn() const { return adt_.enabled(); }
 
@@ -834,6 +853,36 @@ public:
     // flavour immediately, as it does for the MOD toggle.
     void setModPhaser(bool phaser) { modPhaser_ = phaser; }
     bool modPhaser() const { return modPhaser_; }
+
+    // ── AB3 (gui-v60 round, Nathan): the two strip pots,
+    // repurposed as a TWO-STAGE pair of linear crossfades
+    // (weights sum to 1 at every position):
+    //   COMP MIX (the ex-SIDECHAIN pot): dry input delayed
+    //     by the limiter's own 32 samples against the
+    //     limiter's output — parallel compression.
+    //   MOD MIX (the ex-MIX pot): the post-comp signal
+    //     delayed by (chain latency − 32) against the
+    //     engaged insert's WET ARM — for the ADT its
+    //     natural output as authored (SRC centre + decks);
+    //     for the Phase 90 the bare allpass cascade, so
+    //     this pot at 0.5 IS the classic pedal (0.5 dry +
+    //     0.5 cascade), at 1.0 the pure phased signal.
+    // Both targets slew per sample on the retired whole-
+    // chain mix's law (one-pole 0.002, snap 2e-5) and snap
+    // to their targets in reset(); the extremes are hard
+    // selects, so compMix = 1 passes the limiter output
+    // untouched and modMix = 1 the wet arm untouched. With
+    // MOD out the inserts return their input bit-exact, so
+    // the MOD MIX pot is inert. Chain-level defaults are
+    // 1.0/1.0 (fully wet both stages — the DSP suite's
+    // classic pins address the chain directly); the
+    // PROCESSOR's parameters default to 0.5/0.5 (12
+    // o'clock, Nathan) and are pushed into the chain on
+    // prepare and on every block.
+    void setCompMix(float m) { compMixTarget_ = clampf(m, 0.0f, 1.0f); }
+    float compMix() const { return compMixTarget_; }
+    void setModMix(float m) { modMixTarget_ = clampf(m, 0.0f, 1.0f); }
+    float modMix() const { return modMixTarget_; }
 
     int latencySamples() const
     {
@@ -856,12 +905,45 @@ public:
     void process(float inL, float inR, float& outL, float& outR);
 
 private:
+    // AB3: the mod stage's dry-side offset — the part of
+    // the reported latency the inserts themselves add
+    // (960 for MOD-in A, 0 otherwise).
+    int modExtraTarget() const
+    {
+        return (adt_.enabled() && !modPhaser_) ? adt_.latencySamples() : 0;
+    }
+    float readCompRing(const std::vector<float>& ring, int delay) const
+    {
+        return ring[(size_t)((compWrite_ - delay) & compMask_)];
+    }
+
     double fs_ = 48000.0;
     Ba6aLimiter limiter_;
     AdtChain adt_;
     Phaser90 phaser_;
     bool modPhaser_ = false;   // v55: false = A (ADT), true = P (phaser)
     float modBlend_ = 0.0f;    // v55: flavour blend, 0 = A .. 1 = P
+    // AB3 two-stage mix state (see the setters above).
+    float compMixTarget_ = 1.0f, compMixCur_ = 1.0f;
+    float modMixTarget_ = 1.0f, modMixCur_ = 1.0f;
+    // Stage 1's dry tap: the raw input delayed by exactly
+    // the limiter's oversampling delay (32 host samples,
+    // constant), so no edge treatment is ever needed.
+    static constexpr int kDry32Size = 128;   // power of two, >> 32
+    float dry32L_[kDry32Size] = {}, dry32R_[kDry32Size] = {};
+    int dry32Write_ = 0;
+    // Stage 2's dry tap: the post-comp signal's ring,
+    // read at the current mod offset. Sized in prepare()
+    // for the ADT's 20 ms plus margin (power of two).
+    std::vector<float> compRingL_, compRingR_;
+    int compMask_ = 0;
+    int compWrite_ = 0;
+    // The v44 offset crossfade, moved into the chain:
+    // when the offset target changes (MOD toggle, A/P
+    // flavour edge) reads crossfade old -> new over
+    // 30 ms — the inserts' own engagement span.
+    int modDelayA_ = 0, modDelayB_ = 0;
+    float modTapFade_ = 1.0f;   // 1 = settled on modDelayB_
 };
 
 } // namespace osc72

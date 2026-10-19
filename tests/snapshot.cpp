@@ -13,6 +13,14 @@
 //                    selector and its 'timesTwo' parameter
 //                    are gone (the 2X ballistics are baked
 //                    in), so the token no longer exists.
+//   compmix=<0..1> = AB3 (gui-v60): park the COMP MIX pot
+//                    (left top pot, 'compMix') at a value.
+//   modmix=<0..1>  = AB3 (gui-v60): park the MOD MIX pot
+//                    (right top pot, 'modMix') at a value.
+//                    Both params DEFAULT to 0.5 (12
+//                    o'clock), so the default still already
+//                    shows both pots straight up; the
+//                    tokens exist for explicit provenance.
 //   limitout       = 'limit' toggle OUT (default: in)
 //                    v53: the toggle is the RATIO mode switch —
 //                    IN (default here) renders COMP (lever up),
@@ -281,6 +289,25 @@
 // identical to 1.3.0 with 2X engaged (suite K7). The
 // RATIO word's line is plain silk again — the face is
 // the gui-v57 face (build-report-v64.md).
+// v60 shots: gui-v60-a.png ("knob=5 limitout" — the
+// default opening state: INPUT 5, LIMIT, MOD out, and
+// BOTH MIX pots at 12 o'clock on their 0.5 defaults) /
+// gui-v60-b.png ("knob=5 limitout warble phaser
+// compmix=0.5 modmix=0.5" — MOD in, P selected, both
+// pots centred).
+// v60 change (Nathan, AB3 TEST build — not a release):
+// the strip's top pots are repurposed: SIDECHAIN ->
+// COMP MIX ('compMix'), MIX -> MOD MIX ('modMix');
+// the sidechain HPF and the whole-chain 'mix' are
+// deleted. Face: the top word line reads COMP / MOD,
+// the left pot's sweep marks become '0'/'100', the
+// word MIX stands beneath EACH top pot (caps top 9
+// virtual px under the pot assembly's lowest ink,
+// baseline 243), and OUTPUT rises by the same rule
+// (baseline 363 -> 340, onto the L/R line). Pots,
+// sizes and positions are otherwise unchanged; the
+// diff vs gui-v59 is confined to the strip's label /
+// sweep-mark ink.
 // v51 shots: gui-v51-a.png ("knob=5 limitout" — the
 // default opening state, as v50-a) / gui-v51-b.png
 // ("knob=5 limitout gr=12" — driven at exactly 12 dB so
@@ -452,12 +479,18 @@ int main(int argc, char* argv[]) {
     bool phaserOn = false;     // gui-v53: 'modPhaser' (default A)
     float knobVal = 7.0f;      // v33: knob=<0..10> token
     float grOverride = 0.0f;   // v33: gr=<dB> token
+    float compMixVal = -1.0f;  // AB3: compmix=<0..1> token (<0 = leave at the 0.5 default)
+    float modMixVal = -1.0f;   // AB3: modmix=<0..1> token
     for (int i = 2; i < argc; ++i) {
         const juce::String v(argv[i]);
         if (v.startsWith("knob=")) {
             knobVal = v.substring(5).getFloatValue();
         } else if (v.startsWith("gr=")) {
             grOverride = v.substring(3).getFloatValue();
+        } else if (v.startsWith("compmix=")) {
+            compMixVal = v.substring(8).getFloatValue();
+        } else if (v.startsWith("modmix=")) {
+            modMixVal = v.substring(7).getFloatValue();
         } else if (v == "yellow") {
             osc72gui::setKnobColour(osc72gui::KnobColour::yellow);
             osc72gui::setBeatenUp(true);
@@ -490,6 +523,12 @@ int main(int argc, char* argv[]) {
         p->setValueNotifyingHost(limitIn ? 1.0f : 0.0f);
     if (auto* p = proc.apvts.getParameter("power"))
         p->setValueNotifyingHost(powerOn ? 1.0f : 0.0f);
+    if (compMixVal >= 0.0f)
+        if (auto* p = proc.apvts.getParameter("compMix"))
+            p->setValueNotifyingHost(compMixVal);
+    if (modMixVal >= 0.0f)
+        if (auto* p = proc.apvts.getParameter("modMix"))
+            p->setValueNotifyingHost(modMixVal);
 
     // Run some audio through so the DSP state is live.
     juce::AudioBuffer<float> buf(2, 4096);

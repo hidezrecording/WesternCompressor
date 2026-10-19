@@ -2390,33 +2390,32 @@ Osc72Editor::Osc72Editor(Osc72Processor& p) : AudioProcessorEditor(&p), proc_(p)
         proc_.apvts, "outLevelL", outLevelL_);
     outAttR_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         proc_.apvts, "outLevelR", outLevelR_);
-    // MIX pot (v38, Nathan): the strip's wet/dry pot — the
-    // same small knob as the O/P LEVEL pair, configured the
-    // same way; double-click returns to fully WET (1.0), the
-    // pot's home and the unit's default sound. Its silk
-    // (dots, '0'/'100' numerals, MIX word) is in paint();
-    // bounds in resized().
-    mixKnob_.setLookAndFeel(&smallLaf_);
-    mixKnob_.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    mixKnob_.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-    mixKnob_.setRotaryParameters(kPi * 1.25f, kPi * 2.75f, true);
-    mixKnob_.setDoubleClickReturnValue(true, 1.0);
-    addAndMakeVisible(mixKnob_);
-    mixAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        proc_.apvts, "mix", mixKnob_);
-    // SIDECHAIN pot (v41, Nathan): the detector low-cut —
-    // same small knob, same configuration; double-click
-    // returns to 10 Hz (the bottom stop: filter out, the
-    // unit's default ears). Silk in paint(), bounds in
-    // resized().
-    scKnob_.setLookAndFeel(&smallLaf_);
-    scKnob_.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    scKnob_.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-    scKnob_.setRotaryParameters(kPi * 1.25f, kPi * 2.75f, true);
-    scKnob_.setDoubleClickReturnValue(true, 10.0);
-    addAndMakeVisible(scKnob_);
-    scAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        proc_.apvts, "scCutoff", scKnob_);
+    // AB3 (gui-v60, Nathan): the strip's two top pots are
+    // repurposed — the RIGHT pot (v38's MIX, v41's right
+    // column) is now MOD MIX, bound to 'modMix'; the LEFT
+    // pot (v41's SIDECHAIN) is now COMP MIX, bound to
+    // 'compMix'. Same small knobs, same configuration;
+    // double-click returns to CENTRE (0.5), both pots'
+    // home and the unit's default opening state (Nathan:
+    // both pots open at 12 o'clock). Their silk (COMP /
+    // MOD words above, MIX beneath each, '0'/'100'
+    // numerals) is in paint(); bounds in resized().
+    modMixKnob_.setLookAndFeel(&smallLaf_);
+    modMixKnob_.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    modMixKnob_.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    modMixKnob_.setRotaryParameters(kPi * 1.25f, kPi * 2.75f, true);
+    modMixKnob_.setDoubleClickReturnValue(true, 0.5);
+    addAndMakeVisible(modMixKnob_);
+    modMixAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        proc_.apvts, "modMix", modMixKnob_);
+    compMixKnob_.setLookAndFeel(&smallLaf_);
+    compMixKnob_.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    compMixKnob_.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    compMixKnob_.setRotaryParameters(kPi * 1.25f, kPi * 2.75f, true);
+    compMixKnob_.setDoubleClickReturnValue(true, 0.5);
+    addAndMakeVisible(compMixKnob_);
+    compMixAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        proc_.apvts, "compMix", compMixKnob_);
     linkageArmed_ = true;   // v36: pot linkage live from here (see the LINK block above)
     startTimerHz(60);   // v3: 30 -> 60 Hz — the eye's display ballistics (below) now track the limiter's GR envelope instead of sweeping lazily (Nathan: the old motion read like a VU)
 }
@@ -2427,8 +2426,8 @@ Osc72Editor::~Osc72Editor()
     knob_.setLookAndFeel(nullptr);
     outLevelL_.setLookAndFeel(nullptr);
     outLevelR_.setLookAndFeel(nullptr);
-    mixKnob_.setLookAndFeel(nullptr);
-    scKnob_.setLookAndFeel(nullptr);
+    modMixKnob_.setLookAndFeel(nullptr);
+    compMixKnob_.setLookAndFeel(nullptr);
 }
 
 void Osc72Editor::timerCallback()
@@ -2605,7 +2604,7 @@ void Osc72Editor::resized()
     // the pot's top dot (ring R 30, dot top now at virtual
     // 158) clear with a small honest gap, and the label
     // line takes priority over the pot's exact y-186 seat.
-    mixKnob_.setBounds(567, 182, 54, 54);           // centre (594, 209) = virtual (540, 190)
+    modMixKnob_.setBounds(567, 182, 54, 54);        // centre (594, 209) = virtual (540, 190) — superseded by the v41 grid bounds below
     outLevelL_.setBounds(518, 304, 54, 54);         // centre (545, 331) = virtual (495, 301) — on the knob-centre line
     outLevelR_.setBounds(616, 304, 54, 54);         // centre (643, 331) = virtual (584, 301) — on the knob-centre line
     // v41 (Nathan): the strip's small pots become a 2x2 GRID
@@ -2617,8 +2616,8 @@ void Osc72Editor::resized()
     // L / R, centres unmoved (virtual y 300). Top row
     // (virtual y 190, the v39 MIX row): SIDECHAIN takes the
     // left column; MIX moves right into the R column.
-    scKnob_.setBounds(521, 184, 50, 50);            // centre (546, 209) = virtual (496, 190) — left column, top row
-    mixKnob_.setBounds(617, 184, 50, 50);           // centre (642, 209) = virtual (584, 190) — right column, top row (was (540, 190) in v38–v40)
+    compMixKnob_.setBounds(521, 184, 50, 50);       // centre (546, 209) = virtual (496, 190) — left column, top row (AB3: COMP MIX)
+    modMixKnob_.setBounds(617, 184, 50, 50);        // centre (642, 209) = virtual (584, 190) — right column, top row (AB3: MOD MIX; was (540, 190) in v38–v40)
     outLevelL_.setBounds(521, 305, 50, 50);         // centre (546, 330) = virtual (496, 300) — left column, bottom row
     outLevelR_.setBounds(617, 305, 50, 50);         // centre (642, 330) = virtual (584, 300) — right column, bottom row
     eyeArea_ = juce::Rectangle<int>(128, 16, 232, 122);  // v4: the GR display window + its glow (frame virtual (124, 41, 192, 70)); x2 in audio v2. v36: extended up — the GAIN REDUCTION caption now rides ABOVE the display (ink virtual y ~20..31) inside this repaint region. v45: the frame is shorter (virtual (124, 49.75, 192, 52.5)) — it sits entirely inside this region, so the rect is unchanged. v46: the frame grows to (124, 45.8, 192, 60.4) — still entirely inside, rect unchanged
@@ -3527,8 +3526,19 @@ void Osc72Editor::paint(juce::Graphics& g)
     // (~374.7) keeps the same ~11.7 the module's plates
     // keep under LIMIT/MOD, and the plate-to-BITEY air
     // (11.5) is unchanged. Audit in build-report-v38.md.
+    // AB3 (gui-v60, Nathan): the caption rises to sit the
+    // SAME measured distance under the OUTPUT pots as the
+    // new MIX words keep under theirs — 9 virtual px
+    // below the pot assembly's lowest ink (the pots'
+    // body/dot ring bottom measures 321 on the gui-v59
+    // still), so the baseline lands at 340 and the word
+    // now reads on the L/R letters' own line (L · OUTPUT
+    // · R, baselines 341/340/341 — no ink touches: OUTPUT
+    // spans ~512..568, L ends ~502, R starts ~578). The
+    // LINK cluster below does not move; the word's ink
+    // bottom (340) clears its plate top (~374.7) by ~35.
     drawTrackedText(g, "OUTPUT", capsFont(14.5f), 0.6f,
-                    scx, 363.0f, Anchor::centre);
+                    scx, 340.0f, Anchor::centre);
 
     // ── Strip LINK cluster (v36; dropped to the bottom
     //    row in v37, Nathan) ─────────────────────────────
@@ -3580,6 +3590,24 @@ void Osc72Editor::paint(juce::Graphics& g)
     // SIDECHAIN, at the arc ends (225° / 495°) on R 42.
     // v42 (Nathan): the low-cut glyph is DELETED — the
     // SIDECHAIN word alone centres on 496 (see below).
+    // AB3 (gui-v60, Nathan): the top row is repurposed —
+    // the word line now reads COMP (left, the ex-SIDECHAIN
+    // pot = compression mix) and MOD (right, the ex-MIX
+    // pot = mod mix), same font/tracking/baseline; both
+    // pots take the '0'/'100' sweep numerals (the left
+    // pot's '10'/'200' Hz marks go with the deleted
+    // sidechain feature); and the word MIX stands beneath
+    // EACH top pot, centred on it, under its sweep marks —
+    // pulled up close under the pot: the pot assembly's
+    // lowest ink (the numerals' bottom) measures 224 on
+    // the gui-v59 still, the MIX caps top sits 9 virtual
+    // px below it at 233, baseline 243 (capsFont 14.5,
+    // measured cap height 10). Each column reads COMP ·
+    // pot · MIX and MOD · pot · MIX — both pots labelled
+    // just "MIX" beneath, Nathan's explicit call (left =
+    // compression, right = mod, by position). The
+    // OUTPUT word above keeps the same 9 px rule under
+    // its own pots.
     {
         auto gridPotSilk = [&](float cx, const char* lo, const char* hi) {
             for (int i = 0; i <= 4; ++i) {
@@ -3598,19 +3626,20 @@ void Osc72Editor::paint(juce::Graphics& g)
                             n1.x, n1.y + 4.0f, Anchor::centre);
         };
 
-        // SIDECHAIN word. v41 drew it as one centred unit
-        // with a low-cut (high-pass) symbol glyph beside it;
-        // v42 (Nathan): the glyph goes — "no one's going to
-        // be confused about what that knob actually does" —
-        // and the word alone centres on its pot (x 496),
-        // exactly as MIX centres on its own (x 584).
         g.setColour(kSilk);
-        drawTrackedText(g, "SIDECHAIN", capsFont(14.5f), 0.6f,
+        drawTrackedText(g, "COMP", capsFont(14.5f), 0.6f,
                         496.0f, 149.0f, Anchor::centre);
-        drawTrackedText(g, "MIX", capsFont(14.5f), 0.6f,
+        drawTrackedText(g, "MOD", capsFont(14.5f), 0.6f,
                         584.0f, 149.0f, Anchor::centre);
-        gridPotSilk(496.0f, "10", "200");
+        gridPotSilk(496.0f, "0", "100");
         gridPotSilk(584.0f, "0", "100");
+        // MIX beneath each top pot (AB3 — see the block
+        // comment above): caps top 9 vp under the pot
+        // assembly's lowest ink, centred on the pot.
+        drawTrackedText(g, "MIX", capsFont(14.5f), 0.6f,
+                        496.0f, 243.0f, Anchor::centre);
+        drawTrackedText(g, "MIX", capsFont(14.5f), 0.6f,
+                        584.0f, 243.0f, Anchor::centre);
     }
 
     for (float kcx : { 496.0f, 584.0f }) {

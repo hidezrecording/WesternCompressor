@@ -41,7 +41,6 @@ void Ba6aLimiter::prepare(double sampleRate)
     }
     lawCoef_ = tauCoef(kBa6aLawSlewTauSec, fs_);
 
-    setScCutoff(scCutoffHz_);   // v41: refresh the sidechain coefficient at the real rate
     ironInL_.prepare(fs_);  ironInR_.prepare(fs_);
     ironMidL_.prepare(fs_); ironMidR_.prepare(fs_);
     ironOutL_.prepare(fs_); ironOutR_.prepare(fs_);
@@ -64,7 +63,6 @@ void Ba6aLimiter::reset()
     hpLpL_ = hpLpR_ = 0.0f;
     lpL_ = lpR_ = 0.0f;
     sag_ = 0.0f;
-    scLpL_ = scLpR_ = 0.0f;
     detEnv_ = 0.0f;
     lastPreL_ = lastPreR_ = 0.0f;
     prePeak_ = 0.0f;
@@ -218,18 +216,12 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
     // the loop's inherent one-sample delay (the analogue loop
     // is continuous; one sample at audio rates is the honest
     // discrete equivalent and keeps the loop stable). ──
-    // v41 sidechain low-cut: the per-channel LP states track
-    // the sense every sample (engaging the filter never
-    // steps); above the 10 Hz bottom stop the detector hears
-    // sense − LP (the high-passed sense), at the stop it
-    // hears the raw sense exactly as before the feature.
-    scLpL_ += (lastPreL_ - scLpL_) * scCoef_;
-    scLpR_ += (lastPreR_ - scLpR_) * scCoef_;
-    const bool scIn = scCutoffHz_ > 10.5f;
-    const float senL = scIn ? lastPreL_ - scLpL_ : lastPreL_;
-    const float senR = scIn ? lastPreR_ - scLpR_ : lastPreR_;
+    // AB3: the v41 sidechain low-cut is deleted with its
+    // pot (repurposed as COMP MIX) — the detector hears
+    // the raw sense, exactly as it did at the feature's
+    // 10 Hz bottom stop, so this line is the shipped one.
     const float peak = lawSense_
-                     * std::max(std::fabs(senL), std::fabs(senR));
+                     * std::max(std::fabs(lastPreL_), std::fabs(lastPreR_));
     const bool detRising = peak > detEnv_;
     const float detTau = detRising
         ? (attackFast_ ? kBa6aDetFastTauSec : ba6aDetSlowTau(peak, detEnv_))
@@ -516,7 +508,8 @@ void Phaser90::setEnabled(bool on)
     state_ = on ? State::fadingIn : State::fadingOut;
 }
 
-void Phaser90::process(float inL, float inR, float& outL, float& outR)
+void Phaser90::processImpl(float inL, float inR, float& outL, float& outR,
+                           float& effL, float& effR)
 {
     // The LFO turns continuously, engaged or not (the
     // pedal's oscillator never stops), and the stages track
@@ -552,6 +545,8 @@ void Phaser90::process(float inL, float inR, float& outL, float& outR)
     if (state_ == State::off) {
         outL = inL;
         outR = inR;
+        effL = inL;   // AB3: the effect arm at fade 0 is the
+        effR = inR;   // input exactly, like the classic arm.
         return;
     }
     const float step = 1.0f / (kPhaserFadeSec * (float)fs_);
@@ -566,6 +561,28 @@ void Phaser90::process(float inL, float inR, float& outL, float& outR)
     const float g = fadeGain_;
     outL = inL + (mixL - inL) * g;
     outR = inR + (mixR - inR) * g;
+    // AB3 effect arm: the same engage fade, taken toward
+    // the bare cascade — hard-selected at the extremes so
+    // a settled machine delivers the cascade bit-for-bit
+    // (at g=1) and the input bit-for-bit (at g=0).
+    if (g >= 1.0f)      { effL = wetL; effR = wetR; }
+    else if (g <= 0.0f) { effL = inL;  effR = inR; }
+    else {
+        effL = inL + (wetL - inL) * g;
+        effR = inR + (wetR - inR) * g;
+    }
+}
+
+void Phaser90::process(float inL, float inR, float& outL, float& outR)
+{
+    float effL, effR;
+    processImpl(inL, inR, outL, outR, effL, effR);
+}
+
+void Phaser90::processEffect(float inL, float inR, float& outL, float& outR)
+{
+    float classicL, classicR;
+    processImpl(inL, inR, classicL, classicR, outL, outR);
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -578,6 +595,14 @@ void Chain::prepare(double sampleRate)
     limiter_.prepare(fs_);
     adt_.prepare(fs_);
     phaser_.prepare(fs_);
+    // AB3: the mod stage's dry ring — sized for the ADT's
+    // 20 ms offset at this rate plus margin, power of two.
+    int need = (int)std::ceil(0.025 * fs_) + 64;
+    int sz = 256;
+    while (sz < need) sz <<= 1;
+    compRingL_.assign((size_t)sz, 0.0f);
+    compRingR_.assign((size_t)sz, 0.0f);
+    compMask_ = sz - 1;
     reset();
 }
 
@@ -587,6 +612,19 @@ void Chain::reset()
     adt_.reset();
     phaser_.reset();
     modBlend_ = modPhaser_ ? 1.0f : 0.0f;
+    // AB3: both mix slews snap to their targets and the
+    // dry taps start settled — a fresh instance is at its
+    // panel state from the first sample, no load glide
+    // (the retired whole-chain mix's reset discipline).
+    compMixCur_ = compMixTarget_;
+    modMixCur_ = modMixTarget_;
+    for (int i = 0; i < kDry32Size; ++i) dry32L_[i] = dry32R_[i] = 0.0f;
+    dry32Write_ = 0;
+    std::fill(compRingL_.begin(), compRingL_.end(), 0.0f);
+    std::fill(compRingR_.begin(), compRingR_.end(), 0.0f);
+    compWrite_ = 0;
+    modDelayA_ = modDelayB_ = modExtraTarget();
+    modTapFade_ = 1.0f;
 }
 
 void Chain::process(float inL, float inR, float& outL, float& outR)
@@ -596,14 +634,45 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // which lives inside the limiter's gain computer).
     float midL, midR;
     limiter_.process(inL, inR, midL, midR);
-    // MOD insert: both machines run continuously; the
-    // flavour blend selects between them. While MOD is out
-    // each returns its input bit-exact once settled (the ADT
-    // by its state machine, the phaser likewise), so the
-    // blend is bit-exact dry in either flavour.
+
+    // ── AB3 stage 1 — COMP MIX: the raw input delayed by
+    // exactly the limiter's 32-sample oversampling delay
+    // (a fixed tap, written every sample) against the
+    // limiter's output. Linear crossfade, hard selects at
+    // the extremes: at 1 the limiter output passes
+    // untouched (the shipped path), at 0 the output of
+    // this stage is the input delayed by exactly 32. ──
+    dry32L_[dry32Write_] = inL;
+    dry32R_[dry32Write_] = inR;
+    const int rd32 = (dry32Write_ - limiter_.osDelaySamples()) & (kDry32Size - 1);
+    const float dryL = dry32L_[rd32], dryR = dry32R_[rd32];
+    dry32Write_ = (dry32Write_ + 1) & (kDry32Size - 1);
+    compMixCur_ += (compMixTarget_ - compMixCur_) * 0.002f;
+    if (std::fabs(compMixTarget_ - compMixCur_) < 2.0e-5f)
+        compMixCur_ = compMixTarget_;
+    float compL, compR;
+    if (compMixCur_ >= 1.0f)      { compL = midL; compR = midR; }
+    else if (compMixCur_ <= 0.0f) { compL = dryL; compR = dryR; }
+    else {
+        compL = dryL * (1.0f - compMixCur_) + midL * compMixCur_;
+        compR = dryR * (1.0f - compMixCur_) + midR * compMixCur_;
+    }
+
+    // MOD insert: both machines run continuously on the
+    // post-comp signal; the flavour blend selects between
+    // their WET ARMS. While MOD is out each arm returns
+    // its input bit-exact once settled (the ADT by its
+    // state machine, the phaser likewise), so the stage-2
+    // blend is the post-comp signal alone in either
+    // flavour — the MOD MIX pot is inert, as briefed.
+    //   A arm: the ADT's natural output (SRC centre +
+    //     decks), exactly as authored in 1.3.1.
+    //   P arm: the phaser's bare cascade (processEffect)
+    //     — the pot re-creates the classic 50/50 pedal at
+    //     0.5, the pure phased signal at 1.0.
     float aL, aR, pL, pR;
-    adt_.process(midL, midR, aL, aR);
-    phaser_.process(midL, midR, pL, pR);
+    adt_.process(compL, compR, aL, aR);
+    phaser_.processEffect(compL, compR, pL, pR);
     const float target = modPhaser_ ? 1.0f : 0.0f;
     if (modBlend_ != target) {
         const float step = 1.0f / (kAdtFadeSec * (float)fs_);
@@ -614,13 +683,57 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // Hard-select at the extremes: a settled flavour is its
     // own output, bit-for-bit (the subtractive blend is the
     // transition law, as in the inserts themselves).
+    float wetL, wetR;
     if (modBlend_ <= 0.0f) {
-        outL = aL; outR = aR;
+        wetL = aL; wetR = aR;
     } else if (modBlend_ >= 1.0f) {
-        outL = pL; outR = pR;
+        wetL = pL; wetR = pR;
     } else {
-        outL = aL + (pL - aL) * modBlend_;
-        outR = aR + (pR - aR) * modBlend_;
+        wetL = aL + (pL - aL) * modBlend_;
+        wetR = aR + (pR - aR) * modBlend_;
+    }
+
+    // ── AB3 stage 2 — MOD MIX: the post-comp signal
+    // delayed by the inserts' own latency (the offset
+    // target tracks MOD toggle and A/P flavour; a change
+    // starts the v44-style 30 ms offset crossfade between
+    // the old and new reads) against the wet arm. Linear
+    // crossfade, hard selects at the extremes: at 0 the
+    // comp path alone, aligned to the reported latency;
+    // at 1 the wet arm untouched. ──
+    compRingL_[(size_t)compWrite_] = compL;
+    compRingR_[(size_t)compWrite_] = compR;
+    const int extra = modExtraTarget();
+    if (extra != modDelayB_) {
+        modDelayA_ = modDelayB_;
+        modDelayB_ = extra;
+        modTapFade_ = 0.0f;
+    }
+    float modDryL, modDryR;
+    if (modTapFade_ >= 1.0f && modDelayB_ == 0) {
+        modDryL = compL; modDryR = compR;   // settled, no offset
+    } else {
+        const float bL = readCompRing(compRingL_, modDelayB_);
+        const float bR = readCompRing(compRingR_, modDelayB_);
+        if (modTapFade_ >= 1.0f) {
+            modDryL = bL; modDryR = bR;
+        } else {
+            const float aLagL = readCompRing(compRingL_, modDelayA_);
+            const float aLagR = readCompRing(compRingR_, modDelayA_);
+            modDryL = aLagL + (bL - aLagL) * modTapFade_;
+            modDryR = aLagR + (bR - aLagR) * modTapFade_;
+            modTapFade_ = std::min(1.0f, modTapFade_ + 1.0f / (kAdtFadeSec * (float)fs_));
+        }
+    }
+    compWrite_ = (compWrite_ + 1) & compMask_;
+    modMixCur_ += (modMixTarget_ - modMixCur_) * 0.002f;
+    if (std::fabs(modMixTarget_ - modMixCur_) < 2.0e-5f)
+        modMixCur_ = modMixTarget_;
+    if (modMixCur_ >= 1.0f)      { outL = wetL; outR = wetR; }
+    else if (modMixCur_ <= 0.0f) { outL = modDryL; outR = modDryR; }
+    else {
+        outL = modDryL * (1.0f - modMixCur_) + wetL * modMixCur_;
+        outR = modDryR * (1.0f - modMixCur_) + wetR * modMixCur_;
     }
 }
 

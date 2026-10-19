@@ -502,26 +502,22 @@ private:
     SmallKnobLookAndFeel smallLaf_;
     juce::Slider outLevelL_, outLevelR_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> outAttL_, outAttR_;
-    // v38 (Nathan): the MIX pot — the same small knob as the
-    // O/P LEVEL pots, centred under the POWER toggle on the
-    // ATTACK/RELEASE centre line (virtual (540, 186)), bound
-    // to 'mix' (0 = dry, 1 = wet, default wet). Its silk —
-    // dot ring, '0'/'100' end numerals and the MIX word
-    // under the pot, L/R-style — is drawn in paint().
-    juce::Slider mixKnob_;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAtt_;
-    // v41 (Nathan): the SIDECHAIN pot — the detector low-cut
-    // ('scCutoff', 10–200 Hz, default 10 = filter out). The
-    // strip's four small pots become a 2x2 grid on the
-    // output pots' columns: top row SIDECHAIN (left) / MIX
-    // (right, moved from x 540), bottom row OUTPUT L / R
-    // unmoved; all four shrink a touch (54 -> 50 device px,
-    // silk radii scale with them). Its silk (word, dot ring,
-    // '10'/'200' end numerals) is drawn in paint(), MIX-style.
-    // v42: the low-cut glyph that sat beside the word in v41
-    // is deleted — the SIDECHAIN word alone centres on the pot.
-    juce::Slider scKnob_;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> scAtt_;
+    // AB3 (gui-v60, Nathan): the strip's top-row pots are
+    // repurposed — the RIGHT pot (v38's MIX at (540, 186),
+    // moved to the right column in v41's 2x2 grid) is now
+    // MOD MIX, bound to 'modMix' (0 = the comp path alone,
+    // 0.5 = the classic half blend, 1 = fully wet; default
+    // 0.5, 12 o'clock). The LEFT pot (v41's SIDECHAIN) is
+    // now COMP MIX, bound to 'compMix' (0 = dry, 1 = full
+    // compression; default 0.5). The grid geometry is
+    // unchanged (top row (496/584, 190), 50 device px);
+    // the silk — COMP / MOD words on the word line, MIX
+    // beneath each pot, '0'/'100' numerals on both — is
+    // drawn in paint().
+    juce::Slider modMixKnob_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> modMixAtt_;
+    juce::Slider compMixKnob_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compMixAtt_;
 
     float displayedGrDb_ = 0.0f;   // ballistics-smoothed eye value
     float lastFlangeProp_ = -1.0f; // v10: knob pos at last flange repaint
