@@ -840,6 +840,37 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.4.0 — THE MIXER-ARCHITECTURE RELEASE (FULL2
+candidate, approved by Nathan's ear 2026-10-19; staging
+report ~/workspace/western-compressor-full2-candidate/
+REPORT.md). The strip is now a two-channel mixer on an
+output bus, PA-200-style: the compressor module outputs
+WITHOUT internal makeup; the MOD send is tapped
+post-compressor at the module output; COMP MIX and MOD
+MIX are parallel channel gains into the bus; the auto
+makeup (0.92·avgGR + 7k², peak-aware 1.600 ceiling) is
+applied at the bus sum. The module's GR traces are
+bit-identical to the interim FULL candidate across all
+30 programme configurations. Acceptance, measured: at
+COMP MIX 0 the insert feed now travels +18.39 dB RMS
+across the INPUT sweep (the previous candidate's feed
+was sample-identical at INPUT 5 vs 10 there — the flaw
+Nathan's ear caught). Ballistics are the classics-centre
+seats: LIMIT attack FAST 3.000 ms / SLOW 14.958 ms,
+release SINGLE 90% 0.9986 s / DUAL 90% 3.144 s (T4
+memory contrast 1.41×); COMP attacks read 4.438 /
+21.021 ms through the shared constants (intrinsic law
+ratio, flagged). ADT: right deck carries a minimal
++1.0 ms static stagger (kAdtDeck1StaggerMs, this build
+only) so the two decks never sustain the same delay;
+mono-in acceptance — centre = SRC dry at full strength,
+sides = decks only, delay/pitch trajectory correlation
+≈ −0.06; flavour P stays a pure mono-pedal model. Face
+gui-v61: one centred MIX word under the two mix pots,
+OUTPUT on its own line below the L/R pots. The
+sidechain HPF and the old whole-chain MIX parameter are
+deleted (sessions' orphaned values are ignored on
+restore). Suites: DSP 84/84, processor 38/38.
 v1.3.1 — THE 2X BALLISTICS ARE THE ONLY BALLISTICS
 (report docs/build-report-v64.md). One change over
 1.3.0, on Nathan's ear verdict: the 2X timings "just
