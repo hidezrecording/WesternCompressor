@@ -977,6 +977,8 @@ private:
     Phaser90 phaser_;
     bool modPhaser_ = false;   // v55: false = A (ADT), true = P (phaser)
     float modBlend_ = 0.0f;    // v55: flavour blend, 0 = A .. 1 = P
+    bool prepared_ = false;    // v1.4.1: prepare() has built the chain
+    double preparedFs_ = 0.0;  // v1.4.1: the rate it was built at
     // FULL2 bus state (see the setters above).
     float compMixTarget_ = 1.0f, compMixCur_ = 1.0f;
     float modMixTarget_ = 1.0f, modMixCur_ = 1.0f;

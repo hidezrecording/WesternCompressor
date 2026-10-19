@@ -357,7 +357,19 @@ void AdtChain::reset()
     std::fill(ringL_.begin(), ringL_.end(), 0.0f);
     std::fill(ringR_.begin(), ringR_.end(), 0.0f);
     writePos_ = 0;
-    state_ = State::off;
+    // v1.4.1: park the state machine CONSISTENTLY with the
+    // surviving engagement target. The pre-fix code forced
+    // off here while target_ survived true — and
+    // setEnabled() early-returns on "no change", so a host
+    // re-prepare (which re-applies the same target) could
+    // never re-arm the machine: the fade stayed pinned at
+    // 0 and the insert returned its input forever (the
+    // Luna power-cycle parking defect). A reset whose
+    // target is ON now re-arms exactly like a fresh
+    // engage — fade-in from 0 over the same 30 ms. Fresh
+    // instances are unaffected: target_ is false until
+    // the first setEnabled.
+    state_ = target_ ? State::fadingIn : State::off;
     fadeGain_ = 0.0f;
     delay1Ms_ = lastDelay1Ms_ = kAdtBaseMs + kAdtDeck1StaggerMs;
     delay2Ms_ = lastDelay2Ms_ = kAdtDeck2BaseMs;
@@ -511,7 +523,12 @@ void Phaser90::prepare(double sampleRate)
 
 void Phaser90::reset()
 {
-    state_ = State::off;
+    // v1.4.1: park consistently with the surviving target,
+    // exactly as AdtChain::reset — a target-ON reset re-arms
+    // into the fade-in instead of parking off forever (the
+    // host re-prepare defect: setEnabled cannot re-arm a
+    // machine whose target never changed).
+    state_ = target_ ? State::fadingIn : State::off;
     fadeGain_ = 0.0f;
     lfoPhase_ = 0.0f;
     breakHz_ = kPhaserBreakLoHz;
@@ -610,11 +627,25 @@ void Phaser90::processEffect(float inL, float inR, float& outL, float& outR)
 
 void Chain::prepare(double sampleRate)
 {
-    fs_ = sampleRate > 0.0 ? sampleRate : 48000.0;
+    const double rate = sampleRate > 0.0 ? sampleRate : 48000.0;
     // FULL2: the chain's limiter is the MODULE — its own
     // make-up application is disabled from here on; the
     // bus below applies the law to the summed channels.
     limiter_.setApplyMakeup(false);
+    // v1.4.1: SAME-RATE RE-PREPARE PRESERVATION. A host can
+    // re-call prepareToPlay on a live instance without
+    // reloading it (Luna's top-bar power cycle does, via
+    // the JUCE AU wrapper). Rebuilding under a live stream
+    // zeroed every ring and — through the inserts' reset —
+    // parked the MOD section (see AdtChain::reset). At a
+    // repeated rate there is nothing to rebuild: every
+    // ring, phase, fade and tracker keeps its live state
+    // and the re-call is an inaudible non-event. The first
+    // prepare, and any genuine rate change, still build
+    // from scratch below.
+    if (prepared_ && rate == preparedFs_)
+        return;
+    fs_ = rate;
     limiter_.prepare(fs_);
     adt_.prepare(fs_);
     phaser_.prepare(fs_);
@@ -628,6 +659,8 @@ void Chain::prepare(double sampleRate)
     compRingR_.assign((size_t)sz, 0.0f);
     compMask_ = sz - 1;
     reset();
+    preparedFs_ = fs_;
+    prepared_ = true;
 }
 
 void Chain::reset()
@@ -642,8 +675,12 @@ void Chain::reset()
     // at its panel state from the first sample, no load
     // glide (the retired whole-chain mix's reset
     // discipline). The inserts' own state machines park
-    // off through their reset() (their targets survive),
-    // exactly as the K7 harness protocol relies on.
+    // through their reset() consistently with their
+    // surviving targets (v1.4.1: off when the target is
+    // out, re-armed into the fade-in when it is in) — in
+    // the K7 harness protocol the targets are still out
+    // at reset time, so they park off there exactly as
+    // before.
     compMixCur_ = compMixTarget_;
     modMixCur_ = modMixTarget_;
     modGate_ = adt_.enabled() ? 1.0f : 0.0f;

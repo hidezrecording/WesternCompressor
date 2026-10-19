@@ -2264,6 +2264,202 @@ int main() {
         }
     }
 
+    std::printf("\n=== N. HOST RE-PREPARE / RESET RE-ARM (v1.4.1) ===\n");
+    {
+        char d[512];
+        // N1/N2 — insert level: a reset() whose engagement
+        // target survives ON must RE-ARM the machine into
+        // its fade-in. The <= 1.4.0 defect: reset parked
+        // the state machine off while target_ stayed true,
+        // and setEnabled's no-change early return meant a
+        // host re-prepare could never re-arm it — fadeGain
+        // pinned at 0, the insert returning its input
+        // sample-for-sample forever (diagnosis doc, Luna).
+        // The target-OFF mirrors pin that reset still parks.
+        {
+            osc72::AdtChain adt;
+            adt.prepare(kFs);
+            adt.setEnabled(true);
+            const int seg = (int)(0.3 * kFs);
+            for (int i = 0; i < seg; ++i) {
+                float s = 0.4f * (float)std::sin(2.0 * kPi * 440.0 * i / kFs);
+                float oL, oR; adt.process(s, s, oL, oR);
+            }
+            const float settledFade = adt.fadeGain();
+            adt.reset();   // target survives ON
+            float wet = 0.0f;
+            for (int i = 0; i < seg; ++i) {
+                float s = 0.4f * (float)std::sin(2.0 * kPi * 440.0 * (seg + i) / kFs);
+                float oL, oR; adt.process(s, s, oL, oR);
+                if (i > seg / 2) wet = std::max(wet, std::fabs(oL - s));
+            }
+            std::snprintf(d, sizeof d, "settled fade %.2f; after reset: fade %.2f, max |out-in| %.4f (settled half)",
+                          (double)settledFade, (double)adt.fadeGain(), (double)wet);
+            check(settledFade == 1.0f && adt.fadeGain() == 1.0f && wet > 0.05f,
+                  "N1a ADT reset with target ON re-arms (fade back to 1, output wet again)", d);
+        }
+        {
+            osc72::AdtChain adt;
+            adt.prepare(kFs);
+            for (int i = 0; i < 1000; ++i) { float oL, oR; adt.process(0.3f, 0.3f, oL, oR); }
+            adt.reset();   // target OFF throughout
+            bool exact = adt.fadeGain() == 0.0f;
+            for (int i = 0; i < 1000; ++i) {
+                float oL, oR; adt.process(0.3f, -0.2f, oL, oR);
+                if (oL != 0.3f || oR != -0.2f) exact = false;
+            }
+            check(exact, "N1b ADT reset with target OFF still parks (bit-exact dry, fade 0)", "");
+        }
+        {
+            osc72::Phaser90 ph;
+            ph.prepare(kFs);
+            ph.setEnabled(true);
+            const int seg = (int)(0.3 * kFs);
+            for (int i = 0; i < seg; ++i) {
+                float s = 0.4f * (float)std::sin(2.0 * kPi * 440.0 * i / kFs);
+                float oL, oR; ph.process(s, s, oL, oR);
+            }
+            const float settledFade = ph.fadeGain();
+            ph.reset();    // target survives ON
+            float wet = 0.0f;
+            for (int i = 0; i < seg; ++i) {
+                float s = 0.4f * (float)std::sin(2.0 * kPi * 440.0 * (seg + i) / kFs);
+                float oL, oR; ph.process(s, s, oL, oR);
+                if (i > seg / 2) wet = std::max(wet, std::fabs(oL - s));
+            }
+            std::snprintf(d, sizeof d, "settled fade %.2f; after reset: fade %.2f, max |out-in| %.4f (settled half)",
+                          (double)settledFade, (double)ph.fadeGain(), (double)wet);
+            check(settledFade == 1.0f && ph.fadeGain() == 1.0f && wet > 0.02f,
+                  "N2a phaser reset with target ON re-arms (fade back to 1, output phased again)", d);
+        }
+        {
+            osc72::Phaser90 ph;
+            ph.prepare(kFs);
+            ph.reset();    // target OFF throughout
+            bool exact = ph.fadeGain() == 0.0f;
+            for (int i = 0; i < 1000; ++i) {
+                float oL, oR; ph.process(0.3f, -0.2f, oL, oR);
+                if (oL != 0.3f || oR != -0.2f) exact = false;
+            }
+            check(exact, "N2b phaser reset with target OFF still parks (bit-exact dry, fade 0)", "");
+        }
+        // N3 — chain level, the Luna event itself: a
+        // same-rate re-prepare mid-stream must be an
+        // inaudible non-event — the render BIT-IDENTICAL
+        // to a twin that was never re-prepared (the
+        // same-rate prepare preserves all live state; the
+        // reset re-arm above covers the resets that do
+        // happen). On the buggy build the insert parked
+        // at the event and the renders diverged there.
+        auto renderEvent = [&](bool phaser, bool reprepare) {
+            osc72::Chain ch;
+            ch.prepare(kFs);
+            ch.setKnob(0.75f);
+            ch.setCompMix(0.0f);
+            ch.setModMix(1.0f);
+            ch.setModPhaser(phaser);
+            ch.reset();
+            ch.setModIn(true);
+            ProgGen pg;
+            std::vector<float> out;
+            const int total = (int)(5.0 * kFs);
+            out.reserve((size_t)total * 2);
+            for (int i = 0; i < total; ++i) {
+                if (reprepare && i == (int)(3.0 * kFs)) ch.prepare(kFs);
+                float l, r; pg.sample(i, l, r);
+                float oL, oR; ch.process(l, r, oL, oR);
+                out.push_back(oL); out.push_back(oR);
+            }
+            return out;
+        };
+        check(renderEvent(false, true) == renderEvent(false, false),
+              "N3a ADT: same-rate re-prepare mid-stream bit-identical to no event (Luna power cycle)", "");
+        check(renderEvent(true, true) == renderEvent(true, false),
+              "N3b phaser: same-rate re-prepare mid-stream bit-identical to no event", "");
+        // N3c — and the ADT in the re-prepared render is
+        // genuinely ENGAGED afterwards, not identically
+        // parked in both twins: mono programme at compMix
+        // 0 leaves real side energy after the event (a
+        // parked insert returns the mono feed untouched —
+        // side exactly zero).
+        {
+            osc72::Chain ch;
+            ch.prepare(kFs);
+            ch.setKnob(0.5f);
+            ch.setCompMix(0.0f);
+            ch.setModMix(1.0f);
+            ch.reset();
+            ch.setModIn(true);
+            ProgGen pg;
+            double side = 0; int cnt = 0;
+            const int total = (int)(5.0 * kFs);
+            for (int i = 0; i < total; ++i) {
+                if (i == (int)(3.0 * kFs)) ch.prepare(kFs);
+                float l, r; pg.sample(i, l, r);
+                const float m = 0.5f * (l + r);
+                float oL, oR; ch.process(m, m, oL, oR);
+                if (i >= (int)(4.0 * kFs)) {
+                    const double s = 0.5 * ((double)oL - (double)oR);
+                    side += s * s; ++cnt;
+                }
+            }
+            const double sideDb = 10.0 * std::log10(side / cnt);
+            std::snprintf(d, sizeof d, "post-event side RMS %.2f dBFS; adt fade %.2f",
+                          sideDb, (double)ch.adt().fadeGain());
+            check(sideDb > -45.0 && ch.adt().fadeGain() == 1.0f,
+                  "N3c ADT audibly engaged after the re-prepare (side energy present, fade 1)", d);
+        }
+        // N4 — a genuine RATE CHANGE still rebuilds from
+        // scratch: after prepare(44100) and the standard
+        // reset/engage sequence, the chain renders
+        // bit-identically to a fresh 44.1 k instance. (The
+        // reset/engage is re-run on the rebuilt chain
+        // because Chain::reset snaps the MOD gate to the
+        // SURVIVING target: a chain that was engaged
+        // across the rate change re-opens with its gate
+        // already up, and the bus peak tracker (0.6 s
+        // decay) legitimately remembers that different
+        // first 30 ms — a history difference, not a
+        // rebuild difference. What this pin proves is
+        // that every rate-dependent structure — rings,
+        // oversampler, taus — is rebuilt exactly.)
+        {
+            auto setup = [&](osc72::Chain& ch, double fs) {
+                ch.prepare(fs);
+                ch.setKnob(0.75f);
+                ch.setCompMix(0.0f);
+                ch.setModMix(1.0f);
+                ch.reset();
+                ch.setModIn(true);
+            };
+            osc72::Chain a;
+            setup(a, kFs);
+            ProgGen pgA;
+            for (int i = 0; i < (int)(1.0 * kFs); ++i) {
+                float l, r; pgA.sample(i, l, r);
+                float oL, oR; a.process(l, r, oL, oR);
+            }
+            a.prepare(44100.0);   // the rate change: full rebuild
+            a.setModIn(false);    // re-run the fresh-load sequence
+            a.reset();
+            a.setModIn(true);
+            osc72::Chain b;
+            setup(b, 44100.0);
+            ProgGen pg1, pg2;
+            bool same = true;
+            const int settle = (int)(0.5 * 44100), meas = (int)(2.0 * 44100);
+            for (int i = 0; i < settle + meas; ++i) {
+                float l1, r1; pg1.sample(i, l1, r1);
+                float l2, r2; pg2.sample(i, l2, r2);
+                float aL, aR, bL, bR;
+                a.process(l1, r1, aL, aR);
+                b.process(l2, r2, bL, bR);
+                if (i >= settle && (aL != bL || aR != bR)) same = false;
+            }
+            check(same, "N4 rate-change prepare rebuilds fresh (== fresh 44.1 k instance past the settle, bit-exact)", "");
+        }
+    }
+
     std::printf("\n%s (%d checks, %d failures)\n",
                 failures == 0 ? "ALL TESTS PASSED" : "FAILURES PRESENT",
                 checks, failures);

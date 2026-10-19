@@ -56,6 +56,12 @@
 //          the offsets at crossfade scale — never a full-
 //          weight copy stepped to either (the v44 flam,
 //          now guarded at the chain's internal tap)
+//   P12    HOST RE-PREPARE (v1.4.1): a same-rate
+//          prepareToPlay re-call mid-stream (Luna's top-bar
+//          power cycle) is bit-identical to no event, in
+//          both MOD flavours — <= 1.4.0 parked the inserts
+//          on that event (DSP suite section N has the
+//          insert/chain-level pins)
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "PluginProcessor.h"
 #include <cstdio>
@@ -1170,6 +1176,56 @@ int main() {
             check(a == 992 && e == 32,
                   "P11d proc: latency unchanged by the bake (992 / 32)", b);
         }
+    }
+
+    // ── P12. HOST RE-PREPARE (v1.4.1 fix) ───────────────────────
+    // A host can re-call prepareToPlay on a live instance
+    // without reloading it — Luna's top-bar power cycle
+    // does exactly this through the JUCE AU wrapper. On
+    // <= 1.4.0 the re-call rebuilt the chain under a live
+    // MOD engagement and parked both inserts forever
+    // (reset parked the state machines off while the
+    // engagement target survived, and the no-change
+    // setEnabled re-apply never re-armed them). The fix
+    // preserves live state across a same-rate re-prepare
+    // and re-arms on any genuine target-on reset (DSP
+    // suite, section N). Pins: a mid-stream same-rate
+    // re-call is BIT-IDENTICAL to a twin that never saw
+    // it, in both MOD flavours.
+    {
+        auto renderWithEvent = [&](bool phaser, bool reprepare) {
+            Osc72Processor p;
+            p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.75f);
+            p.apvts.getParameter("warble")->setValueNotifyingHost(1.0f);
+            p.apvts.getParameter("modPhaser")->setValueNotifyingHost(phaser ? 1.0f : 0.0f);
+            p.apvts.getParameter("compMix")->setValueNotifyingHost(0.0f);
+            p.apvts.getParameter("modMix")->setValueNotifyingHost(1.0f);
+            p.prepareToPlay(kFs, 512);
+            Material mat{ 2 };
+            juce::MidiBuffer midi;
+            const int block = 512;
+            std::vector<float> out;
+            for (int base = 0; base < (int)(4.0 * kFs); base += block) {
+                if (reprepare && base == (int)(2.0 * kFs))
+                    p.prepareToPlay(kFs, 512);   // the Luna event
+                juce::AudioBuffer<float> buf(2, block);
+                for (int j = 0; j < block; ++j) {
+                    float l, r; mat.sample(base + j, l, r);
+                    buf.setSample(0, j, l);
+                    buf.setSample(1, j, r);
+                }
+                p.processBlock(buf, midi);
+                for (int j = 0; j < block; ++j) {
+                    out.push_back(buf.getSample(0, j));
+                    out.push_back(buf.getSample(1, j));
+                }
+            }
+            return out;
+        };
+        check(renderWithEvent(false, true) == renderWithEvent(false, false),
+              "P12a proc: same-rate prepareToPlay re-call mid-stream bit-identical (ADT in)", "");
+        check(renderWithEvent(true, true) == renderWithEvent(true, false),
+              "P12b proc: same-rate prepareToPlay re-call mid-stream bit-identical (phaser in)", "");
     }
 
     std::printf("%s (%d checks, %d failures)\n",
