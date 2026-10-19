@@ -3537,8 +3537,18 @@ void Osc72Editor::paint(juce::Graphics& g)
     // spans ~512..568, L ends ~502, R starts ~578). The
     // LINK cluster below does not move; the word's ink
     // bottom (340) clears its plate top (~374.7) by ~35.
+    // FULL2 (gui-v61, Nathan): OUTPUT leaves the L/R line
+    // — he does not want it sitting up between L and R —
+    // and drops to its OWN line below the pots, by the
+    // SAME ink-to-pot gap the MIX word keeps under the
+    // top pots: MIX's caps top sits 9 vp under the sweep
+    // numerals' ink bottom (224 -> 233); the L/R letters'
+    // ink bottom is their baseline, 341, so OUTPUT's caps
+    // top lands at 350 and its baseline at 360. The LINK
+    // cluster still does not move; the word's ink bottom
+    // (360) clears its plate top (~374.7) by ~14.7.
     drawTrackedText(g, "OUTPUT", capsFont(14.5f), 0.6f,
-                    scx, 340.0f, Anchor::centre);
+                    scx, 360.0f, Anchor::centre);
 
     // ── Strip LINK cluster (v36; dropped to the bottom
     //    row in v37, Nathan) ─────────────────────────────
@@ -3608,6 +3618,14 @@ void Osc72Editor::paint(juce::Graphics& g)
     // compression, right = mod, by position). The
     // OUTPUT word above keeps the same 9 px rule under
     // its own pots.
+    // FULL2 (gui-v61, Nathan): the pair of MIX words
+    // becomes ONE, centred between the pots at the strip
+    // centre (540), same baseline 243; and OUTPUT moves
+    // off the L/R line to its own line below the OUTPUT
+    // pots (baseline 360 — see its draw). The strip now
+    // reads COMP · pot · pot · MOD over a single centred
+    // MIX, and L · pot · pot · R over a single centred
+    // OUTPUT.
     {
         auto gridPotSilk = [&](float cx, const char* lo, const char* hi) {
             for (int i = 0; i <= 4; ++i) {
@@ -3633,13 +3651,16 @@ void Osc72Editor::paint(juce::Graphics& g)
                         584.0f, 149.0f, Anchor::centre);
         gridPotSilk(496.0f, "0", "100");
         gridPotSilk(584.0f, "0", "100");
-        // MIX beneath each top pot (AB3 — see the block
-        // comment above): caps top 9 vp under the pot
-        // assembly's lowest ink, centred on the pot.
+        // MIX beneath the top pots — FULL2 / gui-v61
+        // (Nathan): ONE word, centred BETWEEN the two
+        // pots at the strip centre (x = 540), same
+        // baseline 243 as AB3's pair (he likes the
+        // height): caps top 233, 9 vp under the pot
+        // assembly's lowest ink. (AB3 drew one MIX under
+        // each pot; the two columns now share the single
+        // centred word.)
         drawTrackedText(g, "MIX", capsFont(14.5f), 0.6f,
-                        496.0f, 243.0f, Anchor::centre);
-        drawTrackedText(g, "MIX", capsFont(14.5f), 0.6f,
-                        584.0f, 243.0f, Anchor::centre);
+                        540.0f, 243.0f, Anchor::centre);
     }
 
     for (float kcx : { 496.0f, 584.0f }) {

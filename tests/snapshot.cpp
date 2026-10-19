@@ -308,6 +308,24 @@
 // sizes and positions are otherwise unchanged; the
 // diff vs gui-v59 is confined to the strip's label /
 // sweep-mark ink.
+// v61 shots: gui-v61-a.png ("knob=5 limitout" — the
+// default opening state, as v60-a) / gui-v61-b.png
+// ("knob=5 limitout warble phaser compmix=0.5
+// modmix=0.5" — MOD in, P selected, both pots centred,
+// as v60-b).
+// v61 change (Nathan, FULL2 TEST build — not a
+// release): the strip's two under-pot MIX words become
+// ONE word, MIX, centred between the top pots at the
+// strip centre (x = 540 vp), same baseline 243 (he
+// likes the height); and OUTPUT becomes a single
+// centred word on its own line BELOW the L/R pots,
+// dropped by the same ink-to-pot gap (L/R ink bottom
+// 341 -> caps top 350, baseline 360), clear of the
+// LINK plate (~14.7 vp). COMP/MOD stay above their
+// pots; sweep marks stay 0/100; LINK cluster unmoved.
+// The diff vs gui-v60 is confined to the strip's
+// label ink (the two MIX words merge; OUTPUT moves
+// from the L/R line to below the pots).
 // v51 shots: gui-v51-a.png ("knob=5 limitout" — the
 // default opening state, as v50-a) / gui-v51-b.png
 // ("knob=5 limitout gr=12" — driven at exactly 12 dB so

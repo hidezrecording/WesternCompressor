@@ -359,7 +359,7 @@ int main() {
               "P6c proc: SINGLE sheds most GR by +0.35 s, DUAL tail holds (readout, AB2)", b);
     }
 
-    // ── P7. THE TWO MIX POTS (AB3: COMP MIX / MOD MIX) ─────
+    // ── P7. THE TWO MIX POTS (FULL2: bus channel gains) ────
     {
         // One processor over typical material, full histories.
         // compMix/modMix < 0 = leave the param untouched
@@ -439,32 +439,40 @@ int main() {
             check(exact, warble ? "P7b defaults == explicit 0.5/0.5 bit-for-bit (MOD in)"
                                 : "P7b defaults == explicit 0.5/0.5 bit-for-bit (MOD out)", b);
         }
-        // P7c: both pots at 0, MOD out: the output is the
-        // input delayed by exactly the reported latency
-        // (32 — the comp stage's own alignment).
+        // P7c (FULL2 form; the AB3 form pinned "output =
+        // input delayed" via the crossfade's dry arm —
+        // there is no dry arm now): both pots at 0, MOD
+        // out: the bus sums two zero-gain channels = exact
+        // digital silence once the pot slews have settled.
         {
             auto d = runPots(0.0f, 0.0f, false, false, 1.5);
             bool exact = true;
             for (int i = settle; i < (int)d.outL.size(); ++i)
-                if (d.outL[(size_t)i] != d.inL[(size_t)(i - 32)] || d.outR[(size_t)i] != d.inR[(size_t)(i - 32)])
+                if (d.outL[(size_t)i] != 0.0f || d.outR[(size_t)i] != 0.0f)
                     exact = false;
-            std::snprintf(b, sizeof b, "settled compMix=0/modMix=0 output == input delayed 32 exactly: %d", (int)exact);
-            check(exact, "P7c both pots 0 return the input delayed by the latency (MOD out)", b);
+            std::snprintf(b, sizeof b, "settled compMix=0/modMix=0 output == 0.0f exactly: %d", (int)exact);
+            check(exact, "P7c both pots 0: digital silence at the bus (MOD out)", b);
         }
-        // P7d: both pots at 0, MOD in (A): the input
-        // delayed by exactly the reported 992.
+        // P7d (FULL2 form): both pots at 0, MOD in (A):
+        // silence — the gate cannot resurrect a zero-gain
+        // channel either.
         {
             auto d = runPots(0.0f, 0.0f, true, false, 1.5);
             bool exact = true;
             for (int i = settle; i < (int)d.outL.size(); ++i)
-                if (d.outL[(size_t)i] != d.inL[(size_t)(i - 992)] || d.outR[(size_t)i] != d.inR[(size_t)(i - 992)])
+                if (d.outL[(size_t)i] != 0.0f || d.outR[(size_t)i] != 0.0f)
                     exact = false;
-            std::snprintf(b, sizeof b, "settled compMix=0/modMix=0 (MOD in) == input delayed 992 exactly: %d", (int)exact);
-            check(exact, "P7d both pots 0 return the input delayed by the latency (MOD in)", b);
+            std::snprintf(b, sizeof b, "settled compMix=0/modMix=0 (MOD in) == 0.0f exactly: %d", (int)exact);
+            check(exact, "P7d both pots 0: digital silence at the bus (MOD in)", b);
         }
-        // P7e: the COMP stage at 0.5 is the mean of its two
-        // aligned arms (the compMix=0 render IS the aligned
-        // dry arm; compMix=1 the limiter path), MOD out.
+        // P7e (FULL2 form): the COMP channel's gain is
+        // linear — at 0.5 the bus carries exactly half the
+        // comp channel (the compMix=0 render is now the
+        // silent bus, so the old mean-of-arms formula
+        // reduces to half the full render; it still holds
+        // to 0.00e+00 here, MOD out, because the bus
+        // make-up trajectory is common and the cap is
+        // clear of this material at knob 0.5).
         {
             auto d = runPots(0.0f, 1.0f, false, false, 2.0);
             auto w = runPots(1.0f, 1.0f, false, false, 2.0);
@@ -476,15 +484,23 @@ int main() {
                 maxErr = std::max(maxErr, std::fabs(mL - h.outL[(size_t)i]));
                 maxErr = std::max(maxErr, std::fabs(mR - h.outR[(size_t)i]));
             }
-            std::snprintf(b, sizeof b, "max |compMix0.5 - (dry+wet)/2| = %.2e", maxErr);
-            check(maxErr < 2e-6, "P7e compMix=0.5 is the mean of its aligned arms (MOD out)", b);
+            std::snprintf(b, sizeof b, "max |compMix0.5 - (zero+full)/2| = %.2e", maxErr);
+            check(maxErr < 2e-6, "P7e compMix=0.5 is exactly half the comp channel (MOD out, FULL2 gain law)", b);
         }
-        // P7f: the MOD stage at 0.5 in the P flavour is the
-        // mean of its aligned arms (modMix=0 = the comp
-        // path alone; modMix=1 = the pure cascade) — the
-        // classic-pedal blend, through the whole processor
-        // path. (The bit-level equivalence to 1.3.1's own P
-        // output is the DSP suite's K7f/L7 subject.)
+        // P7f (FULL2 form): the MOD channel's gain sums
+        // linearly into the bus — at 0.5 the output is the
+        // mean of the comp-only (modMix=0) and both-
+        // channels (modMix=1) renders — UP TO the bus
+        // ceiling: the summed render's higher bus peaks
+        // engage the peak-aware cap where the single-
+        // channel renders do not shave the same peaks, so
+        // exact superposition breaks at the loudest
+        // transients by design (measured 2.89e-03 max on
+        // this material at knob 0.5 — a fraction of a dB
+        // on peak samples; the DSP suite's L4 pins the
+        // exact law in the cap-free regime, and M2 pins
+        // the bound). Bound set from the measurement with
+        // headroom.
         {
             auto d = runPots(1.0f, 0.0f, true, true, 2.0);
             auto w = runPots(1.0f, 1.0f, true, true, 2.0);
@@ -496,8 +512,8 @@ int main() {
                 maxErr = std::max(maxErr, std::fabs(mL - h.outL[(size_t)i]));
                 maxErr = std::max(maxErr, std::fabs(mR - h.outR[(size_t)i]));
             }
-            std::snprintf(b, sizeof b, "max |modMix0.5 - (dry+wet)/2| = %.2e (MOD in, P)", maxErr);
-            check(maxErr < 2e-6, "P7f modMix=0.5 is the mean of its aligned arms (MOD in, P)", b);
+            std::snprintf(b, sizeof b, "max |modMix0.5 - (compOnly+full)/2| = %.2e (MOD in, P; bus-cap residue, see comment)", maxErr);
+            check(maxErr < 6e-3, "P7f modMix=0.5 sums the channels (mean form; bus-cap residue bounded, FULL2)", b);
         }
         // P7g: POWER off bypasses bit-exact at PARTIAL pot
         // settings (the brief's explicit case: the bypass
@@ -561,7 +577,7 @@ int main() {
               "P8 'scCutoff'/'mix' removed; 1.3.1 legacy state restores, orphans ignored", b);
     }
 
-    // ── P9. TWO-STAGE ALIGNMENT at impulse level (AB3) ────
+    // ── P9. BUS ALIGNMENT at impulse level (FULL2) ────────
     {
         // One impulse at low drive (knob 0: minimal GR), full
         // history. Params are set before processing starts, so
@@ -597,33 +613,37 @@ int main() {
         };
         const int total = (int)(1.5 * kFs), impAt = (int)(0.5 * kFs);
         char b[256];
-        // P9a/P9b: the COMP stage at a partial blend (MOD
-        // out): the dry arm (compMix=0), the wet arm (1) and
-        // the blend (0.5) all peak exactly at +32, and the
-        // blend's peak is the mean of the arms' peaks — a
-        // misaligned arm would split the peak and collapse
-        // its height toward the larger single-arm share.
+        // P9a/P9b (FULL2 form): the COMP channel at
+        // partial gain (MOD out): compMix=0 is exactly
+        // silent (no dry arm exists to peak), compMix=1
+        // and 0.5 both peak exactly at +32, and the half
+        // gain's peak is half the full channel's — a
+        // misaligned or stepped gain would split the peak
+        // or break the ratio.
         {
             auto dry = runImp2(0.0f, 1.0f, false, false, impAt, total);
             auto wet = runImp2(1.0f, 1.0f, false, false, impAt, total);
             auto half = runImp2(0.5f, 1.0f, false, false, impAt, total);
-            int atDry = 0, atWet = 0, atHalf = 0;
-            const float pkDry = peakAt(dry, impAt + 32, 400, atDry);
+            int atWet = 0, atHalf = 0;
             const float pkWet = peakAt(wet, impAt + 32, 400, atWet);
             const float pkHalf = peakAt(half, impAt + 32, 400, atHalf);
-            std::snprintf(b, sizeof b, "comp stage: peaks dry@%+d wet@%+d half@%+d (want all +32)",
-                          atDry - impAt, atWet - impAt, atHalf - impAt);
-            check(atDry == impAt + 32 && atWet == impAt + 32 && atHalf == impAt + 32,
-                  "P9a comp-stage blended impulse peak exactly at +32 (MOD out)", b);
-            const float meanPk = 0.5f * (pkDry + pkWet);
-            std::snprintf(b, sizeof b, "half peak %.4f vs mean-of-peaks %.4f", pkHalf, meanPk);
-            check(std::fabs(pkHalf - meanPk) < 0.03f * meanPk,
-                  "P9b comp-stage blend peak coincides (no split)", b);
+            float dryMax = 0;
+            for (float v : dry) dryMax = std::max(dryMax, std::fabs(v));
+            std::snprintf(b, sizeof b, "comp channel: cm0 max %.1e (want 0), peaks wet@%+d half@%+d (want +32)",
+                          (double)dryMax, atWet - impAt, atHalf - impAt);
+            check(dryMax == 0.0f && atWet == impAt + 32 && atHalf == impAt + 32,
+                  "P9a comp channel impulse peak exactly at +32; compMix=0 silent (MOD out, FULL2)", b);
+            std::snprintf(b, sizeof b, "half peak %.4f vs half the full peak %.4f", pkHalf, 0.5f * pkWet);
+            check(std::fabs(pkHalf - 0.5f * pkWet) < 0.03f * pkWet,
+                  "P9b comp channel gain is linear at the impulse peak (no split)", b);
         }
-        // P9c/P9d: the MOD stage at a partial blend (MOD in
-        // A, compMix=1): the comp-path arm (modMix=0), the
-        // ADT arm (1) and the blend (0.5) all peak exactly
-        // at +992, coincident.
+        // P9c/P9d (FULL2 reading): the channels at the
+        // bus (MOD in A, compMix=1): the comp channel
+        // alone (modMix=0), both channels (1) and comp +
+        // half ADT (0.5) all peak exactly at +992,
+        // coincident — the alignment the bus is built on,
+        // and the half render's peak is the channels'
+        // mean (superposition at the peak).
         {
             auto dry = runImp2(1.0f, 0.0f, true, false, impAt, total);
             auto wet = runImp2(1.0f, 1.0f, true, false, impAt, total);
@@ -632,22 +652,26 @@ int main() {
             const float pkDry = peakAt(dry, impAt + 992, 400, atDry);
             const float pkWet = peakAt(wet, impAt + 992, 400, atWet);
             const float pkHalf = peakAt(half, impAt + 992, 400, atHalf);
-            std::snprintf(b, sizeof b, "mod stage: peaks dry@%+d wet@%+d half@%+d (want all +992)",
+            std::snprintf(b, sizeof b, "bus channels: peaks compOnly@%+d both@%+d half@%+d (want all +992)",
                           atDry - impAt, atWet - impAt, atHalf - impAt);
             check(atDry == impAt + 992 && atWet == impAt + 992 && atHalf == impAt + 992,
-                  "P9c mod-stage blended impulse peak exactly at +992 (MOD in, A)", b);
+                  "P9c bus channels' impulse peaks coincide exactly at +992 (MOD in, A)", b);
             const float meanPk = 0.5f * (pkDry + pkWet);
             std::snprintf(b, sizeof b, "half peak %.4f vs mean-of-peaks %.4f", pkHalf, meanPk);
             check(std::fabs(pkHalf - meanPk) < 0.03f * meanPk,
-                  "P9d mod-stage blend peak coincides (no split)", b);
+                  "P9d half-gain bus peak is the channels' mean (no split)", b);
         }
         // P9e: MOD toggle mid-stream at compMix=1 /
-        // modMix=0.5 — the mod stage's dry side must
-        // crossfade its offset with the chain's engagement
-        // law (the v44 flam, at its new home): an impulse
-        // fired 5 ms into the edge has to appear at BOTH
-        // offsets at crossfade scale, never as a full-
-        // weight copy stepped to either one.
+        // modMix=0.5 — the engagement edge in FULL2 form:
+        // the comp channel must crossfade its delay
+        // offset (32 -> 992) with the chain's 30 ms law
+        // while the MOD channel's gate ramps up (1.47 s):
+        // an impulse fired 5 ms into the edge has to
+        // appear at BOTH offsets at partial weight, never
+        // as a full-weight copy stepped to either one.
+        // FULL2 readings on this tree: +32 peak 0.167,
+        // +992 peak 0.230 — inside the standing bounds,
+        // which are kept.
         {
             Osc72Processor p;
             p.prepareToPlay(kFs, 512);
@@ -677,7 +701,7 @@ int main() {
                           pk32, at32 - midImp, pk992, at992 - midImp);
             check(pk32 > 0.05f && pk32 < 0.30f && pk992 > 0.02f && pk992 < 0.30f
                   && at32 == midImp + 32 && at992 == midImp + 992,
-                  "P9e mod-stage dry side crossfades its offset on MOD toggle (no step)", b);
+                  "P9e engagement edge: comp channel crossfades its offset, gate ramps (no step)", b);
         }
     }
 
@@ -725,10 +749,11 @@ int main() {
             check(s0 == 32 && s1 == 992 && s2 == 32 && s3 == 32 && s4 == 32 && s5 == 992,
                   "P10b proc: latency follows flavour — 992 only for MOD-in A", b);
         }
-        // P10c: both pots at 0 with MOD in + P returns the
-        // input delayed by exactly the P-flavour latency
-        // (32) — the mod stage's dry side aligns to the
-        // phaser's zero bulk delay.
+        // P10c (FULL2 form; the AB3 form pinned the dry
+        // arm's delayed return): both pots at 0 with MOD
+        // in + P — the bus is silent, exactly, like every
+        // both-gains-zero state (P7c/P7d in the A flavour
+        // and MOD out).
         {
             Osc72Processor p;
             p.prepareToPlay(kFs, 512);
@@ -758,16 +783,20 @@ int main() {
             }
             bool exact = true;
             for (int i = (int)(0.5 * kFs); i < total; ++i)
-                if (outL[(size_t)i] != inL[(size_t)(i - 32)] || outR[(size_t)i] != inR[(size_t)(i - 32)])
+                if (outL[(size_t)i] != 0.0f || outR[(size_t)i] != 0.0f)
                     exact = false;
-            std::snprintf(b, sizeof b, "settled pots=0 (MOD in, P) == input delayed 32 exactly: %d", (int)exact);
-            check(exact, "P10c both pots 0 return the input delayed by 32 (MOD in, P flavour)", b);
+            std::snprintf(b, sizeof b, "settled pots=0 (MOD in, P) == 0.0f exactly: %d", (int)exact);
+            check(exact, "P10c both pots 0: digital silence at the bus (MOD in, P flavour)", b);
         }
         // P10d: impulse alignment with MOD in + P (P9
-        // methodology at the 32-sample latency): the mod
-        // stage's arms — dry = modMix 0 (the comp path
-        // alone), wet = modMix 1 (the pure cascade), blend
-        // = modMix 0.5 (the classic pedal) — at compMix 1.
+        // methodology at the 32-sample latency): the bus
+        // channels — compOnly = modMix 0 (the comp channel
+        // alone), both = modMix 1 (comp + the pedal's own
+        // output), half = modMix 0.5 — at compMix 1.
+        // (AB3 read its arms as dry/cascade/blend; FULL2's
+        // "wet" render carries the comp channel too, which
+        // is why its peak now sits at +32 outright —
+        // readings below.)
         {
             auto runImpP = [](float modMix, int impAt, int total) {
                 Osc72Processor p;
@@ -804,25 +833,23 @@ int main() {
             int atDry = 0, atWet = 0;
             const float pkDry = peakAt(dry, impAt + 32, 200, atDry);
             const float pkWet = peakAt(wet, impAt + 32, 200, atWet);
-            // AB3 re-instrumentation (cause: the wet arm is
-            // the bare cascade now): the old peak-coincidence
-            // instrument presumed both arms peak at the same
-            // sample at comparable height — true of the old
-            // 50/50 composite (half dry spike), false of an
-            // allpass cascade, whose IR is dispersed over
-            // tens of samples with its maximum a few samples
-            // in (measured +34 here, +33 in J8's protocol —
-            // the exact sample rides the sweep phase) and
-            // well under the dry IR's peak. What alignment
-            // means for this arm: the response ONSET lands
-            // exactly on the latency (nothing arrives
-            // early, no bulk delay), and the blend is the
-            // exact superposition of the arms (P10e). The
-            // dry arm's peak still sits exactly at +32.
+            // Instrumentation (AB3 origin; FULL2 reading):
+            // the cascade's own IR is dispersed over tens of
+            // samples with its maximum a few samples in and
+            // well under the comp channel's IR peak, so
+            // peak-coincidence is the wrong instrument for
+            // it. What alignment means here: the bus's
+            // response ONSET lands on the latency (nothing
+            // arrives early, no bulk delay), the comp
+            // channel's peak sits exactly at +32, and the
+            // channels superpose (P10e). FULL2 readings:
+            // compOnly peak @+32, both-channels peak @+32
+            // (the comp channel's spike dominates the sum),
+            // onset @+30.
             int onset = -1;
             for (int i = impAt; i < impAt + 64 && onset < 0; ++i)
                 if (std::fabs(wet[(size_t)i]) > 0.25f * pkWet) onset = i;
-            std::snprintf(b, sizeof b, "P flavour: dry peak %.3f @%+d; wet peak %.3f @%+d, onset @%+d (want +30..+38)",
+            std::snprintf(b, sizeof b, "P flavour: compOnly peak %.3f @%+d; both peak %.3f @%+d, onset @%+d (want +30..+38)",
                           pkDry, atDry - impAt, pkWet, atWet - impAt, onset - impAt);
             // The onset reads +31 (inside the +30 bound):
             // the limiter's linear-phase resampler pre-rings
@@ -836,17 +863,27 @@ int main() {
             check(atDry == impAt + 32
                   && atWet >= impAt + 32 && atWet <= impAt + 36
                   && onset >= impAt + 30 && onset <= impAt + 38,
-                  "P10d P flavour: dry peak at +32, cascade onset at the latency (no bulk delay, AB3)", b);
-            // P10e (AB3 form): the half blend is the exact
-            // superposition of the two arm renders through
-            // the whole processor path (float-exact form of
-            // the law; P7f pins the same law in double).
-            bool super = true;
+                  "P10d P flavour: comp channel peaks at +32, bus onset at the latency (no bulk delay, FULL2)", b);
+            // P10e (FULL2 form): the half-gain render is
+            // the superposition of the channel renders
+            // through the whole processor path — to float
+            // association, not sample-exactly: the bus
+            // forms g*(comp + 0.5*ph) in one association
+            // where the check forms 0.5*(g*comp) +
+            // 0.5*(g*(comp+ph)) (the AB3 chain formed the
+            // blend in the same association as the check,
+            // hence its old sample-exactness). The bus
+            // make-up is common across the renders (knob
+            // 0, cap far clear), so the residue is pure
+            // rounding; bound 2e-6 as in P7e. (dry here =
+            // the comp channel alone, modMix=0; wet = both
+            // channels, modMix=1.)
+            double supErr = 0;
             for (int i = (int)(0.4 * kFs); i < total; ++i)
-                if (half[(size_t)i] != dry[(size_t)i] * (1.0f - 0.5f) + wet[(size_t)i] * 0.5f)
-                    super = false;
-            std::snprintf(b, sizeof b, "half == 0.5*dry + 0.5*wet sample-exact: %d", (int)super);
-            check(super, "P10e modMix=0.5 is the exact superposition of its arms (MOD in, P flavour)", b);
+                supErr = std::max(supErr, (double)std::fabs(
+                    half[(size_t)i] - (dry[(size_t)i] * (1.0f - 0.5f) + wet[(size_t)i] * 0.5f)));
+            std::snprintf(b, sizeof b, "max |half - (0.5*compOnly + 0.5*both)| = %.2e", supErr);
+            check(supErr < 2e-6, "P10e modMix=0.5 superposes the channels to float association (MOD in, P flavour, FULL2)", b);
             int bestLag = 0; double bestC = -1e30;
             for (int lag = -16; lag <= 16; ++lag) {
                 double s = 0.0;
@@ -908,38 +945,33 @@ int main() {
             std::snprintf(bb, sizeof bb, "mid-flip impulse: +32 peak %.3f @%+d, +992 peak %.3f @%+d",
                           pk32, at32 - midImp, pk992, at992 - midImp);
             if (toPhaser) {
-                // A->P geometry: the impulse's ADT copy can
-                // only leave the 960-sample pipe AFTER the
-                // 30 ms flavour blend has mostly left A, and
-                // the mod stage dry side's old-offset weight
-                // has fallen with it — so mid-flip the energy
-                // is SHARED between the offsets, neither copy
-                // anywhere near the settled height (~0.34 /
-                // ~0.19, P9). AB3 readings on this tree:
-                // 0.015 @+31 / 0.027 @+992 — the +32 window's
-                // maximum sits a sample early on the incoming
-                // cascade's own lobe (its dry-side copy is at
-                // +32 inside the same window, under it), so
-                // the early window is bounded to +/-2 while
-                // the +992 copy stays exact.
+                // A->P geometry (FULL2): the comp channel's
+                // delay crossfades 960 -> 0 while the flavour
+                // blend swaps the insert's output ADT ->
+                // cascade; the impulse's energy is SHARED
+                // between the offsets at crossfade weight,
+                // neither copy near settled height. FULL2
+                // readings on this tree: 0.042 @+32 / 0.041
+                // @+992 — inside the standing bounds (kept).
+                // (AB3 read 0.015 @+31 / 0.027 @+992 with its
+                // dry side at 0.5 weight.)
                 check(pk32 > 0.005f && pk992 > 0.01f && pk32 < 0.15f && pk992 < 0.15f
                       && std::abs(at32 - (midImp + 32)) <= 2 && at992 == midImp + 992, name, bb);
             } else {
-                // P->A geometry: AB3 readings on this tree:
-                // 0.063 @+31 / 0.161 @+992 — the +992 copy
-                // (the ADT pipe + the dry side's rising late
-                // read) already carries the larger share;
-                // the +32 copy is the outgoing cascade plus
-                // the dry side's early read, its maximum on
-                // the cascade lobe a sample early, bounded
-                // to +/-2 as in the A->P direction. Neither
-                // copy is anywhere near settled height.
+                // P->A geometry (FULL2): the comp channel's
+                // rising late read plus the ADT pipe's
+                // emerging SRC carry the +992 share; the +32
+                // copy is the comp channel's early read plus
+                // the outgoing cascade. FULL2 readings on
+                // this tree: 0.179 @+32 / 0.241 @+992 —
+                // inside the standing bounds (kept). (AB3
+                // read 0.063 @+31 / 0.161 @+992.)
                 check(pk32 > 0.03f && pk32 < 0.20f && pk992 > 0.05f && pk992 < 0.30f
                       && std::abs(at32 - (midImp + 32)) <= 2 && at992 == midImp + 992, name, bb);
             }
         };
-        flipTest(true,  "P10g mod-stage crossfades on A->P toggle (no step)");
-        flipTest(false, "P10h mod-stage crossfades on P->A toggle (no step)");
+        flipTest(true,  "P10g channel/flavour crossfades on A->P toggle (no step)");
+        flipTest(false, "P10h channel/flavour crossfades on P->A toggle (no step)");
         // P10i: POWER off is bit-exact bypass with MOD in +
         // P selected AND partial pot settings (the P5
         // invariant in the new flavour, at the AB3 pots'

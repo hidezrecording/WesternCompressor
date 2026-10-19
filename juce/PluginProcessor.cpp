@@ -109,15 +109,18 @@ Osc72Processor::createParameterLayout()
     // HPF — the detector hears the full-range sense, as it
     // always did at the 10 Hz default (where the shipped
     // sound is unchanged, bit-for-bit).
-    // COMP MIX (AB3, Nathan): the strip's LEFT top pot —
-    // the parallel-compression blend: dry input (latency-
-    // aligned inside osc72::Chain) against the limiter's
-    // output, linear crossfade. Default 0.5 = 12 o'clock
-    // (Nathan's explicit call — the unit now OPENS at a
-    // half blend, a deliberate change of default sound vs
-    // 1.3.1; 1.0 is the shipped full-compression sound).
-    // Value strings are plain percents ("0".."100"), as
-    // the retired 'mix' pot's were.
+    // COMP MIX (AB3, Nathan; FULL2 semantics): the
+    // strip's LEFT top pot — in FULL2 a channel GAIN, not
+    // a blend: the compressor module's output into the
+    // output bus, where the auto-make-up now lives
+    // (PA-200-style two-channel mixer; the AB3 dry/wet
+    // crossfade is deleted — there is no dry arm).
+    // Default 0.5 = 12 o'clock (Nathan's explicit call —
+    // the unit OPENS with both channels at half gain;
+    // 1.0 with MOD MIX at 0 is the shipped full-
+    // compression path, modulo the make-up's relocation
+    // to the bus). Value strings are plain percents
+    // ("0".."100"), as the retired 'mix' pot's were.
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID { "compMix", 1 }, "Compression Mix",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f,
@@ -147,13 +150,17 @@ Osc72Processor::createParameterLayout()
     // NOT sonically equivalent; the old single blend has
     // no exact two-stage translation, and the saved value
     // is ignored rather than approximated.
-    // MOD MIX (AB3, Nathan): the strip's RIGHT top pot —
-    // the MOD section's wet amount: the post-comp signal
-    // against the engaged insert's wet arm (the ADT's
-    // natural output; the Phase 90's bare cascade, so 0.5
-    // is the classic pedal), linear crossfade, aligned
-    // inside the chain. Inert while MOD is out. Default
-    // 0.5 = 12 o'clock (Nathan: both pots open centred).
+    // MOD MIX (AB3, Nathan; FULL2 semantics): the
+    // strip's RIGHT top pot — in FULL2 the MOD insert's
+    // channel GAIN into the output bus: the insert,
+    // fed POST-compressor at the module's output,
+    // contributes its own output (the ADT's natural
+    // output; the Phase 90's classic internal blend —
+    // the pedal whole, not a bare cascade) at this
+    // gain, summed with the comp channel under the bus
+    // make-up. Contributes nothing while MOD is out
+    // (the engagement gate). Default 0.5 = 12 o'clock
+    // (Nathan: both pots open centred).
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID { "modMix", 1 }, "Mod Mix",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f,
@@ -291,13 +298,16 @@ void Osc72Processor::processBlock(juce::AudioBuffer<float>& buffer,
         apvts.getRawParameterValue("outLevelR")->load());
 
     // AB3: the v38/v44 processor dry tap is DELETED — both
-    // blends (and the mod stage's offset crossfade, the
-    // v44 machinery's heir) live inside osc72::Chain now,
-    // where the two stages are aligned by construction.
-    // What remains here is the shipped order around the
-    // chain: chain -> O/P LEVEL trims -> the v19 POWER
-    // fade. POWER off is bit-exact bypass at ANY pot
-    // setting: settled off, the chain is skipped entirely.
+    // blends live inside osc72::Chain, aligned by
+    // construction. FULL2: inside the chain they are two
+    // channel GAINS into the output bus (post-compressor
+    // insert feed, bus make-up), the MOD-toggle/A-P edges'
+    // 30 ms offset crossfade now aligning the comp
+    // channel against the insert's latency. What remains
+    // here is the shipped order around the chain:
+    // chain -> O/P LEVEL trims -> the v19 POWER fade.
+    // POWER off is bit-exact bypass at ANY pot setting:
+    // settled off, the chain is skipped entirely.
 
     float* outL = buffer.getWritePointer(0);
     float* outR = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;

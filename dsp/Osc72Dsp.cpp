@@ -164,11 +164,17 @@ void Ba6aLimiter::process(float inL, float inR, float& outL, float& outR)
     // peaks can overshoot the 1.600 bound (Gibbs); this is
     // the makeup ceiling's own instant law and touches only
     // samples above it — see the oversampling note in the
-    // header.
-    const float ipk = std::max(std::fabs(accL), std::fabs(accR));
-    if (ipk > kBa6aMakeupPeakCeil) {
-        const float g = kBa6aMakeupPeakCeil / ipk;
-        accL *= g; accR *= g;
+    // header. FULL2: module mode (applyMakeup_ false) skips
+    // it with the rest of the make-up application — the
+    // module output is the raw post-transformer signal,
+    // and the ceiling discipline lives at the Chain's bus,
+    // the final output, where no decimation follows it.
+    if (applyMakeup_) {
+        const float ipk = std::max(std::fabs(accL), std::fabs(accR));
+        if (ipk > kBa6aMakeupPeakCeil) {
+            const float g = kBa6aMakeupPeakCeil / ipk;
+            accL *= g; accR *= g;
+        }
     }
     outL = accL;
     outR = accR;
@@ -272,7 +278,11 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
     // the detector tap, like the hardware's OUTPUT control.
     // Ceilinged against the pre-make-up peak so the automated
     // output never pushes peaks past the unit's headroom —
-    // the discipline an operator applies by ear. ──
+    // the discipline an operator applies by ear. FULL2: this
+    // computation runs in BOTH modes (the readout and the
+    // direct-limiter behaviour are unchanged); only the
+    // APPLICATION below is gated — in module mode the Chain
+    // re-applies this same law at the output bus. ──
     const float avgTau = grDb_ > avgGrDb_ ? kBa6aMakeupAvgChargeTauSec
                                           : kBa6aMakeupAvgDecayTauSec;
     avgGrDb_ += (grDb_ - avgGrDb_) * tauCoef(avgTau, fs_);
@@ -301,6 +311,16 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
     const float preR = processChannel(inR, 1, grLin, driveLin);
     lastPreL_ = preL;
     lastPreR_ = preR;
+    // FULL2 module mode (applyMakeup_ false, set by the
+    // Chain): the module's output IS the pre-make-up
+    // signal — the make-up law above has run (its states
+    // and readout stay live) but nothing is applied here;
+    // the Chain's bus applies the law to the summed feeds.
+    if (!applyMakeup_) {
+        outL = preL;
+        outR = preR;
+        return;
+    }
     // Instant ceiling (design §3.2): the slow cap above keeps
     // the make-up honest on programme; this per-sample bound
     // covers the transient case — a hit's first overshoot
@@ -339,7 +359,7 @@ void AdtChain::reset()
     writePos_ = 0;
     state_ = State::off;
     fadeGain_ = 0.0f;
-    delay1Ms_ = lastDelay1Ms_ = kAdtBaseMs;
+    delay1Ms_ = lastDelay1Ms_ = kAdtBaseMs + kAdtDeck1StaggerMs;
     delay2Ms_ = lastDelay2Ms_ = kAdtDeck2BaseMs;
     lfo1Phase_ = 0.0f;
     wow1Phase_ = 0.0f; wow2Phase_ = 0.25f;
@@ -375,7 +395,7 @@ float AdtChain::deckTargetMs(int deck)
     if (deck == 1) {
         lfo1Phase_ += kAdtLfo1Hz * inv;
         if (lfo1Phase_ >= 1.0f) lfo1Phase_ -= 1.0f;
-        return kAdtBaseMs
+        return kAdtBaseMs + kAdtDeck1StaggerMs   // FULL2 stagger (header)
              + kAdtLfo1Ms * std::sin(lfo1Phase_ * 6.283185307179586f);
     }
     // Deck 2: smoothed random walk (the manual's "random" LFO
@@ -591,11 +611,16 @@ void Phaser90::processEffect(float inL, float inR, float& outL, float& outR)
 void Chain::prepare(double sampleRate)
 {
     fs_ = sampleRate > 0.0 ? sampleRate : 48000.0;
+    // FULL2: the chain's limiter is the MODULE — its own
+    // make-up application is disabled from here on; the
+    // bus below applies the law to the summed channels.
+    limiter_.setApplyMakeup(false);
     limiter_.prepare(fs_);
     adt_.prepare(fs_);
     phaser_.prepare(fs_);
-    // AB3: the mod stage's dry ring — sized for the ADT's
-    // 20 ms offset at this rate plus margin, power of two.
+    // FULL2: the COMP channel's alignment ring — sized
+    // for the ADT's 20 ms offset at this rate plus margin,
+    // power of two.
     int need = (int)std::ceil(0.025 * fs_) + 64;
     int sz = 256;
     while (sz < need) sz <<= 1;
@@ -611,67 +636,53 @@ void Chain::reset()
     adt_.reset();
     phaser_.reset();
     modBlend_ = modPhaser_ ? 1.0f : 0.0f;
-    // AB3: both mix slews snap to their targets and the
-    // dry taps start settled — a fresh instance is at its
-    // panel state from the first sample, no load glide
-    // (the retired whole-chain mix's reset discipline).
+    // FULL2: both pot slews snap to their targets, the
+    // engagement gate snaps to the held MOD target and
+    // the bus make-up starts cold — a fresh instance is
+    // at its panel state from the first sample, no load
+    // glide (the retired whole-chain mix's reset
+    // discipline). The inserts' own state machines park
+    // off through their reset() (their targets survive),
+    // exactly as the K7 harness protocol relies on.
     compMixCur_ = compMixTarget_;
     modMixCur_ = modMixTarget_;
-    for (int i = 0; i < kDry32Size; ++i) dry32L_[i] = dry32R_[i] = 0.0f;
-    dry32Write_ = 0;
+    modGate_ = adt_.enabled() ? 1.0f : 0.0f;
     std::fill(compRingL_.begin(), compRingL_.end(), 0.0f);
     std::fill(compRingR_.begin(), compRingR_.end(), 0.0f);
     compWrite_ = 0;
     modDelayA_ = modDelayB_ = modExtraTarget();
     modTapFade_ = 1.0f;
+    busAvgGrDb_ = 0.0f;
+    busPrePeak_ = 0.0f;
+    busMakeupDb_ = 0.0f;
+    lastFeedL_ = lastFeedR_ = 0.0f;
 }
 
 void Chain::process(float inL, float inR, float& outL, float& outR)
 {
-    // The limiter section is always engaged (v53: the old
-    // in/out bypass became the COMP/LIMIT ratio mode switch,
-    // which lives inside the limiter's gain computer).
-    float midL, midR;
-    limiter_.process(inL, inR, midL, midR);
+    // ── FULL2 bus architecture (Nathan; see the class
+    // note in the header). The limiter section is always
+    // engaged (v53: the old in/out bypass became the
+    // COMP/LIMIT ratio mode switch, inside the limiter's
+    // gain computer) and runs in MODULE mode: its output
+    // is the raw post-transformer signal, pre-make-up. ──
+    float modL, modR;
+    limiter_.process(inL, inR, modL, modR);
+    lastFeedL_ = modL;   // the send tap: what the inserts
+    lastFeedR_ = modR;   // are fed, at every pot position
 
-    // ── AB3 stage 1 — COMP MIX: the raw input delayed by
-    // exactly the limiter's 32-sample oversampling delay
-    // (a fixed tap, written every sample) against the
-    // limiter's output. Linear crossfade, hard selects at
-    // the extremes: at 1 the limiter output passes
-    // untouched (the shipped path), at 0 the output of
-    // this stage is the input delayed by exactly 32. ──
-    dry32L_[dry32Write_] = inL;
-    dry32R_[dry32Write_] = inR;
-    const int rd32 = (dry32Write_ - limiter_.osDelaySamples()) & (kDry32Size - 1);
-    const float dryL = dry32L_[rd32], dryR = dry32R_[rd32];
-    dry32Write_ = (dry32Write_ + 1) & (kDry32Size - 1);
-    compMixCur_ += (compMixTarget_ - compMixCur_) * 0.002f;
-    if (std::fabs(compMixTarget_ - compMixCur_) < 2.0e-5f)
-        compMixCur_ = compMixTarget_;
-    float compL, compR;
-    if (compMixCur_ >= 1.0f)      { compL = midL; compR = midR; }
-    else if (compMixCur_ <= 0.0f) { compL = dryL; compR = dryR; }
-    else {
-        compL = dryL * (1.0f - compMixCur_) + midL * compMixCur_;
-        compR = dryR * (1.0f - compMixCur_) + midR * compMixCur_;
-    }
-
-    // MOD insert: both machines run continuously on the
-    // post-comp signal; the flavour blend selects between
-    // their WET ARMS. While MOD is out each arm returns
-    // its input bit-exact once settled (the ADT by its
-    // state machine, the phaser likewise), so the stage-2
-    // blend is the post-comp signal alone in either
-    // flavour — the MOD MIX pot is inert, as briefed.
-    //   A arm: the ADT's natural output (SRC centre +
-    //     decks), exactly as authored in 1.3.1.
-    //   P arm: the phaser's bare cascade (processEffect)
-    //     — the pot re-creates the classic 50/50 pedal at
-    //     0.5, the pure phased signal at 1.0.
+    // ── The MOD send: both machines run continuously on
+    // the module output (POST-COMPRESSOR, unconditionally);
+    // the flavour blend selects between their own outputs
+    // — the ADT's natural output (SRC centre + decks) and
+    // the Phase 90's classic output (its internal 50/50).
+    // While MOD is out each machine returns its input
+    // bit-exact once settled, but the bus gate below keeps
+    // the channel silent regardless: the channel is the
+    // insert's output, gated by its engagement. ──
     float aL, aR, pL, pR;
-    adt_.process(compL, compR, aL, aR);
-    phaser_.processEffect(compL, compR, pL, pR);
+    adt_.process(modL, modR, aL, aR);
+    phaser_.process(modL, modR, pL, pR);
     const float target = modPhaser_ ? 1.0f : 0.0f;
     if (modBlend_ != target) {
         const float step = 1.0f / (kAdtFadeSec * (float)fs_);
@@ -691,49 +702,108 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
         wetL = aL + (pL - aL) * modBlend_;
         wetR = aR + (pR - aR) * modBlend_;
     }
+    // The engagement gate: linear over the inserts' own
+    // 30 ms span, exactly 0 settled-out, exactly 1
+    // settled-in. (On a fresh engage the gate and the
+    // machines' internal fades ramp together; on disengage
+    // the gate's fall covers the machines' fade-out tail.)
+    {
+        const float gateTarget = adt_.enabled() ? 1.0f : 0.0f;
+        const float step = 1.0f / (kAdtFadeSec * (float)fs_);
+        if (modGate_ < gateTarget)
+            modGate_ = std::min(gateTarget, modGate_ + step);
+        else if (modGate_ > gateTarget)
+            modGate_ = std::max(gateTarget, modGate_ - step);
+    }
 
-    // ── AB3 stage 2 — MOD MIX: the post-comp signal
-    // delayed by the inserts' own latency (the offset
-    // target tracks MOD toggle and A/P flavour; a change
-    // starts the v44-style 30 ms offset crossfade between
-    // the old and new reads) against the wet arm. Linear
-    // crossfade, hard selects at the extremes: at 0 the
-    // comp path alone, aligned to the reported latency;
-    // at 1 the wet arm untouched. ──
-    compRingL_[(size_t)compWrite_] = compL;
-    compRingR_[(size_t)compWrite_] = compR;
+    // ── The COMP channel: the module output, delayed at
+    // the bus by the engaged insert's own latency so both
+    // channels arrive together (the offset target tracks
+    // MOD toggle and A/P flavour; a change starts the
+    // v44-style 30 ms offset crossfade between the old and
+    // new reads — the machinery's third home, its purpose
+    // unchanged). ──
+    compRingL_[(size_t)compWrite_] = modL;
+    compRingR_[(size_t)compWrite_] = modR;
     const int extra = modExtraTarget();
     if (extra != modDelayB_) {
         modDelayA_ = modDelayB_;
         modDelayB_ = extra;
         modTapFade_ = 0.0f;
     }
-    float modDryL, modDryR;
+    float compL, compR;
     if (modTapFade_ >= 1.0f && modDelayB_ == 0) {
-        modDryL = compL; modDryR = compR;   // settled, no offset
+        compL = modL; compR = modR;   // settled, no offset
     } else {
         const float bL = readCompRing(compRingL_, modDelayB_);
         const float bR = readCompRing(compRingR_, modDelayB_);
         if (modTapFade_ >= 1.0f) {
-            modDryL = bL; modDryR = bR;
+            compL = bL; compR = bR;
         } else {
             const float aLagL = readCompRing(compRingL_, modDelayA_);
             const float aLagR = readCompRing(compRingR_, modDelayA_);
-            modDryL = aLagL + (bL - aLagL) * modTapFade_;
-            modDryR = aLagR + (bR - aLagR) * modTapFade_;
+            compL = aLagL + (bL - aLagL) * modTapFade_;
+            compR = aLagR + (bR - aLagR) * modTapFade_;
             modTapFade_ = std::min(1.0f, modTapFade_ + 1.0f / (kAdtFadeSec * (float)fs_));
         }
     }
     compWrite_ = (compWrite_ + 1) & compMask_;
+
+    // ── The bus sum: two channel GAINS in parallel (the
+    // pots' slews are the retired whole-chain mix's law,
+    // as in AB3). No dry arm anywhere. ──
+    compMixCur_ += (compMixTarget_ - compMixCur_) * 0.002f;
+    if (std::fabs(compMixTarget_ - compMixCur_) < 2.0e-5f)
+        compMixCur_ = compMixTarget_;
     modMixCur_ += (modMixTarget_ - modMixCur_) * 0.002f;
     if (std::fabs(modMixTarget_ - modMixCur_) < 2.0e-5f)
         modMixCur_ = modMixTarget_;
-    if (modMixCur_ >= 1.0f)      { outL = wetL; outR = wetR; }
-    else if (modMixCur_ <= 0.0f) { outL = modDryL; outR = modDryR; }
-    else {
-        outL = modDryL * (1.0f - modMixCur_) + wetL * modMixCur_;
-        outR = modDryR * (1.0f - modMixCur_) + wetR * modMixCur_;
-    }
+    const float busL = compMixCur_ * compL + modGate_ * modMixCur_ * wetL;
+    const float busR = compMixCur_ * compR + modGate_ * modMixCur_ * wetR;
+
+    // ── Auto make-up AT THE BUS (FULL2): the shipped law
+    // (design §3.2), computed from the module's GR exactly
+    // as the limiter computes it internally — 0.92 x avgGR
+    // + 7 x knob^2, capped against the pre-make-up peak so
+    // the automated output never pushes peaks past the
+    // unit's headroom — but the peak it reads is the BUS's
+    // own pre-make-up peak (the summed feeds), and the
+    // trackers run at host rate. The make-up may want
+    // ~37 dB at INPUT 10 (diagnosis §4); the cap and the
+    // instant ceiling below are the only bounds, exactly
+    // as they were inside the module. ──
+    const float grNow = limiter_.gainReductionDb();
+    const float avgTau = grNow > busAvgGrDb_ ? kBa6aMakeupAvgChargeTauSec
+                                             : kBa6aMakeupAvgDecayTauSec;
+    busAvgGrDb_ += (grNow - busAvgGrDb_) * tauCoef(avgTau, fs_);
+    const float peakNow = std::max(std::fabs(busL), std::fabs(busR));
+    if (peakNow > busPrePeak_)
+        busPrePeak_ += (peakNow - busPrePeak_) * tauCoef(0.0002f, fs_);
+    else
+        busPrePeak_ += (peakNow - busPrePeak_) * tauCoef(0.6f, fs_);
+    const float knobS = limiter_.knob();
+    const float desired = kBa6aMakeupFactor * busAvgGrDb_
+                        + kBa6aMakeupCrankDb * knobS * knobS;
+    const float peakCapDb = linearToDb(kBa6aMakeupPeakCeil
+                                       / std::max(busPrePeak_, 0.05f));
+    const float makeupTarget = clampf(std::min(desired, peakCapDb),
+                                      0.0f, kBa6aMakeupCapDb);
+    // Make-up slew: falls instantly (the ceiling discipline
+    // is never late), rises over ~50 ms (no gain-step
+    // zipper) — the module law's own slew discipline.
+    if (makeupTarget < busMakeupDb_)
+        busMakeupDb_ = makeupTarget;
+    else
+        busMakeupDb_ += (makeupTarget - busMakeupDb_) * tauCoef(0.05f, fs_);
+    // Instant ceiling: the per-sample bound covers the
+    // transient case — a hit's first overshoot peak
+    // arriving before the slow peak state registers it.
+    // |out| <= 1.600 whenever it binds, by construction.
+    const float instPeak = std::max(peakNow, 0.05f);
+    const float appliedLin = std::min(dbToLinear(busMakeupDb_),
+                                      kBa6aMakeupPeakCeil / instPeak);
+    outL = busL * appliedLin;
+    outR = busR * appliedLin;
 }
 
 } // namespace osc72

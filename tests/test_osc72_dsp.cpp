@@ -802,8 +802,17 @@ int main() {
     {
         // F2: MONO feed widens (the retired mid/side law is
         // gone): side energy appears, correlation collapses.
+        // FULL2 re-point (cause: the bus sums BOTH channels
+        // at the chain defaults, so the section's subject —
+        // the ADT insert — is now measured on its own bus
+        // channel, compMix=0 / modMix=1: the insert channel
+        // alone, exactly what AB3's modMix=1 hard select
+        // delivered): measured corr 0.855, side/mid 0.286 —
+        // inside the standing bands, no re-base.
         osc72::Chain ch;
         ch.prepare(kFs);
+        ch.setCompMix(0.0f);
+        ch.setModMix(1.0f);
         ch.setModIn(true);
         ProgGen pg;
         double sLL = 0, sRR = 0, sLR = 0, sSide = 0, sMid = 0; int cnt = 0;
@@ -850,6 +859,15 @@ int main() {
         auto widthOf = [&](bool modOn) {
             osc72::Chain ch;
             ch.prepare(kFs);
+            // FULL2 re-point: each arm is ONE bus channel —
+            // dry = the COMP channel alone (compMix=1,
+            // modMix=0, MOD out), wet = the MOD channel
+            // alone (compMix=0, modMix=1, MOD in). (At
+            // compMix=0 with MOD out the bus is silent by
+            // design, so the old same-mix dry arm no longer
+            // exists to compare against.)
+            ch.setCompMix(modOn ? 0.0f : 1.0f);
+            ch.setModMix(modOn ? 1.0f : 0.0f);
             ch.setModIn(modOn);
             ProgGen pgM, pgS;
             double sLL = 0, sRR = 0, sLR = 0; int cnt = 0;
@@ -917,23 +935,34 @@ int main() {
         check(dev > 0.25 && dev < 4.0, "F4 audible varispeed pitch swing (0.25-4%)", d);
     }
     {
-        // F5 (v44 mix-alignment diagnosis): the ADT's SRC is a
-        // PURE integer delay of the limiter output — the fact
-        // the processor's MIX blend arithmetic relies on, here
-        // measured instead of assumed. The same impulse goes
-        // through two chains (MOD out / MOD in, knob 0); the
-        // MOD-in impulse response must equal the MOD-out one
-        // shifted by exactly the reported latency (960), to
-        // float dust, over the arrival window — and the MOD-in
-        // output must be silent before the arrival sample. The
-        // MOD-in impulse is fired at a moment when both decks
-        // sit beyond 21.5 ms (introspection), so no deck echo
-        // can reach the window.
+        // F5 (v44 mix-alignment diagnosis; FULL2 re-homed):
+        // the ADT's SRC is a PURE integer delay of its feed —
+        // the fact the bus's channel alignment relies on,
+        // here measured instead of assumed. FULL2 cause for
+        // the move: the bus sums both channels under a
+        // common make-up, so the SRC-purity fact can no
+        // longer be read off two chain renders; it is
+        // pinned where it lives, at the insert's own
+        // terminals, fed by the module-mode limiter (the
+        // send's actual source). The same impulse goes
+        // through two ADT instances (never enabled / enabled,
+        // knob 0 module feed); the enabled IR must equal the
+        // disabled one shifted by exactly 960, to float
+        // dust, over the arrival window — and the enabled
+        // output must be silent before the arrival sample.
+        // The enabled impulse is fired at a moment when both
+        // decks sit beyond 21.5 ms (introspection), so no
+        // deck echo can reach the window. (The chain-level
+        // arrival is pinned in M3.)
         auto fireIr = [](bool mod, std::vector<float>& ir, float& preMax) {
-            osc72::Chain ch;
-            ch.prepare(kFs);
-            ch.setKnob(0.0f);
-            ch.setModIn(mod);
+            osc72::Ba6aLimiter lim;
+            lim.setApplyMakeup(false);   // module mode: the send's source
+            lim.prepare(kFs);
+            lim.setKnob(0.0f);
+            lim.reset();
+            osc72::AdtChain adt;
+            adt.prepare(kFs);
+            adt.setEnabled(mod);
             const int len = 1400;
             ir.assign((size_t)len, 0.0f);
             preMax = 0.0f;
@@ -943,11 +972,13 @@ int main() {
                 bool fire = false;
                 if (fireAt < 0 && i >= (int)(1.0 * kFs)) {
                     if (!mod) fire = true;
-                    else if (ch.adt().deckDelayMs(1) > 21.5f
-                             && ch.adt().deckDelayMs(2) > 21.5f) fire = true;
+                    else if (adt.deckDelayMs(1) > 21.5f
+                             && adt.deckDelayMs(2) > 21.5f) fire = true;
                 }
+                float mL, mR;
+                lim.process(fire ? 0.5f : 0.0f, fire ? 0.5f : 0.0f, mL, mR);
                 float oL, oR;
-                ch.process(fire ? 0.5f : 0.0f, fire ? 0.5f : 0.0f, oL, oR);
+                adt.process(mL, mR, oL, oR);
                 if (fire) fireAt = i;
                 if (fireAt >= 0) {
                     const int rel = i - fireAt;
@@ -969,7 +1000,7 @@ int main() {
         std::snprintf(d, sizeof d, "fired=%d/%d, max |IR_in[n+960]-IR_out[n]| %.2e over 200 samples, pre-arrival max %.2e",
                       (int)okA, (int)okB, maxDiff, (double)preMax);
         check(okA && okB && maxDiff < 1.0e-9 && preMax < 1.0e-9,
-              "F5 ADT SRC is a pure 960-sample delay of the limiter output (v53: limiter IR itself carries the 32-sample OS delay in both chains)", d);
+              "F5 ADT SRC is a pure 960-sample delay of its (module) feed, at the insert's terminals (FULL2)", d);
     }
 
     // ═══════════════ G. CPU ═══════════════
@@ -1556,6 +1587,20 @@ int main() {
         // no parent tree renders that state. K7f below
         // re-proves the classic-pedal equivalence against
         // the AB2 tree (same ballistics), see its verdict.
+        // FULL2 RE-BASE (2026-10-19, TEST BUILD — the bus
+        // architecture): the AUDIO references above are
+        // re-captured on THIS tree — the make-up's move to
+        // the bus changes the audio renders by design (see
+        // the report's identity section: not bit-neutral;
+        // difference concentrated where the instant
+        // ceiling used to bite inside the oversampled
+        // core). The GR references (grWant) are the FULL
+        // CANDIDATE's own captures, carried verbatim: the
+        // module is untouched, so every config's GR trace
+        // must reproduce the candidate's bit-for-bit
+        // through the new bus — that is the cross-build
+        // identity proof of this revision, asserted per
+        // config below alongside the audio regression.
         auto fnvF = [](uint64_t h, float f) {
             uint32_t u;
             std::memcpy(&u, &f, 4);
@@ -1565,40 +1610,40 @@ int main() {
             }
             return h;
         };
-        struct Cfg { const char* name; float knob; bool comp, att, rel; int mod; double secs; uint64_t want; };
+        struct Cfg { const char* name; float knob; bool comp, att, rel; int mod; double secs; uint64_t want; uint64_t grWant; };
         const Cfg cfgs[] = {
             // MOD out, knob 0.50 (4 s each)
-            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0xed261a92f595aad5ull },
-            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0xbc5758ee4cc51170ull },
-            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x2b85f3626028121cull },
-            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0xc5ab87c84a4e747cull },
-            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0xe5ad27a01f19317aull },
-            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x3afec921da9e5684ull },
-            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0xb84b19a214ee4d97ull },
-            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x10937302cbc02f02ull },
+            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0x13cb03f39f2de77full, 0x8acd6d3cea89facfull },
+            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0x4272aa0263def60eull, 0xb4751a42b384fc52ull },
+            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x6b3bd5c4ce9bb313ull, 0xc7d05a997ff17cd1ull },
+            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0xcd80138d9cf08442ull, 0x60d6ffaf181b4f68ull },
+            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0x8911048ab18b6ed8ull, 0x96a3bbae466c7593ull },
+            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x389b00e42f51a1bdull, 0x26e7695b300e3f6cull },
+            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0xb62900384ac755e5ull, 0x947336edff9ad97full },
+            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x415519d6ad0b0b0eull, 0xc500c7bb1131f928ull },
             // MOD out, knob 0.75
-            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x45356f01c1adf3e9ull },
-            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x1d76e99003b4327full },
-            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x2c28992fc28e1d79ull },
-            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0x0b91c0350939e8b9ull },
-            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0x990964f90a2874bfull },
-            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0xc98125d4b125d9f3ull },
-            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x403b8a734e82b98eull },
-            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x9b6dc5c31146d4a0ull },
+            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0xd0802e5f28451823ull, 0x1a2cc03c04e1887cull },
+            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x1704854f90bfd397ull, 0x4cd1c3ebf591731full },
+            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0xc2f918b678cb1892ull, 0x1bfebf7952c5905full },
+            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0x8da52871caa0a1efull, 0x7e493c16b57cd843ull },
+            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0xa585bb63339366dbull, 0x377ff7abf24236f2ull },
+            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0xb590f63b90eef119ull, 0x8188506c24fe5904ull },
+            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0xfcdd6949daf996b7ull, 0x705251c1f6776cdbull },
+            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0xcbb85dbb8ab04c37ull, 0x2966c219558cec7dull },
             // MOD out, knob 1.00
-            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x2b24ce996d3a0463ull },
-            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0x36df34b01651b31cull },
-            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x3c84b55c57ff3f54ull },
-            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x715cc324edb61dcfull },
-            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x6a39ec42381aa53cull },
-            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x5327001398170cfcull },
-            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x590f33b1273277f1ull },
-            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x3fa4f284e016bca5ull },
+            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x1e436d6f501a074cull, 0x61e63567661e5d6eull },
+            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0xaa107d3e9b7f81bbull, 0x3b934701f2849c01ull },
+            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x3d36c4fec4464d82ull, 0x2e65e3869d9b2f93ull },
+            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x8521daf7c2f05317ull, 0x9e59c419ae95ba94ull },
+            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x07a7425e004febb8ull, 0x97de766fefbaebfcull },
+            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x0afc1e7ff1d2a37dull, 0x95fc1aa031a6bff7ull },
+            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x2df481de0128ec83ull, 0x7c13c92443240b4aull },
+            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x598bf008092a7343ull, 0x2e40e026ba60ace1ull },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xa8ee2347e87e06e9ull },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x552f94dfc0ad324aull },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x67d439d16802015dull },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0xbebbf552d5fb9606ull },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x7d5fb3fb69855c0eull, 0x6b75ffda48caeaf4ull },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0xc78229ac05398df2ull, 0x08e0d81317822abbull },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x7e5e4a48a48e9816ull, 0x4c4ca400af88a56eull },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0xd5300f5a24658e1bull, 0x68aa3373eae50787ull },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -1610,8 +1655,8 @@ int main() {
             // FULL: re-captured again on the merged tree at
             // the AB2 ballistics (pure cascade renders under
             // the re-timed limiter).
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x8e6208a1926f3bbfull },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0xb2ac23b383918e41ull },
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x099ab97a17ec8819ull, 0x08e0d81317822abbull },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0xe49cd7c939cf3b41ull, 0x68aa3373eae50787ull },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
@@ -1630,7 +1675,7 @@ int main() {
         // the P flavour at modMix = 0.5 against references
         // captured on THIS tree, with the classic-pedal
         // equivalence re-proven against the AB2 tree.
-        auto renderHash = [&](const Cfg& c, float modMix = 1.0f) {
+        auto renderHash = [&](const Cfg& c, float modMix = 1.0f, uint64_t* grOut = nullptr) {
             osc72::Chain ch;
             ch.prepare(kFs);
             ch.setKnob(c.knob);
@@ -1644,6 +1689,7 @@ int main() {
             ch.setModIn(c.mod != 0);
             ProgGen pg;
             uint64_t h = 1469598103934665603ull;
+            uint64_t hg = 1469598103934665603ull;
             const int total = (int)(c.secs * kFs);
             for (int i = 0; i < total; ++i) {
                 float l, r; pg.sample(i, l, r);
@@ -1651,80 +1697,73 @@ int main() {
                 h = fnvF(h, oL);
                 h = fnvF(h, oR);
                 h = fnvF(h, ch.gainReductionDb());
+                hg = fnvF(hg, ch.gainReductionDb());
             }
+            if (grOut) *grOut = hg;
             return h;
         };
         struct Group { const char* pin; int first, last; };
         const Group groups[] = {
-            { "K7a baked-2X bit-identity: MOD out, knob 0.50 (8 cfgs)", 0, 8 },
-            { "K7b baked-2X bit-identity: MOD out, knob 0.75 (8 cfgs)", 8, 16 },
-            { "K7c baked-2X bit-identity: MOD out, knob 1.00 (8 cfgs)", 16, 24 },
-            { "K7d baked-2X bit-identity: MOD in A/ADT (4 cfgs)", 24, 28 },
-            { "K7e baked-2X bit-identity: MOD in P/Phase 90 (2 cfgs)", 28, 30 },
+            { "K7a FULL2 regression + GR identity: MOD out, knob 0.50 (8 cfgs)", 0, 8 },
+            { "K7b FULL2 regression + GR identity: MOD out, knob 0.75 (8 cfgs)", 8, 16 },
+            { "K7c FULL2 regression + GR identity: MOD out, knob 1.00 (8 cfgs)", 16, 24 },
+            { "K7d FULL2 regression + GR identity: MOD in A/ADT (4 cfgs)", 24, 28 },
+            { "K7e FULL2 regression + GR identity: MOD in P/Phase 90 (2 cfgs)", 28, 30 },
         };
         for (const Group& g : groups) {
             bool ok = true;
-            char bad[160] = "";
+            char bad[200] = "";
             for (int i = g.first; i < g.last; ++i) {
-                uint64_t got = renderHash(cfgs[i]);
+                uint64_t gotGr = 0;
+                uint64_t got = renderHash(cfgs[i], 1.0f, &gotGr);
                 if (got != cfgs[i].want) {
                     ok = false;
-                    std::snprintf(bad, sizeof bad, "%s: got %016llx want %016llx",
+                    std::snprintf(bad, sizeof bad, "%s: audio got %016llx want %016llx",
                                   cfgs[i].name, (unsigned long long)got,
                                   (unsigned long long)cfgs[i].want);
                     break;
                 }
-            }
-            std::snprintf(d, sizeof d, "%s", ok ? "all hashes match the FULL-candidate references (AB2 ballistics x AB3 harness)" : bad);
-            check(ok, g.pin, d);
-        }
-        // K7f (AB3; re-based FULL): the P flavour at
-        // modMix = 0.5 — the classic pedal. The pin hashes
-        // THIS tree's renders (below); the equivalence to
-        // the classic internal-50/50 output is the probe
-        // verdict recorded here.
-        // VERDICT (probe, this tree vs the AB2 tree — the
-        // classic chain at the SAME ballistics, so the
-        // limiter is held constant and only the blend
-        // arithmetic differs; both K7 P configs rendered
-        // sample-for-sample, 6 s each): NOT bit-identical
-        // — outL/outR differ on 17.67 % / 17.72 % (LIMIT)
-        // and 17.52 % / 17.63 % (COMP) of samples, but the
-        // largest absolute difference anywhere is
-        // 1.192e-07 = 2^-23 (one ulp of full-scale float;
-        // -138.5 dBFS), and the GR trace is bit-identical
-        // on both configs. Same rounding-path parting as
-        // AB3 measured against 1.3.1 (17.4 % / 17.6 %,
-        // same bound): (1-m)*dry + m*cascade cannot round
-        // identically to the classic in + (mix - in) * g.
-        // The AB2-side probe hashes reproduce AB2's own
-        // K7e references (f7dd0cbca857c8f4 /
-        // a1ff60de775fdc45), so the comparison chain is
-        // proven at both ends.
-        {
-            const uint64_t wantP[2] = { 0x7a11fd2b4f8cb936ull, 0x963dbf00dac0bed5ull };
-            bool ok = true;
-            char bad[160] = "";
-            for (int i = 0; i < 2; ++i) {
-                uint64_t got = renderHash(cfgs[28 + i], 0.5f);
-                if (got != wantP[i]) {
+                if (gotGr != cfgs[i].grWant) {
                     ok = false;
-                    std::snprintf(bad, sizeof bad, "%s @modMix0.5: got %016llx want %016llx",
-                                  cfgs[28 + i].name, (unsigned long long)got,
-                                  (unsigned long long)wantP[i]);
+                    std::snprintf(bad, sizeof bad, "%s: GR got %016llx want %016llx (FULL-candidate identity)",
+                                  cfgs[i].name, (unsigned long long)gotGr,
+                                  (unsigned long long)cfgs[i].grWant);
                     break;
                 }
             }
-            std::snprintf(d, sizeof d, "%s", ok ? "both hashes match the FULL references (1-ulp equivalence to the AB2 classic pedal, see above)" : bad);
-            check(ok, "K7f FULL: MOD-in P at modMix=0.5 == AB2 classic P output to 1 ulp (classic pedal)", d);
+            std::snprintf(d, sizeof d, "%s", ok ? "audio == FULL2 references; GR traces bit-identical to the FULL candidate" : bad);
+            check(ok, g.pin, d);
         }
+        // K7f RETIRED in FULL2 (cause: its subject no
+        // longer exists). It pinned the AB3-era fact that
+        // the P flavour at modMix = 0.5 reproduced the
+        // classic pedal's internal-50/50 output to 1 ulp —
+        // a property of the crossfade blend arithmetic.
+        // Under the bus the pots are channel GAINS: the P
+        // channel at modMix = 0.5 is the pedal's own
+        // output at half gain summed with the comp
+        // channel, a different (intended) signal — there
+        // is no classic-pedal chain state left to equate
+        // to. The classic-pedal fact itself survives where
+        // it lives: the machine's internal 50/50 blend is
+        // pinned at its own terminals in L7, and the P
+        // channel's identity (insert out = the pedal's
+        // output of the module signal) in M5/L7. The
+        // modMix = 0.5 P renders remain covered as plain
+        // regression references by K7e (at modMix = 1) and
+        // the processor suite's P10 pins.
     }
 
-    std::printf("\n=== L. TWO-STAGE MIX (AB3: COMP MIX / MOD MIX) ===\n");
+    std::printf("\n=== L. BUS MIX (FULL2: COMP MIX / MOD MIX channel gains) ===\n");
     {
         // Programme renders through the full chain with
         // explicit pot states (K7 protocol: setters, reset,
         // setModIn last). mod: 0 = out, 1 = in A, 2 = in P.
+        // FULL2 semantics: the pots are two channel GAINS
+        // into the output bus (AB3's crossfades are gone);
+        // pins from the AB3 round that measured the dry
+        // arms are replaced here with their bus forms,
+        // cause-noted at each pin.
         struct MixRender { std::vector<float> inL, inR, outL, outR, gr; };
         auto renderMix = [&](float compMix, float modMix, int mod, float knob, double secs) {
             osc72::Chain ch;
@@ -1772,96 +1811,77 @@ int main() {
             }
             check(ok, "L1 compMix=1/modMix=1 explicit == chain defaults, bit-exact (MOD out/A/P)", "");
         }
-        // L2: compMix=0 (modMix=0): the output is the input
-        // delayed by exactly the reported latency, in every
-        // MOD state; with MOD out the MOD MIX pot is inert
-        // at stage 1 too (0 / 0.37 / 1 all identical).
+        // L2 (FULL2; replaces the AB3 dry-arm pin — there
+        // is no dry arm anywhere now): both channel gains
+        // at 0 = digital silence at the bus, every sample,
+        // in every MOD state. (AB3's L2 pinned "output =
+        // input delayed" — that was the crossfade's dry
+        // arm, deleted by Nathan's architecture.)
         {
             bool ok = true;
-            const struct { int mod, lat; } cases[] = { { 0, 32 }, { 1, 992 }, { 2, 32 } };
-            for (const auto& c : cases) {
-                auto r = renderMix(0.0f, 0.0f, c.mod, 0.75f, 2.0);
-                // Settled-state identity: the window opens
-                // after the engage edge's 30 ms offset
-                // crossfade (1440 samples) has completed —
-                // mid-edge the dry side morphs between
-                // offsets, as the v44 tap did.
-                for (size_t i = (size_t)c.lat + 2000; i < r.outL.size(); ++i)
-                    if (r.outL[i] != r.inL[i - (size_t)c.lat] || r.outR[i] != r.inR[i - (size_t)c.lat])
-                        ok = false;
+            for (int mod : { 0, 1, 2 }) {
+                auto r = renderMix(0.0f, 0.0f, mod, 0.75f, 2.0);
+                for (size_t i = 0; i < r.outL.size(); ++i)
+                    if (r.outL[i] != 0.0f || r.outR[i] != 0.0f) ok = false;
             }
-            auto base = renderMix(0.0f, 0.0f, 0, 0.75f, 2.0);
-            for (float mm : { 0.5f, 1.0f }) {
-                auto v = renderMix(0.0f, mm, 0, 0.75f, 2.0);
-                if (v.outL != base.outL || v.outR != base.outR) ok = false;
-            }
-            check(ok, "L2 compMix=0: output == input delayed by exactly the reported latency (32/992/32)", "");
+            check(ok, "L2 both gains 0: digital silence at the bus (MOD out/A/P, every sample)", "");
         }
-        // L3: modMix=0 with MOD in A = the comp path alone,
-        // aligned: sample-equal to the MOD-out render
-        // shifted by exactly 960.
-        {
-            auto inA = renderMix(0.6f, 0.0f, 1, 0.75f, 3.0);
-            auto out = renderMix(0.6f, 0.0f, 0, 0.75f, 3.0);
-            bool ok = true;
-            for (size_t i = 960 + 2000; i < inA.outL.size(); ++i)   // settled (see L2)
-                if (inA.outL[i] != out.outL[i - 960] || inA.outR[i] != out.outR[i - 960])
-                    ok = false;
-            check(ok, "L3 modMix=0 (MOD in A): comp path alone, aligned at +960 exactly", "");
-        }
-        // L4: the linear law at partial mixes is exact
-        // superposition of the two settled arms (bit-level):
-        // (a) comp stage at 0.5, read through the mod stage
-        // at 0 (MOD in A); (b) mod stage at 0.5 in the P
-        // flavour at compMix=1.
-        {
-            auto dA = renderMix(0.0f, 0.0f, 1, 0.75f, 2.0);
-            auto wA = renderMix(1.0f, 0.0f, 1, 0.75f, 2.0);
-            auto hA = renderMix(0.5f, 0.0f, 1, 0.75f, 2.0);
-            bool okA = true;
-            // From sample 2000: ahead of it the three
-            // renders are inside the engage edge's offset
-            // crossfade, whose (b - a) * fade form rounds
-            // differently per arm — the superposition is a
-            // settled-state identity (the P-stage twin below
-            // has no offset edge and holds from sample 0).
-            for (size_t i = 2000; i < hA.outL.size(); ++i) {
-                if (hA.outL[i] != dA.outL[i] * (1.0f - 0.5f) + wA.outL[i] * 0.5f) okA = false;
-                if (hA.outR[i] != dA.outR[i] * (1.0f - 0.5f) + wA.outR[i] * 0.5f) okA = false;
-            }
-            auto dP = renderMix(1.0f, 0.0f, 2, 0.75f, 2.0);
-            auto wP = renderMix(1.0f, 1.0f, 2, 0.75f, 2.0);
-            auto hP = renderMix(1.0f, 0.5f, 2, 0.75f, 2.0);
-            bool okB = true;
-            for (size_t i = 0; i < hP.outL.size(); ++i) {
-                if (hP.outL[i] != dP.outL[i] * (1.0f - 0.5f) + wP.outL[i] * 0.5f) okB = false;
-                if (hP.outR[i] != dP.outR[i] * (1.0f - 0.5f) + wP.outR[i] * 0.5f) okB = false;
-            }
-            std::snprintf(d, sizeof d, "comp-stage superposition %d, mod-stage (P) superposition %d",
-                          (int)okA, (int)okB);
-            check(okA && okB, "L4 partial mixes are the exact linear superposition of the arms", d);
-        }
-        // L5: MOD MIX is inert with MOD out at a working
-        // comp setting: bit-identical at 0 / 0.5 / 1 (the
-        // hard selects and the exact-half law), and within
-        // one float ulp at a non-dyadic position (0.37) —
-        // blending a signal with itself under the linear
-        // law is exact only where the weights are.
+        // L3 (FULL2; replaces the AB3 alignment identity):
+        // with MOD out, CH2 is gated to exactly zero, so
+        // the MOD MIX pot is inert at ANY comp setting and
+        // ANY value — bit-identical renders at 0 / 0.37 /
+        // 0.5 / 1. (Stronger than AB3's L5, whose blend of
+        // a signal with itself was exact only at dyadic
+        // weights; a gated channel contributes nothing at
+        // all.) The channel alignment itself is pinned by
+        // impulse in M3.
         {
             auto a = renderMix(0.7f, 0.0f, 0, 0.75f, 2.0);
-            auto bq = renderMix(0.7f, 0.5f, 0, 0.75f, 2.0);
-            auto cq = renderMix(0.7f, 1.0f, 0, 0.75f, 2.0);
-            auto dq = renderMix(0.7f, 0.37f, 0, 0.75f, 2.0);
-            double mx = 0;
-            for (size_t i = 0; i < a.outL.size(); ++i) {
-                mx = std::max(mx, (double)std::fabs(dq.outL[i] - a.outL[i]));
-                mx = std::max(mx, (double)std::fabs(dq.outR[i] - a.outR[i]));
-            }
-            std::snprintf(d, sizeof d, "0.37 vs 0: max |delta| %.2e (1 ulp class)", mx);
-            check(a.outL == bq.outL && a.outR == bq.outR && a.outL == cq.outL && a.outR == cq.outR
-                  && mx <= 1.2e-7,
-                  "L5 modMix inert with MOD out (bit-exact 0/0.5/1; <=1 ulp at 0.37)", d);
+            auto bq = renderMix(0.7f, 0.37f, 0, 0.75f, 2.0);
+            auto cq = renderMix(0.7f, 0.5f, 0, 0.75f, 2.0);
+            auto dq = renderMix(0.7f, 1.0f, 0, 0.75f, 2.0);
+            check(a.outL == bq.outL && a.outR == bq.outR
+                  && a.outL == cq.outL && a.outR == cq.outR
+                  && a.outL == dq.outL && a.outR == dq.outR,
+                  "L3 MOD out: modMix fully inert (gate) — bit-identical at 0/0.37/0.5/1", "");
         }
+        // L4 (FULL2; replaces the AB3 crossfade
+        // superposition): the BUS is a true two-channel
+        // sum — out(cm, mm) == out(cm, 0) + out(0, mm)
+        // wherever the bus ceiling never binds. Stated
+        // precondition, designed into the render: knob
+        // 0.25 programme (desired make-up ~2.3 dB, bus
+        // peaks ~0.3 → the peak cap sits ~14 dB clear), so
+        // the make-up trajectory — driven by the module's
+        // GR (pot-independent, L6) — is identical across
+        // the three renders and the gains superpose to
+        // float dust. (Where the cap binds the sum is
+        // still bounded — M2 — but no longer linear; that
+        // is the ceiling doing its job, as it did inside
+        // the module.)
+        {
+            auto both = renderMix(1.0f, 1.0f, 1, 0.25f, 3.0);
+            auto compOnly = renderMix(1.0f, 0.0f, 1, 0.25f, 3.0);
+            auto modOnly = renderMix(0.0f, 1.0f, 1, 0.25f, 3.0);
+            double mx = 0;
+            for (size_t i = 0; i < both.outL.size(); ++i) {
+                mx = std::max(mx, (double)std::fabs(both.outL[i] - (compOnly.outL[i] + modOnly.outL[i])));
+                mx = std::max(mx, (double)std::fabs(both.outR[i] - (compOnly.outR[i] + modOnly.outR[i])));
+            }
+            // And each channel's gain is linear in its pot
+            // under the same precondition.
+            auto half = renderMix(0.5f, 0.0f, 1, 0.25f, 3.0);
+            double mxG = 0;
+            for (size_t i = 0; i < half.outL.size(); ++i) {
+                mxG = std::max(mxG, (double)std::fabs(half.outL[i] - 0.5f * compOnly.outL[i]));
+                mxG = std::max(mxG, (double)std::fabs(half.outR[i] - 0.5f * compOnly.outR[i]));
+            }
+            std::snprintf(d, sizeof d, "superposition max err %.2e; gain-linearity max err %.2e (cap non-binding regime)", mx, mxG);
+            check(mx < 2.0e-6 && mxG < 2.0e-6,
+                  "L4 bus superposition: out(1,1) == out(1,0) + out(0,1); channel gains linear", d);
+        }
+        // L5: folded into L3 in FULL2 (the gate makes the
+        // MOD-out inertness exact at every pot value).
         // L6: the GR readout is the limiter's, untouched by
         // either pot: the GR trace of a partial-mix render
         // equals the fully-wet render's trace sample-for-
@@ -1872,16 +1892,21 @@ int main() {
             check(a.gr == bq.gr && a.gr.back() > 0.0f,
                   "L6 GR trace identical at partial mixes (meter source unchanged)", "");
         }
-        // L7 (the classic-pedal proof, AB3 steer): with the
-        // LFO frozen at the sweep bottom (break 600 Hz), the
-        // first notch sits where the J-section law puts it.
-        // The chain's law, applied to the machine's two arms
-        // (dry from a lockstep twin running process(), the
-        // cascade from processEffect()), must null at
-        // modMix 0.5 with the classic depth, tilt to
-        // ~-6 dB at 0.25/0.75 (the (1-2m) residue), and
-        // vanish at 1.0 (the pure cascade is allpass,
-        // |H| = 1 — no notch at all).
+        // L7 (the classic-pedal proof, AB3 steer; FULL2:
+        // a MACHINE-level pin — the bus no longer blends
+        // the phaser's arms, so the classic pedal is what
+        // the insert's own terminals produce): with the
+        // LFO frozen at the sweep bottom (break 600 Hz),
+        // the first notch sits where the J-section law
+        // puts it. The machine's two arms (dry from a
+        // lockstep twin running process(), the cascade
+        // from processEffect()) must null at the internal
+        // 50/50 with the classic depth, tilt to ~-6 dB at
+        // 0.25/0.75 (the (1-2m) residue), and vanish at
+        // 1.0 (the pure cascade is allpass, |H| = 1 — no
+        // notch at all). In FULL2 the bus's MOD channel is
+        // process()'s own output — the classic pedal,
+        // whole — at the MOD MIX gain.
         {
             const double fb = 600.0;
             const double tN = std::tan(22.5 * kPi / 180.0) * std::tan(kPi * fb / kFs);
@@ -1910,11 +1935,11 @@ int main() {
             std::snprintf(d, sizeof d, "notch %.0f Hz: classic %.1f dB; blend 0.25 %.2f, 0.5 %.1f, 0.75 %.2f, 1.0 %+.2f dB",
                           fNotch, gClassic, g25, g50, g75, g100);
             check(g50 < -90.0 && gClassic < -90.0,
-                  "L7a modMix 0.5 notch depth == the classic pedal's (both algebraic nulls)", d);
+                  "L7a the pedal's internal 50/50 notch is the classic algebraic null (machine level)", d);
             check(g25 > -7.5 && g25 < -4.5 && g75 > -7.5 && g75 < -4.5,
-                  "L7b notch depth at 0.25 / 0.75 ~= -6 dB (the (1-2m) residue)", d);
+                  "L7b arm-superposition notch depth at 0.25 / 0.75 ~= -6 dB (the (1-2m) residue)", d);
             check(std::fabs(g100) < 0.75,
-                  "L7c modMix 1.0: no notch — the pure cascade is allpass-flat", d);
+                  "L7c the pure cascade is allpass-flat (no notch)", d);
         }
         // L8 (report data, printed): programme level across
         // both pots' travel — no compensation anywhere;
@@ -1928,19 +1953,314 @@ int main() {
                 }
                 return 10.0 * std::log10(s / (double)n);
             };
-            std::printf("      programme RMS (knob 0.75, 4 s, second half):\n");
+            std::printf("      programme RMS (knob 0.75, 4 s, second half) — bus channel travels:\n");
             for (int mod : { 1, 2 }) {
                 for (float mm : { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f }) {
+                    auto r = renderMix(0.0f, mm, mod, 0.75f, 4.0);
+                    std::printf("        MOD in %s, compMix 0, modMix %.2f (insert channel alone): %.2f dBFS\n",
+                                mod == 1 ? "A" : "P", (double)mm, rmsDb(r));
+                }
+                for (float mm : { 0.0f, 0.5f, 1.0f }) {
                     auto r = renderMix(1.0f, mm, mod, 0.75f, 4.0);
-                    std::printf("        MOD in %s, modMix %.2f: %.2f dBFS\n",
+                    std::printf("        MOD in %s, compMix 1, modMix %.2f (both channels): %.2f dBFS\n",
                                 mod == 1 ? "A" : "P", (double)mm, rmsDb(r));
                 }
             }
             for (float cm : { 0.0f, 0.5f, 1.0f }) {
-                auto r = renderMix(cm, 1.0f, 0, 0.75f, 4.0);
-                std::printf("        MOD out, compMix %.2f: %.2f dBFS\n", (double)cm, rmsDb(r));
+                auto r = renderMix(cm, 0.0f, 0, 0.75f, 4.0);
+                std::printf("        MOD out, compMix %.2f, modMix 0 (comp channel): %.2f dBFS\n",
+                            (double)cm, rmsDb(r));
             }
             check(true, "L8 level table printed (report data)");
+        }
+    }
+
+    std::printf("\n=== M. FULL2 BUS ARCHITECTURE + ADT END-GOAL ACCEPTANCE ===\n");
+    {
+        char d[512];
+        // M1 — Nathan's acceptance (1), the feed itself:
+        // at compMix=0 the insert feed (the send tap) must
+        // MOVE with INPUT. In the FULL candidate the feed
+        // at compMix=0 was the raw input — the diagnosis
+        // proved candidate renders at INPUT 5 vs 10
+        // digit-identical (max |delta| = 0.000e+00). Here
+        // the tap is the module's own output: (a) it equals
+        // a module-mode limiter's output bit-for-bit in
+        // lockstep; (b) its level/crest travel across the
+        // knob is the module's (printed; asserted below);
+        // (c) the insert-channel renders differ at every
+        // knob step.
+        {
+            osc72::Chain ch;
+            ch.prepare(kFs);
+            ch.setKnob(0.5f);
+            ch.setCompMix(0.0f);
+            ch.setModMix(1.0f);
+            ch.reset();
+            ch.setModIn(true);
+            osc72::Ba6aLimiter lim;
+            lim.setApplyMakeup(false);
+            lim.prepare(kFs);
+            lim.setKnob(0.5f);
+            lim.reset();
+            ProgGen pg;
+            bool tapOk = true;
+            for (int i = 0; i < (int)(2.0 * kFs); ++i) {
+                float l, r; pg.sample(i, l, r);
+                float mL, mR; lim.process(l, r, mL, mR);
+                float oL, oR; ch.process(l, r, oL, oR);
+                if (ch.insertFeedL() != mL || ch.insertFeedR() != mR) tapOk = false;
+            }
+            check(tapOk, "M1a insert feed == the module's own output, bit-exact in lockstep", "");
+
+            std::printf("      insert feed at compMix=0 (programme, settled half of 6 s):\n");
+            double rmsK[5], crestK[5];
+            int idx = 0;
+            for (float knob : { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f }) {
+                osc72::Chain c2;
+                c2.prepare(kFs);
+                c2.setKnob(knob);
+                c2.setCompMix(0.0f);
+                c2.setModMix(1.0f);
+                c2.reset();
+                c2.setModIn(true);
+                ProgGen pg2;
+                double sf = 0; float pk = 0; int cnt = 0;
+                for (int i = 0; i < (int)(6.0 * kFs); ++i) {
+                    float l, r; pg2.sample(i, l, r);
+                    float oL, oR; c2.process(l, r, oL, oR);
+                    if (i >= (int)(3.0 * kFs)) {
+                        const float f = c2.insertFeedL();
+                        sf += (double)f * f; pk = std::max(pk, std::fabs(f)); ++cnt;
+                    }
+                }
+                const double rms = 10.0 * std::log10(sf / cnt);
+                const double pkDb = 20.0 * std::log10((double)pk);
+                rmsK[idx] = rms; crestK[idx] = pkDb - rms; ++idx;
+                std::printf("        INPUT %4.1f: feed RMS %.2f dBFS, peak %.2f dBFS, crest %.2f dB\n",
+                            (double)(knob * 10.0f), rms, pkDb, pkDb - rms);
+            }
+            std::snprintf(d, sizeof d, "feed RMS travel %+.2f dB (INPUT 0 -> 10), crest falls %.2f dB",
+                          rmsK[4] - rmsK[0], crestK[0] - crestK[4]);
+            check(rmsK[4] - rmsK[0] > 10.0 && crestK[0] - crestK[4] > 5.0
+                  && rmsK[3] > rmsK[2] && rmsK[2] > rmsK[1],
+                  "M1b the send moves materially with INPUT at compMix=0 (it did not vary at all in FULL)", d);
+        }
+        // M2 — the 1.600 ceiling, relocated to the bus:
+        // programme peaks at the bus output stay bounded
+        // with both channels at full gain, both flavours,
+        // at the drives where the desired make-up far
+        // exceeds the cap (INPUT 7.5 / 10).
+        {
+            double worst = 0;
+            for (int mod : { 1, 2 }) {
+                for (float knob : { 0.75f, 1.0f }) {
+                    osc72::Chain ch;
+                    ch.prepare(kFs);
+                    ch.setKnob(knob);
+                    ch.setCompMix(1.0f);
+                    ch.setModMix(1.0f);
+                    ch.setModPhaser(mod == 2);
+                    ch.reset();
+                    ch.setModIn(true);
+                    ProgGen pg;
+                    for (int i = 0; i < (int)(6.0 * kFs); ++i) {
+                        float l, r; pg.sample(i, l, r);
+                        float oL, oR; ch.process(l, r, oL, oR);
+                        worst = std::max(worst, (double)std::max(std::fabs(oL), std::fabs(oR)));
+                    }
+                }
+            }
+            std::snprintf(d, sizeof d, "worst bus peak %.4f across A/P at INPUT 7.5/10, gains 1/1", worst);
+            check(worst <= 1.6001, "M2 bus ceiling: programme peaks bounded at 1.600 with both channels full", d);
+        }
+        // M3 — channel alignment at the bus, by impulse:
+        // with MOD in A, BOTH channels arrive at +992 and
+        // nothing arrives before, at full and partial
+        // gains; with MOD out the comp channel arrives at
+        // +32. (Replaces the alignment content of the old
+        // crossfade pins; the processor's P9 pins cover
+        // the same facts through the APVTS path.)
+        {
+            struct ImpRes { int peakAt; float pre960; float pre976; };
+            auto impulsePeak = [&](float cm, float mm, bool modIn) {
+                osc72::Chain ch;
+                ch.prepare(kFs);
+                ch.setKnob(0.0f);
+                ch.setCompMix(cm);
+                ch.setModMix(mm);
+                ch.reset();
+                ch.setModIn(modIn);
+                const int impAt = 24000, total = 48000;
+                ImpRes r { -1, 0.0f, 0.0f };
+                float peak = 0;
+                for (int i = 0; i < total; ++i) {
+                    float oL, oR;
+                    ch.process(i == impAt ? 0.5f : 0.0f, i == impAt ? 0.5f : 0.0f, oL, oR);
+                    const int rel = i - impAt;
+                    if (modIn && rel >= 0 && rel < 960) r.pre960 = std::max(r.pre960, std::fabs(oL));
+                    if (modIn && rel >= 0 && rel < 976) r.pre976 = std::max(r.pre976, std::fabs(oL));
+                    if (rel >= 0 && std::fabs(oL) > peak) { peak = std::fabs(oL); r.peakAt = rel; }
+                }
+                return r;
+            };
+            auto a11 = impulsePeak(1.0f, 1.0f, true);
+            auto aHalf = impulsePeak(0.5f, 0.5f, true);
+            auto aC = impulsePeak(1.0f, 0.0f, true);
+            auto aM = impulsePeak(0.0f, 1.0f, true);
+            auto aOut = impulsePeak(0.5f, 0.5f, false);
+            // Exact invariants: every channel's peak lands
+            // on its reported latency offset; the COMP
+            // channel is exactly silent before +960 (its
+            // delayed IR's first sample) with only the OS
+            // filter's leading edge (< 2e-5, measured
+            // 8.4e-6) before the +992 peak sample. In the
+            // mixed renders the pre-window also carries the
+            // ADT's early DECK echoes (deck delays 14-33 ms
+            // < the SRC's 20 ms + module onset) — bounded
+            // to < 5e-4 absolute (measured 1.7e-5: a lone
+            // impulse through the tape band).
+            std::snprintf(d, sizeof d,
+                          "peaks: (1,1) +%d, (0.5,0.5) +%d, comp-only +%d, mod-only +%d, MOD out +%d; comp pre-960 %.1e, pre-976 %.1e; mixed pre-976 %.1e",
+                          a11.peakAt, aHalf.peakAt, aC.peakAt, aM.peakAt, aOut.peakAt,
+                          (double)aC.pre960, (double)aC.pre976, (double)a11.pre976);
+            check(a11.peakAt == 992 && aHalf.peakAt == 992 && aC.peakAt == 992 && aM.peakAt == 992
+                  && aOut.peakAt == 32 && aC.pre960 == 0.0f && aC.pre976 < 2.0e-5 && a11.pre976 < 5.0e-4,
+                  "M3 channels time-aligned at the bus (+992 both, partial gains too; comp channel silent before)", d);
+        }
+        // M4 — Nathan's ADT end-goal acceptance (mono in,
+        // compMix=0, modMix=1, flavour A): a full dry mono
+        // centre (the ADT's SRC at full strength) plus one
+        // deck hard on each side, the decks decorrelated
+        // in delay AND pitch, offset at all times in the
+        // mean (FULL2 stagger: deck 1/RIGHT +1.0 ms).
+        {
+            // Chain level: centre/side decomposition.
+            osc72::Chain ch;
+            ch.prepare(kFs);
+            ch.setKnob(0.5f);
+            ch.setCompMix(0.0f);
+            ch.setModMix(1.0f);
+            ch.reset();
+            ch.setModIn(true);
+            ProgGen pg;
+            const int total = (int)(6.0 * kFs), w0 = (int)(3.0 * kFs);
+            std::vector<float> feed((size_t)total), oL((size_t)total), oR((size_t)total);
+            for (int i = 0; i < total; ++i) {
+                float l, r; pg.sample(i, l, r);
+                const float m = 0.5f * (l + r);
+                ch.process(m, m, oL[(size_t)i], oR[(size_t)i]);
+                feed[(size_t)i] = ch.insertFeedL();
+            }
+            double mf = 0, ff = 0, mm2 = 0, eS = 0;
+            for (int i = w0; i < total; ++i) {
+                const double M = 0.5 * (oL[(size_t)i] + oR[(size_t)i]);
+                const double S = 0.5 * (oL[(size_t)i] - oR[(size_t)i]);
+                const double F = feed[(size_t)(i - 960)];
+                mf += M * F; ff += F * F; mm2 += M * M; eS += S * S;
+            }
+            const double corrM = mf / std::sqrt(ff * mm2);
+            const double smDb = 10.0 * std::log10(eS / mm2);
+            // Unit level: SRC strength in the centre, sides
+            // carry no SRC component, decks decorrelated.
+            osc72::AdtChain adt;
+            adt.prepare(kFs);
+            adt.setEnabled(true);
+            ProgGen pg2;
+            std::vector<float> in((size_t)total), aL((size_t)total), aR((size_t)total);
+            for (int i = 0; i < total; ++i) {
+                float l, r; pg2.sample(i, l, r);
+                const float m = 0.5f * (l + r);
+                in[(size_t)i] = m;
+                adt.process(m, m, aL[(size_t)i], aR[(size_t)i]);
+            }
+            double uMf = 0, uFf = 0, uSf = 0, sab = 0, saa = 0, sbb = 0;
+            for (int i = w0; i < total; ++i) {
+                const double f = in[(size_t)(i - 960)];
+                const double M = 0.5 * (aL[(size_t)i] + aR[(size_t)i]);
+                const double S = 0.5 * (aL[(size_t)i] - aR[(size_t)i]);
+                const double dl = aL[(size_t)i] - f, dr = aR[(size_t)i] - f;
+                uMf += M * f; uFf += f * f; uSf += S * f;
+                sab += dl * dr; saa += dl * dl; sbb += dr * dr;
+            }
+            const double srcSlope = uMf / uFf;
+            const double sideSlope = uSf / uFf;
+            const double deckCorr = sab / std::sqrt(saa * sbb);
+            // Deck trajectories, 12 s.
+            osc72::AdtChain tr;
+            tr.prepare(kFs);
+            tr.setEnabled(true);
+            const int tN = (int)(12.0 * kFs);
+            std::vector<double> d1((size_t)tN), d2((size_t)tN);
+            for (int i = 0; i < tN; ++i) {
+                float xL, xR; tr.process(0.0f, 0.0f, xL, xR);
+                d1[(size_t)i] = tr.deckDelayMs(1);
+                d2[(size_t)i] = tr.deckDelayMs(2);
+            }
+            auto pearson = [](const std::vector<double>& a, const std::vector<double>& b) {
+                const size_t n = a.size();
+                double ma = 0, mb = 0;
+                for (size_t i = 0; i < n; ++i) { ma += a[i]; mb += b[i]; }
+                ma /= (double)n; mb /= (double)n;
+                double xy = 0, xx = 0, yy = 0;
+                for (size_t i = 0; i < n; ++i) {
+                    xy += (a[i] - ma) * (b[i] - mb);
+                    xx += (a[i] - ma) * (a[i] - ma);
+                    yy += (b[i] - mb) * (b[i] - mb);
+                }
+                return xy / std::sqrt(xx * yy);
+            };
+            std::vector<double> p1((size_t)tN - 1), p2((size_t)tN - 1);
+            double meanDiff = 0, frac01 = 0;
+            for (int i = 0; i < tN; ++i) {
+                meanDiff += d1[(size_t)i] - d2[(size_t)i];
+                if (std::fabs(d1[(size_t)i] - d2[(size_t)i]) < 0.1) ++frac01;
+                if (i + 1 < tN) {
+                    p1[(size_t)i] = -(d1[(size_t)(i + 1)] - d1[(size_t)i]);
+                    p2[(size_t)i] = -(d2[(size_t)(i + 1)] - d2[(size_t)i]);
+                }
+            }
+            meanDiff /= tN;
+            const double rhoD = pearson(d1, d2), rhoP = pearson(p1, p2);
+            std::snprintf(d, sizeof d,
+                          "centre corr %.3f, S/M %.2f dB; SRC slope %.3f, side slope %+.3f, deck corr %+.3f; traj rho d %+.3f / p %+.3f, mean sep %+.2f ms, |d|<0.1ms %.2f%%",
+                          corrM, smDb, srcSlope, sideSlope, deckCorr, rhoD, rhoP,
+                          meanDiff, 100.0 * frac01 / tN);
+            check(corrM > 0.90 && srcSlope > 0.95 && srcSlope < 1.08
+                  && std::fabs(sideSlope) < 0.12 && std::fabs(deckCorr) < 0.30
+                  && std::fabs(rhoD) < 0.2 && std::fabs(rhoP) < 0.2
+                  && meanDiff > -6.0 && meanDiff < -3.5 && frac01 / tN < 0.03,
+                  "M4 mono ADT acceptance: full dry centre (SRC at full strength) + hard decks, decorrelated, offset in the mean", d);
+        }
+        // M5 — flavour P, mono in, compMix=0/modMix=1:
+        // the phaser is a mono-pedal model (one shared
+        // coefficient law; the channels run independently
+        // but identically), so a mono input yields a pure
+        // mono output — bit-identical channels, zero side
+        // energy, no widening. Stated plainly per the
+        // steer; no voicing change for P this round.
+        {
+            osc72::Chain ch;
+            ch.prepare(kFs);
+            ch.setKnob(0.5f);
+            ch.setCompMix(0.0f);
+            ch.setModMix(1.0f);
+            ch.setModPhaser(true);
+            ch.reset();
+            ch.setModIn(true);
+            ProgGen pg;
+            bool same = true;
+            double s = 0; int cnt = 0;
+            for (int i = 0; i < (int)(4.0 * kFs); ++i) {
+                float l, r; pg.sample(i, l, r);
+                const float m = 0.5f * (l + r);
+                float oL, oR; ch.process(m, m, oL, oR);
+                if (oL != oR) same = false;
+                if (i >= (int)(2.0 * kFs)) { s += (double)oL * oL; ++cnt; }
+            }
+            std::snprintf(d, sizeof d, "L==R bit-exact %d; mono out RMS %.2f dBFS", (int)same,
+                          10.0 * std::log10(s / cnt));
+            check(same, "M5 flavour P mono in: pure mono out (identical channels, no widening — mono-pedal model)", d);
         }
     }
 

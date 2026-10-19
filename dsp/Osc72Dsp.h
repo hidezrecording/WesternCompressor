@@ -513,6 +513,24 @@ public:
     // was out of the path — so the shipped 1.3.1 audio
     // and every ballistics pin hold bit-exact.
 
+    // FULL2 (bus architecture, Nathan): false = MODULE
+    // mode — process() returns the raw module output (post
+    // output transformer, PRE make-up, no instant ceiling,
+    // no output-rate ceiling guard): the signal the MOD
+    // send and the COMP bus channel are fed from. The
+    // make-up LAW still runs inside (avg-GR tracker, peak
+    // tracker, cap, slew — appliedMakeupDb() stays live)
+    // so the direct-limiter behaviour at the default
+    // (true) is bit-identical to every earlier build; the
+    // Chain sets false in prepare() and re-applies the
+    // law at the output bus, where the peak the cap reads
+    // is the summed bus's own. GR, ballistics, statics and
+    // the detector (which reads pre-make-up lastPre) are
+    // untouched in either mode — the diagnosis verified
+    // the GR trace is unchanged with make-up forced off.
+    void setApplyMakeup(bool apply) { applyMakeup_ = apply; }
+    bool applyMakeup() const { return applyMakeup_; }
+
     void process(float inL, float inR, float& outL, float& outR);
 
     // Host-rate delay of the oversampling resampler pair
@@ -580,6 +598,7 @@ private:
     float grDb_ = 0.0f;
     float avgGrDb_ = 0.0f;
     float makeupDb_ = 0.0f;
+    bool applyMakeup_ = true;   // FULL2: false = module mode (see setter)
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -588,7 +607,8 @@ private:
 //   SRC  = the source itself, delayed by the 20 ms base offset
 //          (the non-Live arrangement: decks may swing ahead of
 //          and behind the source). Reported latency = base.
-//   DECK 1 (offset 20 ms): sine LFO ±6 ms @ 0.30 Hz, panned
+//   DECK 1 (offset 20 ms; FULL2: + kAdtDeck1StaggerMs —
+//          see its note): sine LFO ±6 ms @ 0.30 Hz, panned
 //          hard RIGHT.
 //   DECK 2 (offset 25 ms): smoothed-random LFO ±8 ms, panned
 //          hard LEFT.
@@ -605,6 +625,19 @@ private:
 // ─────────────────────────────────────────────────────────────────────
 inline constexpr float kAdtBaseMs      = 20.0f;
 inline constexpr float kAdtDeck2BaseMs = 25.0f;
+// FULL2-ONLY VOICING (Nathan, tempered steer): a small
+// static stagger on deck 1 (the RIGHT deck) so the two
+// sides are offset at all times — "not extreme, just
+// barely enough to not have phase cancellation... just
+// enough for a wide stereo feel", the width coming from
+// the hard panning + decorrelated modulation (sine vs
+// smoothed-random), not from a large L/R time split.
+// +1.0 ms (the ~1 ms class he targeted); the separation
+// statistics that arbitrate it are measured in the FULL2
+// report (min instantaneous |dR-dL|, coincidence dwell,
+// trajectory cross-correlations over 12 s). This tree
+// only — 1.3.1 and the FULL candidate keep 20.0.
+inline constexpr float kAdtDeck1StaggerMs = 1.0f;
 inline constexpr float kAdtLfo1Ms      = 6.0f;
 inline constexpr float kAdtLfo1Hz      = 0.30f;
 inline constexpr float kAdtLfo2Ms      = 8.0f;
@@ -740,15 +773,15 @@ public:
     // allpass cascade, with the same engage fade applied
     // toward the cascade instead of toward the classic
     // 50/50 mix (exact input at fade 0, exact cascade at
-    // fade 1). This is the wet arm the chain's MOD MIX
-    // stage blends against the post-comp signal: with the
-    // chain's linear crossfade, modMix 0.5 reproduces the
-    // classic pedal (0.5 dry + 0.5 cascade — the mix this
-    // class's process() has always made internally), 1.0
-    // is the pure phased signal and 0.25/0.75 tilt the
-    // comb either way. process() above is unchanged: the
-    // machine's classic self-contained output, still what
-    // the J-suite pins.
+    // fade 1). In AB3 this was the chain's MOD MIX wet
+    // arm; in FULL2 the bus takes the machine's own
+    // output (process(), the classic 50/50 pedal) as the
+    // MOD channel, per Nathan's bus spec — the insert's
+    // own output IS the channel — so processEffect() is
+    // retained as the cascade's test surface (the J/L
+    // suites pin the machine's two arms directly).
+    // process() above is unchanged: the machine's classic
+    // self-contained output.
     void processEffect(float inL, float inR, float& outL, float& outR);
 
     // Introspection (tests)
@@ -808,14 +841,35 @@ private:
 // output bit-for-bit. Latency follows the SELECTED flavour:
 // the ADT base offset with A, the oversampling figure alone
 // with P.
-// AB3 (gui-v60 test round): the path is restructured into
-// TWO aligned blend stages around the inserts — COMP MIX
-// (input delayed 32 vs the limiter output) ahead of them,
-// MOD MIX (the post-comp signal delayed by the inserts'
-// own latency vs the engaged flavour's wet arm) behind
-// them; see the setters in the class for the full note.
-// The reported latency is unchanged (32 / 992-A / 32-P)
-// and does not depend on either pot.
+// AB3 (gui-v60 test round): the path was restructured
+// into TWO aligned blend stages around the inserts.
+// FULL2 (bus architecture, Nathan — superseding AB3's
+// cascade): the path is a two-channel MIXER on the
+// PA-200 pattern. INPUT drives the compressor module AND
+// the sends. The module (make-up DISABLED inside it —
+// Ba6aLimiter module mode) feeds two parallel channels:
+//   CH1 COMP: the module output, time-aligned at the bus
+//     by the engaged insert's extra latency (the v44
+//     offset crossfade retargeted onto this channel).
+//   CH2 MOD: the insert's own output — the ADT's natural
+//     output / the Phase 90's classic output — the insert
+//     being fed POST-COMPRESSOR from the module output,
+//     at every pot position. An engagement gate (the
+//     inserts' own 30 ms span) silences the channel while
+//     MOD is out: CH2 contributes nothing.
+// COMP MIX and MOD MIX are the channels' GAINS (not
+// crossfades — no dry arm anywhere), and the AUTO MAKE-UP
+// happens AT THE BUS: the shipped law (0.92.avgGR +
+// 7k^2 crank, peak-aware ceiling, programme peaks
+// bounded at 1.600) computed from the module's GR and
+// applied to the summed bus, its peak tracker reading
+// the bus's own pre-make-up peak. The GR meter still
+// reads the module's GR. The reported latency is
+// unchanged (32 / 992-A / 32-P) and does not depend on
+// either pot. Diagnosis: docs/../DIAGNOSIS (staging
+// folder) — at AB3's compMix=0 the insert feed was the
+// raw input (INPUT-invariant, bit-proven); here the send
+// carries the module output unconditionally.
 // ─────────────────────────────────────────────────────────────────────
 
 class Chain {
@@ -854,35 +908,33 @@ public:
     void setModPhaser(bool phaser) { modPhaser_ = phaser; }
     bool modPhaser() const { return modPhaser_; }
 
-    // ── AB3 (gui-v60 round, Nathan): the two strip pots,
-    // repurposed as a TWO-STAGE pair of linear crossfades
-    // (weights sum to 1 at every position):
-    //   COMP MIX (the ex-SIDECHAIN pot): dry input delayed
-    //     by the limiter's own 32 samples against the
-    //     limiter's output — parallel compression.
-    //   MOD MIX (the ex-MIX pot): the post-comp signal
-    //     delayed by (chain latency − 32) against the
-    //     engaged insert's WET ARM — for the ADT its
-    //     natural output as authored (SRC centre + decks);
-    //     for the Phase 90 the bare allpass cascade, so
-    //     this pot at 0.5 IS the classic pedal (0.5 dry +
-    //     0.5 cascade), at 1.0 the pure phased signal.
+    // ── The two strip pots (AB3 repurposing; FULL2
+    // semantics, Nathan): COMP MIX (the ex-SIDECHAIN pot)
+    // is the COMP channel's gain on the output bus and
+    // MOD MIX (the ex-MIX pot) the MOD channel's gain —
+    // GAINS, not crossfades (see the class note above).
     // Both targets slew per sample on the retired whole-
     // chain mix's law (one-pole 0.002, snap 2e-5) and snap
-    // to their targets in reset(); the extremes are hard
-    // selects, so compMix = 1 passes the limiter output
-    // untouched and modMix = 1 the wet arm untouched. With
-    // MOD out the inserts return their input bit-exact, so
-    // the MOD MIX pot is inert. Chain-level defaults are
-    // 1.0/1.0 (fully wet both stages — the DSP suite's
-    // classic pins address the chain directly); the
-    // PROCESSOR's parameters default to 0.5/0.5 (12
-    // o'clock, Nathan) and are pushed into the chain on
-    // prepare and on every block.
+    // to their targets in reset(). With MOD out the MOD
+    // channel is gated to silence, so the MOD MIX pot is
+    // inert. Chain-level defaults are 1.0/1.0 (both
+    // channels at full gain — the DSP suite's classic
+    // pins address the chain directly); the PROCESSOR's
+    // parameters default to 0.5/0.5 (12 o'clock, Nathan)
+    // and are pushed into the chain on prepare and on
+    // every block.
     void setCompMix(float m) { compMixTarget_ = clampf(m, 0.0f, 1.0f); }
     float compMix() const { return compMixTarget_; }
     void setModMix(float m) { modMixTarget_ = clampf(m, 0.0f, 1.0f); }
     float modMix() const { return modMixTarget_; }
+
+    // FULL2 introspection (tests): the bus make-up the
+    // law is currently applying, and the insert feed —
+    // the module output sample the inserts were last fed
+    // (the send tap itself, pre-insert).
+    float busMakeupDb() const { return busMakeupDb_; }
+    float insertFeedL() const { return lastFeedL_; }
+    float insertFeedR() const { return lastFeedR_; }
 
     int latencySamples() const
     {
@@ -905,9 +957,11 @@ public:
     void process(float inL, float inR, float& outL, float& outR);
 
 private:
-    // AB3: the mod stage's dry-side offset — the part of
+    // FULL2: the COMP channel's bus offset — the part of
     // the reported latency the inserts themselves add
-    // (960 for MOD-in A, 0 otherwise).
+    // (960 for MOD-in A, 0 otherwise). The comp channel
+    // is delayed by it so both channels arrive at the bus
+    // together; latencySamples() reports the same figure.
     int modExtraTarget() const
     {
         return (adt_.enabled() && !modPhaser_) ? adt_.latencySamples() : 0;
@@ -923,27 +977,39 @@ private:
     Phaser90 phaser_;
     bool modPhaser_ = false;   // v55: false = A (ADT), true = P (phaser)
     float modBlend_ = 0.0f;    // v55: flavour blend, 0 = A .. 1 = P
-    // AB3 two-stage mix state (see the setters above).
+    // FULL2 bus state (see the setters above).
     float compMixTarget_ = 1.0f, compMixCur_ = 1.0f;
     float modMixTarget_ = 1.0f, modMixCur_ = 1.0f;
-    // Stage 1's dry tap: the raw input delayed by exactly
-    // the limiter's oversampling delay (32 host samples,
-    // constant), so no edge treatment is ever needed.
-    static constexpr int kDry32Size = 128;   // power of two, >> 32
-    float dry32L_[kDry32Size] = {}, dry32R_[kDry32Size] = {};
-    int dry32Write_ = 0;
-    // Stage 2's dry tap: the post-comp signal's ring,
-    // read at the current mod offset. Sized in prepare()
-    // for the ADT's 20 ms plus margin (power of two).
+    // The MOD channel's engagement gate: 1 while MOD is
+    // in (settled), 0 while out; slews linearly over the
+    // inserts' own 30 ms engage span on MOD edges, so the
+    // channel fades with its machine and is exactly 0
+    // settled-out (CH2 contributes nothing, per spec).
+    float modGate_ = 0.0f;
+    // The COMP channel's alignment ring: the module
+    // output, read at the current bus offset. Sized in
+    // prepare() for the ADT's 20 ms plus margin (power
+    // of two).
     std::vector<float> compRingL_, compRingR_;
     int compMask_ = 0;
     int compWrite_ = 0;
-    // The v44 offset crossfade, moved into the chain:
-    // when the offset target changes (MOD toggle, A/P
-    // flavour edge) reads crossfade old -> new over
-    // 30 ms — the inserts' own engagement span.
+    // The v44 offset crossfade, retargeted onto the COMP
+    // channel: when the offset target changes (MOD
+    // toggle, A/P flavour edge) the comp channel's reads
+    // crossfade old -> new over 30 ms — the inserts' own
+    // engagement span.
     int modDelayA_ = 0, modDelayB_ = 0;
     float modTapFade_ = 1.0f;   // 1 = settled on modDelayB_
+    // The bus make-up law's state (FULL2): the shipped
+    // law's trackers, running at host rate on the bus —
+    // avg-GR (charge/decay taus), the slow-decay peak of
+    // the bus's own pre-make-up signal, and the slewed
+    // make-up itself. See process().
+    float busAvgGrDb_ = 0.0f;
+    float busPrePeak_ = 0.0f;
+    float busMakeupDb_ = 0.0f;
+    // Insert-feed introspection (the send tap).
+    float lastFeedL_ = 0.0f, lastFeedR_ = 0.0f;
 };
 
 } // namespace osc72
