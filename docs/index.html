@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="Western Compressor: a tube limiting amplifier in the RCA BA-6A tradition, modeled at the component level, with reel ADT and Phase 90 modulation. VST3 and AU for Mac.">
+<title>Western Compressor — Tube Limiting Amplifier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Roboto+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#090807;
+  --ink-2:#11100e;
+  --panel:#171512;
+  --panel-hi:#211e19;
+  --line:#4c4336;
+  --line-soft:#2d2923;
+  --paper:#eee1c3;
+  --paper-dim:#b9aa8d;
+  --amber:#f6a21b;
+  --amber-hi:#ffc45b;
+  --green:#69ed9a;
+  --wood:#b66a24;
+  --shadow:rgba(0,0,0,.64);
+  --font:"Roboto Condensed", "Arial Narrow", sans-serif;
+}
+@media (prefers-color-scheme:light){
+  :root{
+    --ink:#090807; --ink-2:#11100e; --panel:#171512; --panel-hi:#211e19;
+    --line:#4c4336; --line-soft:#2d2923; --paper:#eee1c3; --paper-dim:#b9aa8d;
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;
+  color:var(--paper);
+  background:
+    radial-gradient(ellipse 76% 38% at 50% -8%,rgba(246,162,27,.105),transparent 68%),
+    radial-gradient(ellipse 55% 30% at 50% 42%,rgba(182,106,36,.045),transparent 72%),
+    linear-gradient(180deg,#0e0c09 0%,#070706 45%,#0c0a08 100%);
+  font-family:var(--font);
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+body:before{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.22;
+  background-image:repeating-linear-gradient(92deg,rgba(255,255,255,.008) 0,rgba(255,255,255,.008) 1px,transparent 1px,transparent 4px)
+}
+a{color:inherit}
+button,input{font:inherit}
+.shell{width:min(1240px,100%);margin:0 auto;padding:42px 24px 68px}
+
+.hero{text-align:center}
+.eyebrow{
+  display:inline-flex;align-items:center;gap:12px;
+  font-weight:700;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber-hi)
+}
+.eyebrow:before,.eyebrow:after{content:"";width:34px;height:1px;background:linear-gradient(90deg,transparent,var(--amber))}
+.eyebrow:after{transform:scaleX(-1)}
+h1{
+  margin:16px auto 12px;max-width:880px;
+  font-size:clamp(36px,6.2vw,78px);line-height:.97;letter-spacing:-.025em;text-transform:uppercase;
+  color:#f4e8ca;text-shadow:0 1px 0 #4e4230,0 9px 32px rgba(0,0,0,.42)
+}
+.deck{margin:0 auto;max-width:760px;color:#c3b493;font-size:clamp(17px,2vw,21px);text-wrap:balance}
+.deck strong{color:var(--paper);font-weight:600}
+.actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:25px}
+.btn{
+  min-height:48px;padding:0 22px;border:1px solid transparent;border-radius:3px;
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  font-weight:700;font-size:13px;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;
+  cursor:pointer;transition:background-color .2s ease,border-color .2s ease,color .2s ease,transform .2s ease,box-shadow .2s ease
+}
+.btn:hover{transform:translateY(-2px)}
+.btn:focus-visible,input:focus-visible{outline:2px solid var(--amber-hi);outline-offset:3px}
+.btn-primary{
+  color:#1b1003;background:linear-gradient(180deg,#ffd06f 0%,var(--amber-hi) 8%,var(--amber) 78%,#d27b08 100%);
+  border-color:#ffcf76;box-shadow:inset 0 1px rgba(255,255,255,.65),inset 0 -1px rgba(86,41,0,.28),0 12px 28px rgba(246,162,27,.2)
+}
+.btn-primary:hover{background:linear-gradient(180deg,#ffdc8c,#f6ab28 80%,#dd850c);box-shadow:inset 0 1px rgba(255,255,255,.72),inset 0 -1px rgba(86,41,0,.22),0 15px 34px rgba(246,162,27,.3)}
+.btn-secondary{background:linear-gradient(180deg,#1a1713,#100f0d);border-color:#655745;color:var(--paper);box-shadow:inset 0 1px rgba(255,255,255,.045),0 5px 14px rgba(0,0,0,.2)}
+.btn-secondary:hover{background:linear-gradient(180deg,#252018,#15120f);border-color:#8c795f}
+
+.hardware{
+  position:relative;margin:44px auto 0;container-type:inline-size;
+  border:1px solid #81745f;border-radius:7px;padding:8px;
+  background:linear-gradient(180deg,#625b50 0,#28241e 2px,#0c0b09 7px,#090807 calc(100% - 8px),#3a342b 100%);
+  box-shadow:0 38px 92px rgba(0,0,0,.72),0 0 0 1px #030302,0 0 0 2px rgba(147,125,91,.14),inset 0 1px rgba(255,255,255,.32),inset 0 -1px rgba(255,255,255,.08);
+  overflow:hidden;isolation:isolate
+}
+.hardware:before{
+  content:"";position:absolute;inset:8px;z-index:2;pointer-events:none;
+  background:linear-gradient(112deg,rgba(255,255,255,.085),transparent 14%,transparent 70%,rgba(255,255,255,.025));
+  mix-blend-mode:screen
+}
+.hardware:after{
+  content:"";position:absolute;inset:8px;z-index:2;pointer-events:none;border-radius:2px;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.11),inset 0 -14px 24px rgba(0,0,0,.10)
+}
+.hardware img{display:block;width:100%;height:auto;border-radius:2px;filter:contrast(1.025) saturate(1.035)}
+.meter-glow{
+  position:absolute;left:19.4%;width:30%;height:13.1%;top:10%;border-radius:7px;z-index:3;pointer-events:none;
+  background:linear-gradient(112deg,rgba(255,255,255,.105) 0%,transparent 25%,transparent 72%,rgba(87,209,236,.035) 100%),radial-gradient(ellipse at 50% 0%,rgba(255,188,88,.13),transparent 60%);
+  box-shadow:inset 0 0 16px rgba(0,0,0,.18),inset 0 1px rgba(255,255,255,.12);
+  animation:breathe 3.3s ease-in-out infinite
+}
+@keyframes breathe{50%{opacity:.38;filter:saturate(1.25) brightness(1.14)}}
+.caption{margin:12px 4px 0;text-align:right;color:#827766;font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+
+.marquee{
+  margin-top:20px;border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);
+  display:grid;grid-template-columns:repeat(4,1fr);color:#cdbf9f
+}
+.marquee span{padding:15px 10px;text-align:center;font-size:12px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;border-right:1px solid var(--line-soft)}
+.marquee span:last-child{border-right:0}
+.marquee i{display:inline-block;width:6px;height:6px;margin-right:8px;border-radius:50%;background:var(--green);box-shadow:0 0 10px rgba(105,237,154,.7)}
+
+.story{
+  margin:86px auto 0;max-width:1040px;display:grid;grid-template-columns:.82fr 1.18fr;gap:70px;align-items:start
+}
+.section-number{color:var(--amber);font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase}
+h2{margin:8px 0 0;font-size:clamp(30px,4vw,52px);line-height:1;text-transform:uppercase;letter-spacing:-.015em}
+.story-copy{margin:0;color:var(--paper-dim);font-size:18px;line-height:1.65}
+.story-copy strong{color:var(--paper);font-weight:600}
+.features{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:36px;background:#3a342b;border:1px solid #3f382e;box-shadow:0 18px 42px rgba(0,0,0,.16)}
+.feature{background:linear-gradient(145deg,#151310,#0e0d0b);padding:24px}
+.feature b{display:block;margin-bottom:8px;font-size:14px;letter-spacing:.08em;text-transform:uppercase;color:var(--amber-hi)}
+.feature p{margin:0;color:var(--paper-dim);font-size:15px;line-height:1.55}
+
+.get{
+  margin-top:86px;display:grid;grid-template-columns:.82fr 1.18fr;gap:1px;
+  background:#504637;border:1px solid #5e5240;box-shadow:0 34px 76px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.04)
+}
+.donate,.signup{background:linear-gradient(145deg,#211d17 0%,#151310 48%,#0f0e0c 100%);padding:clamp(28px,4vw,52px)}
+.donate{position:relative;overflow:hidden}
+.donate:after{content:"";position:absolute;width:210px;height:210px;right:-90px;bottom:-90px;border-radius:50%;border:36px solid rgba(246,162,27,.04)}
+.tape-label{
+  display:inline-block;padding:7px 14px;color:#211a10;background:#dfc17e;
+  clip-path:polygon(2% 8%,98% 0,100% 87%,2% 100%,0 52%);
+  transform:rotate(-1.5deg);font-family:"Permanent Marker",cursive;font-size:15px;letter-spacing:.05em
+}
+.donate h2,.signup h2{font-size:clamp(28px,3.6vw,45px);margin:19px 0 12px}
+.donate p,.signup-intro{color:var(--paper-dim);font-size:16px;line-height:1.6;margin:0}
+.donate .btn{width:100%;margin-top:24px;font-size:16px;min-height:56px;position:relative;z-index:1}
+.donation-suggest{margin-top:10px!important;color:#d8c39d!important;font-size:13px!important;text-align:center;letter-spacing:.04em}
+.owner-note{margin-top:4px!important;font-size:12px!important;color:#827766!important;text-align:center}
+.small-list{list-style:none;padding:0;margin:24px 0 0;display:grid;gap:11px}
+.small-list li{color:#cbbd9e;font-size:14px;display:flex;gap:10px}
+.small-list li:before{content:"";flex:0 0 auto;width:8px;height:8px;margin-top:6px;border:1px solid var(--amber);transform:rotate(45deg)}
+
+form{margin-top:23px}
+.field{margin-top:15px}
+label,.legend{display:block;margin-bottom:7px;color:#e7d9ba;font-size:12px;font-weight:700;letter-spacing:.11em;text-transform:uppercase}
+input[type="text"],input[type="email"]{
+  width:100%;min-height:48px;padding:11px 13px;color:var(--paper);background:linear-gradient(180deg,#080706,#0d0c0a);border:1px solid #5a4f3f;border-radius:2px;font-size:16px;
+  box-shadow:inset 0 2px 8px rgba(0,0,0,.42),0 1px rgba(255,255,255,.025);transition:border-color .18s ease,box-shadow .18s ease
+}
+input[type="text"]:focus,input[type="email"]:focus{border-color:#b9863e;box-shadow:inset 0 2px 8px rgba(0,0,0,.42),0 0 0 1px rgba(246,162,27,.16)}
+input::placeholder{color:#7f7463}
+.radios{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.radio{
+  position:relative;display:flex;align-items:center;gap:10px;padding:13px 14px;margin:0;
+  border:1px solid #51483a;background:linear-gradient(180deg,#0d0c0a,#080706);color:#cfc1a4;border-radius:2px;cursor:pointer;font-size:15px;letter-spacing:.02em;text-transform:none;
+  box-shadow:inset 0 1px rgba(255,255,255,.025);transition:border-color .18s ease,background-color .18s ease,color .18s ease
+}
+.radio:has(input:checked){border-color:var(--amber);background:linear-gradient(180deg,#251b0d,#181108);color:#fff0ca;box-shadow:inset 0 0 12px rgba(246,162,27,.055)}
+.radio input{width:17px;height:17px;margin:0;accent-color:var(--amber)}
+.submit{width:100%;margin-top:18px}
+.status{display:none;margin-top:13px;padding:12px 14px;border:1px solid #665234;background:#17120b;color:#e9d2a6;font-size:14px}
+.status:not(:empty){display:block}
+.status.error{border-color:#7c4237;background:#20100d;color:#ffbaaa}
+.downloads{
+  display:none;margin-top:22px;padding-top:21px;border-top:1px solid var(--line);
+}
+.downloads.show{display:block;animation:reveal .45s ease both}
+.downloads h3{margin:0 0 12px;font-size:15px;letter-spacing:.09em;text-transform:uppercase}
+.download-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.download-grid .btn{padding:0 12px}
+.btn-disabled{cursor:not-allowed;opacity:.48;background:#12110f;border-color:#4a4338;color:#b2a894}
+.btn-disabled:hover{transform:none}
+.platform-card{display:none;margin-top:16px;border:1px solid #5b4b35;background:#0e0c09;padding:20px}
+.platform-card.show{display:block;animation:reveal .4s ease both}
+.platform-card h4{margin:0 0 5px;color:var(--amber-hi);font-size:15px;letter-spacing:.08em;text-transform:uppercase}
+.platform-card>p{margin:0;color:var(--paper-dim);font-size:14px;line-height:1.55}
+.steps{counter-reset:install;list-style:none;margin:18px 0 0;padding:0;display:grid;gap:14px}
+.steps li{counter-increment:install;display:grid;grid-template-columns:28px 1fr;gap:11px;align-items:start;color:#cdbf9f;font-size:14px;line-height:1.5}
+.steps li:before{content:counter(install);width:26px;height:26px;border:1px solid var(--amber);display:grid;place-items:center;color:var(--amber-hi);font-size:12px;font-weight:700}
+.steps strong{color:var(--paper);font-weight:600}
+.command{display:block;margin-top:7px;padding:10px 11px;border:1px solid #3f382e;background:#050504;color:#9cf0b8;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:normal;overflow-wrap:anywhere;user-select:all}
+.windows-note{margin-top:16px!important;padding:13px;border-left:2px solid var(--amber);background:#17120b;color:#e3d3b2!important}
+.form-fine{margin:12px 0 0;color:#8e8370;font-size:12px;line-height:1.45}
+
+footer{margin-top:48px;padding-top:20px;border-top:1px solid var(--line-soft);display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;color:#8d816c;font-size:12px;letter-spacing:.04em}
+.js-reveal{transform:translateY(14px);filter:brightness(.88);transition:transform .7s ease,filter .7s ease}
+.js-reveal.in{transform:none;filter:none}
+@keyframes reveal{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+@media(max-width:850px){
+  .shell{padding:30px 16px 48px}.story,.get{grid-template-columns:1fr;gap:28px}.story{margin-top:64px}.get{gap:1px;margin-top:64px}.features{grid-template-columns:1fr}.marquee{grid-template-columns:1fr 1fr}.marquee span:nth-child(2){border-right:0}.marquee span:nth-child(-n+2){border-bottom:1px solid var(--line-soft)}
+}
+@media(max-width:560px){
+  .shell{padding-left:12px;padding-right:12px}.hero{padding-top:8px}.hardware{margin-top:30px;padding:4px;border-radius:5px}.hardware:before,.hardware:after{inset:4px}.caption{text-align:left;font-size:10px}.actions .btn{width:100%}.features{margin-top:24px}.story{gap:24px}.donate,.signup{padding:27px 20px}.download-grid{grid-template-columns:1fr}.marquee span{padding:12px 5px;font-size:10px}.owner-note{display:none}
+}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.meter-glow{animation:none}.js-reveal{transform:none;filter:none;transition:none}.btn{transition:none}}
+
+
+
+/* === Kit embed restyle: match this page's original signup form === */
+.kit-embed .formkit-form[data-uid]{max-width:none;margin-top:23px;padding:0;background:transparent;border:0;box-shadow:none;font-family:inherit}
+.kit-embed .formkit-form[data-uid] [data-style]{background:transparent;padding:0}
+.kit-embed .formkit-fields{display:block}
+.kit-embed .formkit-field{margin:0 0 15px}
+.kit-embed .formkit-input{width:100%;min-height:48px;padding:11px 13px;color:var(--paper)!important;background:linear-gradient(180deg,#080706,#0d0c0a)!important;border:1px solid #5a4f3f!important;border-radius:2px!important;font-size:16px;font-weight:400!important;box-shadow:inset 0 2px 8px rgba(0,0,0,.42),0 1px rgba(255,255,255,.025)!important}
+.kit-embed .formkit-input:focus{border-color:#b9863e!important;box-shadow:inset 0 2px 8px rgba(0,0,0,.42),0 0 0 1px rgba(246,162,27,.16);outline:none}
+.kit-embed .formkit-input::placeholder{color:#7f7463!important;opacity:1}
+.kit-embed .formkit-submit{display:flex;width:100%;min-height:48px;margin-top:3px;padding:0 22px;align-items:center;justify-content:center;color:#1b1003!important;background:linear-gradient(180deg,#ffd06f 0%,var(--amber-hi) 8%,var(--amber) 78%,#d27b08 100%)!important;border:1px solid #ffcf76!important;border-radius:3px!important;font-weight:700!important;font-size:13px!important;letter-spacing:.1em;text-transform:uppercase;box-shadow:inset 0 1px rgba(255,255,255,.65),inset 0 -1px rgba(86,41,0,.28),0 12px 28px rgba(246,162,27,.2)}
+.kit-embed .formkit-submit:hover{background:linear-gradient(180deg,#ffdc8c,#f6ab28 80%,#dd850c)!important}
+.kit-embed .formkit-powered-by-convertkit-container{margin-top:14px;text-align:center}
+.kit-embed .formkit-powered-by-convertkit{background:transparent!important;color:var(--paper-dim)!important;border-color:var(--line)!important;opacity:.75}
+.kit-embed .formkit-alert{margin:0 0 15px}
+.kit-embed .formkit-alert:empty{display:none}
+</style>
+</head>
+<body>
+<main class="shell">
+  <section class="hero js-reveal">
+    <div class="eyebrow">Early access · native plugin</div>
+    <h1>A Broadcast Classic Reborn</h1>
+    <p class="deck"><strong>Western Compressor</strong> is a tube limiting amplifier modeled at the component level on the RCA BA-6A: vari-mu gain reduction, transformer-coupled tube stages, and a modulation section pairing reel ADT with a script-era Phase 90.</p>
+    <div class="actions">
+      <a class="btn btn-primary" href="#early-access">Get early access</a>
+      <a class="btn btn-secondary" href="#donate">Support Western Compressor</a>
+    </div>
+
+    <figure class="hardware" aria-label="Western Compressor tube limiting amplifier plugin interface with gain reduction display, attack and release toggles, ratio and modulation sections and output strip">
+      <img src="assets/western-compressor-panel.png" alt="Western Compressor interface: one-knob tube limiter with gain reduction display, attack and release toggles, COMP and LIMIT ratio modes, ADT and Phase 90 modulation, COMP MIX and MOD MIX bus pots and stereo output">
+      <span class="meter-glow" aria-hidden="true"></span>
+    </figure>
+    <p class="caption" style="text-align:right">The Western Compressor · one drive knob, two mix channels</p>
+  </section>
+
+  <div class="marquee js-reveal" aria-label="Plugin formats and status">
+    <span><i></i>Early access available</span><span>VST3 + AU</span><span>Mac</span><span>Tube limiting</span>
+  </div>
+
+  <section class="story js-reveal">
+    <div>
+      <span class="section-number">01 · The machine</span>
+      <h2>One knob.<br>All tube.</h2>
+    </div>
+    <p class="story-copy">The RCA BA-6A was a broadcast limiting amplifier: nine tubes, custom transformers, and <strong>no ratio, threshold, attack or release knobs</strong> — the circuit decided, and the engineer drove it. The Western Compressor recreates that machine at the component level: an input transformer, a 6SK7 vari-mu pair under feedback detection, 6J7 and 6V6 tube saturation stages, an output transformer, and a B+ rail that sags under load. One INPUT knob sets the drive; automatic makeup holds the programme level as the gain reduction digs in.</p>
+  </section>
+
+  <div class="features js-reveal">
+    <article class="feature"><b>Vari-mu limiting</b><p>Feedback detection off the output transformer, a ratio that rises with depth, and two laws: COMP starts near 1.5:1 and digs to about 3:1; LIMIT starts at 3:1 and climbs when pushed.</p></article>
+    <article class="feature"><b>Classic-centre ballistics</b><p>Attack and release toggles voiced in the middle of the classic compressors: 3 ms or 15 ms attack, 1 s single or 3 s dual release with programme memory in the slow seat.</p></article>
+    <article class="feature"><b>Two-channel mix bus</b><p>COMP MIX and MOD MIX feed the output bus in parallel. The MOD send is driven post-compressor and carries reel ADT or a Phase 90, each at its natural full wet.</p></article>
+  </div>
+
+  <section class="get js-reveal" id="early-access">
+    <aside class="donate" id="donate">
+      <span class="tape-label">KEEP WESTERN ALIVE</span>
+      <h2>Support the build.</h2>
+      <p>Western Compressor is independent. <strong style="color:var(--paper)">Any amount is welcome</strong> and helps cover testing, installers, signing and the long road from early access to a finished 1.0 release.</p>
+
+      <a class="btn btn-primary" href="https://venmo.com/Nathan-Sabatino" target="_blank" rel="noopener" id="donateButton">Donate with Venmo</a>
+      <p class="donation-suggest">Suggested $10 · any amount is welcome</p>
+      <p class="owner-note">Venmo: @Nathan-Sabatino</p>
+
+      <ul class="small-list">
+        <li>Submit the form to access downloads.</li>
+        <li>Current macOS build includes VST3, AU and standalone.</li>
+        <li>Updates continue throughout early access.</li>
+      </ul>
+    </aside>
+
+    <div class="signup">
+      <span class="section-number">02 · Download</span>
+      <h2>Join the early access list.</h2>
+      <p class="signup-intro">Enter your name, email and platform. Once the form is received, the download area opens below.</p>
+
+      <!-- ============================================================
+           KIT FORM PLACEHOLDER — ACTION NEEDED (Nathan):
+           Create the "Western Compressor Downloads" form in Kit,
+           mirroring the Bitey (10056005) and DN1000 (10056071) forms:
+           fields Email / First Name / Platform (required custom field),
+           double opt-in ON, success redirect to
+           https://hidezrecording.github.io/WesternCompressor/?joined=1#early-access
+           Then replace REPLACE-WITH-WESTERN-KIT-FORM-UID below (both the
+           data-uid attribute and the script src) with the new form's uid.
+           Until then the signup form does not load; the download area
+           still opens for anyone arriving with ?joined=1.
+           ============================================================ -->
+      <div class="kit-embed">
+        <script async data-uid="REPLACE-WITH-WESTERN-KIT-FORM-UID" src="https://bitey-plug-ins.kit.com/REPLACE-WITH-WESTERN-KIT-FORM-UID/index.js"></script>
+      </div>
+
+      <div class="downloads" id="downloads" aria-live="polite">
+        <h3>Your early access download</h3>
+
+        <section class="platform-card" id="macDownloads" aria-labelledby="macDownloadTitle">
+          <h4 id="macDownloadTitle">macOS installation</h4>
+          <p>Download the latest Mac installer, then follow these steps if Gatekeeper or your DAW blocks Western Compressor.</p>
+          <a class="btn btn-secondary" style="width:100%;margin-top:16px" href="https://github.com/hidezrecording/WesternCompressor/releases/download/v1.4.0/WesternCompressor-1.4.0-macOS.pkg">Download Mac installer</a>
+          <ol class="steps">
+            <li><div><strong>Run the installer.</strong> Download and open the <code>.pkg</code> file. It removes any previous Western Compressor build automatically.</div></li>
+            <li><div><strong>Approve it in Gatekeeper if macOS blocks it.</strong> Go to System Settings → Privacy &amp; Security, scroll down, then click “Open Anyway.”</div></li>
+            <li><div><strong>Clear quarantine if your DAW still refuses the plug-in.</strong> Open Terminal and run the AU command below. For VST3, use the second command.<code class="command">xattr -cr ~/Library/Audio/Plug-Ins/Components/Western\ Compressor.component</code><code class="command">xattr -cr ~/Library/Audio/Plug-Ins/VST3/Western\ Compressor.vst3</code></div></li>
+            <li><div><strong>Rescan plug-ins</strong> in your DAW, then load Western Compressor as an AU or VST3.</div></li>
+          </ol>
+        </section>
+
+        <section class="platform-card" id="windowsDownloads" aria-labelledby="windowsDownloadTitle">
+          <h4 id="windowsDownloadTitle">Windows early access</h4>
+          <p>The Windows installer will appear here when it is ready.</p>
+
+          <p class="windows-note"><strong>Windows build coming soon.</strong> You’re on the mailing list, and we’ll notify you when it is available.</p>
+        </section>
+      </div>
+      <p class="form-fine">Used only for Western Compressor early access updates and release notices. No list-selling, no unrelated mail.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>Western Compressor · Tube Limiting Amplifier</span>
+    <span>Independent early access · macOS VST3 / AU</span>
+  </footer>
+</main>
+
+<script>
+(function(){
+  var reveals = document.querySelectorAll('.js-reveal');
+  if ('IntersectionObserver' in window && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    var observer = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if (entry.isIntersecting) {
+          entry.target.classList.add('in');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, {threshold:.12});
+    reveals.forEach(function(el){ observer.observe(el); });
+  } else {
+    reveals.forEach(function(el){ el.classList.add('in'); });
+  }
+
+  var downloads = document.getElementById('downloads');
+  if (new URLSearchParams(window.location.search).get('joined') === '1') {
+    document.getElementById('macDownloads').classList.add('show');
+    document.getElementById('windowsDownloads').classList.add('show');
+    downloads.classList.add('show');
+    setTimeout(function(){ downloads.scrollIntoView({block:'nearest'}); }, 350);
+  }
+})();
+
+</script>
+</body>
+</html>

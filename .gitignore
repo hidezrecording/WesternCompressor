@@ -1,3 +1,9 @@
 juce/build/
 build/
 docs/
+!docs/
+docs/*
+!docs/index.html
+!docs/assets/
+docs/assets/*
+!docs/assets/western-compressor-panel.png
