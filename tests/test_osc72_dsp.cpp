@@ -451,9 +451,18 @@ int main() {
         // carry the vari-mu substance as before; the
         // kiss-at-(-20) clause moves to B2c, where the home
         // position now lives.
-        Meas m20 = runLim(0.85f, 0.05f, 40.0f);
-        Meas m10 = runLim(0.85f, 0.15f, 40.0f);
-        Meas m0  = runLim(0.85f, 0.5f, 40.0f);
+        // TEST3 RE-SITE (cause: Nathan's recalibration
+        // directive — threshold 0.95 -> 0.80): at the
+        // TEST2 ladder the rungs now sit at GR 9.9/17.1/
+        // 24.1 with both pre-makeup rises at 0.6 dB (the
+        // flat top of the curve — no rising-ratio region
+        // left to read). The ladder steps one amp down at
+        // the same knob: amps 0.015/0.05/0.15 read GR
+        // 1.7/9.9/17.1 with rises 0.73 then 0.56 dB — the
+        // rising-ratio region, same substance.
+        Meas m20 = runLim(0.85f, 0.015f, 40.0f);
+        Meas m10 = runLim(0.85f, 0.05f, 40.0f);
+        Meas m0  = runLim(0.85f, 0.15f, 40.0f);
         float pre20 = db(m20.peakL) - m20.makeupDb;
         float pre10 = db(m10.peakL) - m10.makeupDb;
         float pre0  = db(m0.peakL) - m0.makeupDb;
@@ -461,9 +470,9 @@ int main() {
         std::snprintf(d, sizeof d, "GR %.1f/%.1f/%.1f dB; pre-makeup rises %.1f then %.1f dB per step",
                       m20.meanGr, m10.meanGr, m0.meanGr, riseLo, riseHi);
         check(m10.meanGr > m20.meanGr + 2.5f && m0.meanGr > m10.meanGr + 4.0f,
-              "B2a GR grows steeply with level at the 40 Hz bench (vari-mu, TEST2 re-site)", d);
+              "B2a GR grows steeply with level at the 40 Hz bench (vari-mu, TEST3 re-site)", d);
         check(riseLo < 9.5f && riseHi < riseLo,
-              "B2b static ratio > 1.3:1 and RISING with depth (TEST2 re-site)", d);
+              "B2b static ratio > 1.3:1 and RISING with depth (TEST3 re-site)", d);
         // B2c (TEST2 — supersedes the staging-fix home-depth
         // pin; cause: Nathan's operating-point directive
         // 2026-10-23): the home position is now the KISS he
@@ -546,15 +555,26 @@ int main() {
         // C3/C4/K4 — which is the evidence the ballistics
         // core did not move). Measured on this tree:
         // LIMIT settled 8.5 dB / t90 70 ms; COMP 4.7 / 80.
+        // TEST3 RE-BASE (cause: Nathan's recalibration
+        // directive — threshold 0.95 -> 0.80): the lower
+        // threshold is reached sooner on the same
+        // programme step and the settled depth is higher;
+        // the seat constants are untouched (release seats
+        // C3/C4/K4/K5 still land on their references —
+        // the ballistics core did not move). Measured on
+        // this tree: LIMIT settled 17.4 dB / t90 20 ms;
+        // COMP settled 10.9 dB / t90 40 ms. Bands widen
+        // around the programme-domain figures (10 ms
+        // block quantisation).
         for (bool comp : { false, true }) {
             auto tr = grStepProg(true, comp, 1.0f, 1.0f);
             float settled = 0;
             double t90 = progT90(tr, settled);
             std::snprintf(d, sizeof d, "%s settled GR %.1f dB, envelope t90 %.0f ms (programme step)",
                           comp ? "COMP" : "LIMIT", settled, t90);
-            check(t90 > 45 && t90 < 115,
-                  comp ? "C1-COMP attack FAST: programme-step envelope t90 45-115 ms (TEST2)"
-                       : "C1 attack FAST: programme-step envelope t90 45-115 ms (TEST2)", d);
+            check(t90 > 15 && t90 < 60,
+                  comp ? "C1-COMP attack FAST: programme-step envelope t90 15-60 ms (TEST3)"
+                       : "C1 attack FAST: programme-step envelope t90 15-60 ms (TEST3)", d);
         }
     }
     {
@@ -575,8 +595,11 @@ int main() {
         float sF = 0, sS = 0;
         double tF = progT90(trF, sF), tS = progT90(trS, sS);
         std::snprintf(d, sizeof d, "programme-step t90 fast %.0f ms, slow %.0f ms", tF, tS);
-        check(tS > 120 && tS < 210 && tS >= 1.5 * tF,
-              "C2 attack SLOW: programme-step envelope t90 120-210 ms, >= 1.5x FAST (TEST2)", d);
+        // TEST3 RE-BASE (cause as C1): measured FAST
+        // 20 ms / SLOW 100 ms on this tree's programme
+        // step (separation 5x); band follows the figures.
+        check(tS > 70 && tS < 160 && tS >= 1.5 * tF,
+              "C2 attack SLOW: programme-step envelope t90 70-160 ms, >= 1.5x FAST (TEST3)", d);
         // v53: the SLOW constants take one common x1.25
         // toward the restated LA-2A reference (attack
         // ~10 ms) — in COMP (the near-shipped law) the full
@@ -591,8 +614,10 @@ int main() {
         std::snprintf(d, sizeof d, "COMP programme-step t90 %.0f ms, settled %.1f dB", tSC, sSC);
         // TEST2 re-base (cause as C2): measured 110 ms on
         // this tree's programme step.
-        check(tSC > 80 && tSC < 145,
-              "C2c attack SLOW (COMP): programme-step envelope t90 80-145 ms (TEST2)", d);
+        // TEST3 RE-BASE (cause as C1): measured 70 ms,
+        // settled 10.3 dB on this tree.
+        check(tSC > 50 && tSC < 110,
+              "C2c attack SLOW (COMP): programme-step envelope t90 50-110 ms (TEST3)", d);
         auto trSmall = grStepProg(false, false, 1.0f, 0.25f); // TEST2 small programme step
         float sSmall = 0;
         double tSmall = progT90(trSmall, sSmall);
@@ -613,8 +638,15 @@ int main() {
         // engages (settled 0.28 dB — its envelope sits at
         // the trimmed verge); the pin asserts that
         // engagement figure and its lazy arrival.
-        check(tSmall > 100 && tSmall < 210 && sSmall < 1.0f,
-              "C2b attack SLOW small programme step: t90 100-210 ms, settled < 1 dB (TEST2)", d);
+        // TEST3 RE-BASE (cause as C1): at the corrected
+        // operating point the quarter-level programme
+        // step ENGAGES the slow seat (settled 7.83 dB,
+        // t90 90 ms) — the TEST2 "barely engages" figure
+        // was the overshoot's signature, not a property
+        // to keep. The pin asserts the engagement and
+        // its lazy in-family arrival.
+        check(tSmall > 60 && tSmall < 140 && sSmall > 4.0f,
+              "C2b attack SLOW small programme step: t90 60-140 ms, settled > 4 dB (TEST3)", d);
     }
     {
         // C3: release FAST = SINGLE — 1176 release at
@@ -749,8 +781,15 @@ int main() {
         // 4.220 s (8 s hold), bands +/-17.5%; the memory
         // contrast survives at 1.41x (pin >= 1.35x) — the
         // T4 memory stays in circuit, scaled with the seat.
-        check(tBrief > 1.95 && tBrief < 2.77 && tLong > 1.35 * tBrief && tLong > 2.76 && tLong < 3.94,
-              "C5 DUAL memory: holds at TEST2 refs 2.36/3.35 s, long >= 1.35x slower (re-base: hold depth, see report)", d);
+        // TEST3 RE-BASE (cause as C1): at the corrected
+        // operating point the holds read 2.62/4.27 s
+        // (contrast 1.63) — back inside the original AB2
+        // tolerance window (2.998/4.220 at +/-17.5%);
+        // refs move to the measured figures, T4 band
+        // kept. The depth-dependence mechanism is the
+        // one TEST2 controlled for.
+        check(tBrief > 2.16 && tBrief < 3.08 && tLong > 1.35 * tBrief && tLong > 3.52 && tLong < 5.02,
+              "C5 DUAL memory: holds at TEST3 refs 2.62/4.27 s, long >= 1.35x slower (re-base: hold depth, see report)", d);
     }
 
     // ═══════════════ D. AUTO MAKE-UP (Nathan's pin) ═══════════════
@@ -798,7 +837,14 @@ int main() {
         // programme; the report's onset table carries the
         // working depths). The pin asserts the new home:
         // ProgGen stays essentially GR-free at every knob.
-        check(grAt1 <= 1.5f, "D3 programme mean GR at max ~0 dB (TEST2 threshold; ProgGen under the verge)", d);
+        // TEST3 RE-BASE (cause: Nathan's recalibration
+        // directive — TEST2 overshot): at the corrected
+        // threshold ProgGen at full drive draws a working
+        // depth again — measured mean GR at max 7.3 dB.
+        // The pin asserts that working band (the digging
+        // the v1.1.1 note above asked for, at the
+        // corrected operating point).
+        check(grAt1 > 4.0f && grAt1 < 12.0f, "D3 programme mean GR at max = working depth 4-12 dB (TEST3 recalibration)", d);
     }
 
     // ═══════════════ E. COLOUR / DRYNESS / THD / FR ═══════════════
@@ -1653,8 +1699,8 @@ int main() {
             // Programme refs: LIMIT 70 ms, COMP 80 ms.
             float aSet = 0;
             double a = progT90(grStepProg(true, comp, 1.0f, 1.0f), aSet);
-            double aRef = comp ? 80.0 : 70.0;
-            std::snprintf(d, sizeof d, "%s programme-step t90 %.0f ms vs TEST2 ref %.0f ms (settled %.1f dB)", mn, a, aRef, aSet);
+            double aRef = comp ? 40.0 : 20.0; // TEST3 refs (programme step, this tree)
+            std::snprintf(d, sizeof d, "%s programme-step t90 %.0f ms vs TEST3 ref %.0f ms (settled %.1f dB)", mn, a, aRef, aSet);
             check(nearRef(a, aRef, 0.30),
                   comp ? "K1-COMP attack FAST: programme-step t90 == TEST2 ref"
                        : "K1 attack FAST: programme-step t90 == TEST2 ref", d);
@@ -1663,8 +1709,8 @@ int main() {
             // COMP 21.021 (flagged, +/-15%).
             float sSet = 0;
             double s = progT90(grStepProg(false, comp, 1.0f, 1.0f), sSet);
-            double sRef = comp ? 110.0 : 160.0;
-            std::snprintf(d, sizeof d, "%s programme-step t90 %.0f ms vs TEST2 ref %.0f ms (settled %.1f dB)", mn, s, sRef, sSet);
+            double sRef = comp ? 70.0 : 100.0; // TEST3 refs (programme step, this tree)
+            std::snprintf(d, sizeof d, "%s programme-step t90 %.0f ms vs TEST3 ref %.0f ms (settled %.1f dB)", mn, s, sRef, sSet);
             check(nearRef(s, sRef, 0.30),
                   comp ? "K2-COMP attack SLOW: programme-step t90 == TEST2 ref"
                        : "K2 attack SLOW: programme-step t90 == TEST2 ref", d);
@@ -1672,8 +1718,8 @@ int main() {
             // AB2 refs: 24.000 / 24.542 (report-only, +/-15%).
             float mSet = 0;
             double m = progT90(grStepProg(false, comp, 1.0f, 0.25f), mSet);
-            double mRef = comp ? 100.0 : 150.0;
-            std::snprintf(d, sizeof d, "%s small programme-step t90 %.0f ms vs TEST2 ref %.0f ms (settled %.2f dB)", mn, m, mRef, mSet);
+            double mRef = comp ? 60.0 : 90.0; // TEST3 refs (programme step, this tree)
+            std::snprintf(d, sizeof d, "%s small programme-step t90 %.0f ms vs TEST3 ref %.0f ms (settled %.2f dB)", mn, m, mRef, mSet);
             check(nearRef(m, mRef, 0.35),
                   comp ? "K3-COMP attack SLOW small programme step: t90 == TEST2 ref"
                        : "K3 attack SLOW small programme step: t90 == TEST2 ref", d);
@@ -1745,9 +1791,12 @@ int main() {
                       b, l, l / b);
         // TEST2 re-base (cause as C5): refs 2.36/3.35 at
         // the re-sited hold depth, T4 band kept.
-        check(b > 2.36 * 0.825 && b < 2.36 * 1.175
-           && l > 3.35 * 0.825 && l < 3.35 * 1.175 && l / b > 1.35,
-              "K6 T4 memory: both holds == TEST2 refs, contrast survives", d);
+        // TEST3 re-base (cause as C5): refs 2.62/4.27 at
+        // the corrected operating point (back inside the
+        // AB2 window), T4 band kept.
+        check(b > 2.62 * 0.825 && b < 2.62 * 1.175
+           && l > 4.27 * 0.825 && l < 4.27 * 1.175 && l / b > 1.35,
+              "K6 T4 memory: both holds == TEST3 refs, contrast survives", d);
     }
     {
         // K7: BAKED-2X BIT-IDENTITY — programme renders
@@ -1819,37 +1868,37 @@ int main() {
         struct Cfg { const char* name; float knob; bool comp, att, rel; int mod; double secs; uint64_t want; uint64_t grWant; };
         const Cfg cfgs[] = {
             // MOD out, knob 0.50 (4 s each)
-            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0xa48a95a078561902u, 0x476f6096d8e1a383u },
-            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0xa48a95a078561902u, 0x476f6096d8e1a383u },
+            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0x2dcd9bc6556fef8cu, 0x33169882a4fc1a36u },
+            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0xb362f647ceef62dbu, 0xe904050c6fcd662bu },
             { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0xa48a95a078561902u, 0x476f6096d8e1a383u },
             { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0xa48a95a078561902u, 0x476f6096d8e1a383u },
-            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0xa48a95a078561902u, 0x476f6096d8e1a383u },
-            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0xa48a95a078561902u, 0x476f6096d8e1a383u },
+            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0x15b0f46f384f3646u, 0x6db3613b75ed45cfu },
+            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x7a9d2f2d47addee5u, 0xb601041aaf859770u },
             { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0xa48a95a078561902u, 0x476f6096d8e1a383u },
             { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0xa48a95a078561902u, 0x476f6096d8e1a383u },
             // MOD out, knob 0.75
-            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x64ced04c5bf4e663u, 0x476f6096d8e1a383u },
-            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x64ced04c5bf4e663u, 0x476f6096d8e1a383u },
-            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x63a506d462b6c938u, 0xa696af679e389485u },
-            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0xb7cd6ebc25bcb68au, 0x4977e70457cedde0u },
-            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0x64ced04c5bf4e663u, 0x476f6096d8e1a383u },
-            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x64ced04c5bf4e663u, 0x476f6096d8e1a383u },
-            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x5b7efc60f44a3167u, 0x913881b3c75565eau },
-            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x0379e2b30e297251u, 0xc3fa9cafa46c4e60u },
+            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x9cce7d87cace2f8eu, 0xadadabc00b12f21eu },
+            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0xbb7c237acccc6361u, 0x77cd465071cf1b69u },
+            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x0cbc2f7851e00812u, 0xea97459c4dd66fe3u },
+            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0xf3436a1d8a0838f0u, 0x13222b5309825643u },
+            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0x113ce4dd6f93e59bu, 0x21040338d1ee8050u },
+            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x1150d122c3a2f7deu, 0x538b630cf72674acu },
+            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x9fe03e85215b1248u, 0x9956c0f143405022u },
+            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x1b96079530cde86du, 0x5e02afe0dbec4143u },
             // MOD out, knob 1.00
-            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x990ff1d7b6da4b67u, 0x476f6096d8e1a383u },
-            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0x990ff1d7b6da4b67u, 0x476f6096d8e1a383u },
-            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x8bd302634078dcf2u, 0xe07fddfeb9b4aeb5u },
-            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x39f5c89c0805f0ebu, 0xe612ba1c052c83c6u },
-            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x990ff1d7b6da4b67u, 0x476f6096d8e1a383u },
-            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x990ff1d7b6da4b67u, 0x476f6096d8e1a383u },
-            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0xa8fc0a06095808f2u, 0x958e63ca67f06895u },
-            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x03867c8ea9a08398u, 0x52c557f34727cd96u },
+            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x8e3765aec2bc56feu, 0x67c57be5074967ffu },
+            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0xcc789595b05faf36u, 0x67b03bd42f307554u },
+            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x968b94a78d7e8dcbu, 0x969bb335678b97d2u },
+            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x8fde2152418fbe4au, 0xc7b94b05a14c5b51u },
+            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x7f2ca6b47dbb9760u, 0xd07acf3977c2067cu },
+            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0xbb20ffa70a4e3a4eu, 0xe918c0031c10bd08u },
+            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x64169497b587a688u, 0xb3370cc04e9da7e6u },
+            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x7a18e4ad33535d7eu, 0xb61c277304b15981u },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x220a82e31bb8763eu, 0x29f3e04d7803f383u },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x9a97724d7f2d0f6au, 0x3816a95f0a2cd593u },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x220a82e31bb8763eu, 0x29f3e04d7803f383u },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x074aab38f9f45fedu, 0xb730b2b81133410bu },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x626ee653c8f81fb5u, 0xda654531cdc71661u },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x856ef9ce24a46bc2u, 0x70c526c3de439ea3u },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x5a4983a1ceac1770u, 0xce058cb9ccb7a04bu },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0xfbfcd27da487b962u, 0xe3b222d48aa60310u },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -1861,8 +1910,8 @@ int main() {
             // FULL: re-captured again on the merged tree at
             // the AB2 ballistics (pure cascade renders under
             // the re-timed limiter).
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0xb7f5e93fcc7b649fu, 0x3816a95f0a2cd593u },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0xb4d839a873a0221bu, 0xb730b2b81133410bu },
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0xa3e45d5d957ea330u, 0x70c526c3de439ea3u },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0xef99ea22bc4d9cfdu, 0xe3b222d48aa60310u },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
@@ -1881,6 +1930,12 @@ int main() {
         // the P flavour at modMix = 0.5 against references
         // captured on THIS tree, with the classic-pedal
         // equivalence re-proven against the AB2 tree.
+        // TEST3 RE-CAPTURE (2026-10-23, cause: Nathan's
+        // recalibration directive — threshold 0.95 ->
+        // 0.80): all 30 references re-captured on this
+        // tree (TEST2's table is in git history). The
+        // knob-0.50 group no longer collapses to a
+        // single render — ProgGen engages there now.
         // TEST2 RE-CAPTURE (2026-10-23, cause: Nathan's
         // operating-point directive): all 30 references
         // re-captured on this tree. The knob-0.50 group

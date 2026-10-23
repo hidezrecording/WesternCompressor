@@ -328,7 +328,29 @@ inline float ba6aSenseShape(float envLin, float toeEnv) {
 // LIMIT), knobs 0-4 essentially clean; the measured
 // before/after onset table is in the TEST2 report
 // (western-compressor-release-1.4.2/REPORT-TEST2.md).
-inline constexpr float kBa6aThresholdEnvLin = 0.95f; // pre-sense detector-envelope threshold (calibrated, TEST2)
+// TEST3 RECALIBRATION (2026-10-23, Nathan's ear verdict
+// on TEST2: "way too far — the compressor's not even
+// kicking in until the input is cranked to 10 and
+// absolutely raging... the input drive goes well into
+// distortion before we're anywhere near starting to
+// compress"; he asked for ~5 dB, TEST2's 0.95 had moved
+// the static curves +29-31 dB input-referred). TEST3's
+// primary anchor is his stated reference signal —
+// programme peaking around -10 dBFS: INPUT 5 triggers
+// little/no compression, onset starts around 6, clearly
+// working by 6.5-7; cross-checked against the knob-
+// translation spec (what shipped at knob 3-4 should
+// happen around 6). Binary-searched on the processor
+// harness (drums + dense scaled to -10 dBFS peak, both
+// modes, both seats): 0.95 onsets at 6.5+ (too late),
+// 0.70 runs hot at knob 6 (mean 2.7-4.8 vs the 1-3
+// band), 0.80 lands it — knob 5 exactly 0.00 mean/p95
+// in every cell, knob 6 mean 1.3-2.1 (FAST), 6.5 in
+// the 3-6 working band, 7 in band (COMP) to ~1.4 dB
+// over its top (LIMIT). Static-curve
+// translation vs the shipped law (40 Hz, knob 0.85,
+// method (a)): stated in REPORT-TEST3.md.
+inline constexpr float kBa6aThresholdEnvLin = 0.80f; // pre-sense detector-envelope threshold (calibrated, TEST3)
 // The SLOW attack seat's trim on the threshold: the two
 // seats READ the same signal through different envelope
 // shapes — the T4-shaped slow envelope equilibrates at
@@ -343,6 +365,14 @@ inline constexpr float kBa6aThresholdEnvLin = 0.95f; // pre-sense detector-envel
 // (its depth at a given knob is its envelope's, as
 // shipped). The T4 demand reference (the slow seat's own
 // law) carries the same trim.
+// TEST3 (2026-10-23): the trim was re-tested for removal
+// at the recalibrated threshold (0.80) and STAYS: with
+// the trim at 1.0 the SLOW seat reads 0.000 dB GR at
+// every knob 4-8 on the -10 dBFS-peak anchor materials
+// (both modes) and 0.000 through knob 6.5 on the
+// -14 dBFS RMS drums harness — the seat cannot engage
+// in the working range without it, at this threshold
+// exactly as at TEST2's. Value unchanged: 0.74.
 inline constexpr float kBa6aThresholdSlowTrim = 0.74f;
 inline float ba6aVariMuDb(float envLin, float slope, float toeEnv, float refEnvLin) {
     const float over = ba6aSenseShape(envLin, toeEnv)

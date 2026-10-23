@@ -1237,7 +1237,7 @@ int main() {
             return -1.0;
         };
         double r = grRiseT90();
-        std::snprintf(b, sizeof b, "SLOW attack GR rise t90: TEST2 %.1f ms vs ref 237.3 ms (re-based, operating point)", r);
+        std::snprintf(b, sizeof b, "SLOW attack GR rise t90: TEST3 %.1f ms vs ref 180.0 ms (re-based, operating point)", r);
         // TEST2 re-base (cause: Nathan's operating-point
         // directive): the protocol is re-sited to the
         // region the raised threshold leaves reachable
@@ -1250,8 +1250,19 @@ int main() {
         // figures are pinned in the DSP suite, C2/K2);
         // the 16.0 ms reference belonged to the old
         // operating point's deep-GR tone regime.
-        check(std::fabs(r - 237.3) <= (64.0 / kFs * 1000.0),
-              "P11b proc: SLOW attack rise == TEST2 ref end-to-end (readout)", b);
+        // TEST3 re-base (cause: Nathan's recalibration
+        // directive — threshold 0.95 -> 0.80): same
+        // protocol, measured rise 180.0 ms. DSP-level
+        // control on the same stimulus: TEST2 settles
+        // 7.5 dB / t90 257 ms, TEST3 settles 20.6 dB /
+        // t90 183 ms — the seat's envelope arrival is
+        // operating-point-paced against a deeper
+        // settled depth; the seat constants are
+        // untouched (DSP suite C2/K2 carry the seat's
+        // programme figures; C3/C4/K4/K5 hold the
+        // release seats on their references).
+        check(std::fabs(r - 180.0) <= (64.0 / kFs * 1000.0),
+              "P11b proc: SLOW attack rise == TEST3 ref end-to-end (readout)", b);
 
         // P11c: end-to-end release — the GR readout's 50%
         // recovery time after a loud passage (DUAL seat),
@@ -1310,7 +1321,7 @@ int main() {
         };
         float pk = 0;
         double f = grFallT50(pk);
-        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: TEST2 %.3f s vs ref 0.028 s, peak %.1f dB (ref 22.3, unmoved)",
+        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: TEST3 %.3f s vs ref 0.044 s, peak %.1f dB (ref 34.8, TEST3 re-base)",
                       f, pk);
         // TEST2 re-base of the time only (cause: Nathan's
         // operating-point directive): the protocol is
@@ -1323,8 +1334,25 @@ int main() {
         // depth/pulsation mechanism ledgered at C4c/K5
         // in the DSP suite). Tolerance unchanged (one
         // 64-sample block; 0.3 dB).
-        check(std::fabs(f - 0.028) <= (64.0 / kFs) && std::fabs(pk - 22.3f) < 0.3f,
-              "P11c proc: DUAL release 50% recovery == TEST2 ref from the AB2 depth (depth ref unmoved)", b);
+        // TEST3 re-base (cause: Nathan's recalibration
+        // directive — threshold 0.95 -> 0.80): at the
+        // corrected operating point the same stimulus
+        // parks at the depth the translation gives it —
+        // peak 34.8 dB — and the 50% recovery reads
+        // 0.044 s from that depth. Controls: at knob
+        // 1.0 the 40 Hz tone's peak is stimulus-
+        // saturated on both trees (TEST2 22.6-23.6 dB
+        // for amp 1-3; TEST3 35-37 dB for amp 0.1-1.0
+        // and knob 0.70-1.0), and TEST3's t50 swings
+        // 0.011-0.040 s across near-identical peaks —
+        // the readout follows the depth/charge state
+        // (the C4c/K5 pulsation mechanism), not the
+        // seat. The DUAL seat itself is pinned
+        // unchanged by the DSP suite: C4/K5 hold the
+        // AB2 references unmoved; C5/K6 re-based at
+        // TEST3 figures inside the AB2 window.
+        check(std::fabs(f - 0.044) <= (64.0 / kFs) && std::fabs(pk - 34.8f) < 0.3f,
+              "P11c proc: DUAL release 50% recovery == TEST3 ref from the TEST3 depth (re-based, operating point)", b);
 
         // P11d: the reported latency is untouched by the
         // bake (MOD in A: 992; MOD out: 32).
