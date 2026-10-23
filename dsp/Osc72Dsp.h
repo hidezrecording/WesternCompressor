@@ -167,7 +167,7 @@ private:
 //    grows continuously (soft knee -> limiting), capped at
 //    the pair's useful ~38 dB.
 // ─────────────────────────────────────────────────────────────────────
-inline constexpr float kBa6aCeilingDb   = -16.0f;
+inline constexpr float kBa6aCeilingDb   = -16.0f; // shipped verge; superseded as the law's reference by kBa6aThresholdEnvLin (TEST2, below) — retained as the documented panel-physics reference the study cites
 inline constexpr float kBa6aDbPerVolt   = 27.0f; // GR slope on the shaped sense (v1.1.2, below)
 inline constexpr float kBa6aDetToeEnv   = 0.38f; // 6H6 square-law toe corner (sense-domain volts)
 inline constexpr float kBa6aGrCapDb     = 46.0f;
@@ -262,9 +262,91 @@ inline constexpr float kBa6aDetSense = 2.2f;
 inline float ba6aSenseShape(float envLin, float toeEnv) {
     return envLin * envLin / (envLin + toeEnv);
 }
-inline float ba6aVariMuDb(float envLin, float slope, float toeEnv) {
+// OPERATING-POINT / THRESHOLD SHIFT (TEST2 candidate,
+// 2026-10-23, Nathan's directive on the 1.4.2 test build —
+// the factory defaults and the meter range are approved,
+// but the onset sits far too low): on average programme
+// the unit was already well into compression with INPUT
+// at 0. Measured (round-3 materials at -14 dBFS RMS
+// through the processor, FAST/Single, before this change):
+// knob 0 GR mean/p95 = 6.6/11.1 dB (drums LIMIT), 3.0/3.8
+// (vocal LIMIT); knob 5 = 22.1/35.8 and 15.8/19.1. His
+// calibration: at INPUT 5 a regular signal should BARELY
+// show the start of gain reduction; below 5 essentially
+// none; above 5 it develops with the existing shape ("the
+// other positions are fine — an overall gain staging and
+// threshold issue").
+// The remedy is a threshold offset INSIDE the gain
+// computer: the law's verge — the reference the shaped
+// envelope is compared against — is raised from the bare
+// ceiling envelope to kBa6aThresholdEnvLin, a level at
+// the DETECTOR TAP (pre-sense): each mode's reference is
+// the threshold times its own sense, so the threshold is
+// a signal level, the same for both modes in the units
+// the hardware would know. The law's response to
+// sense-domain OVERSHOOT above the verge is the shipped
+// law unchanged (same slope on the same shape), so at
+// matched overshoot the ratios and the toe are preserved
+// by construction; the depth available at the top of the
+// envelope's reach is spent only by the offset itself.
+// Measured facts that shaped this form (TEST2 report):
+//  (1) the detector envelope's reach is BOUNDED by the
+//      path itself (the tanh cascade caps the sustained
+//      pre-sense envelope at ~0.87, programme transients
+//      to ~1.08): that bounded window IS the law's working
+//      range, so the offset must be spent inside it, as a
+//      reference raise. Scaling the sensed envelope down
+//      instead squashes the window and caps the unit's
+//      sustained GR at ~1 dB (measured, rejected).
+//  (2) the modes' senses scale the same tap level to
+//      different envelope units (COMP's envelope runs
+//      2.2/1.4 hotter), so a shared POST-sense reference
+//      cannot onset both modes at the same signal level —
+//      the threshold is therefore stated pre-sense and
+//      applied through each mode's sense (it glides with
+//      the sense slew on a mode flip, as the shipped
+//      law's effective threshold did).
+//  (3) programme peaks run into the stages' saturation,
+//      so GR-vs-drive is not a clean translation in drive
+//      terms; the threshold value was calibrated
+//      empirically on the processor onset sweep.
+// It is deliberately NOT a drive re-map and NOT a pad:
+// the drive taper Nathan approved, the level into the
+// iron/tube stages and so the tone at a given knob are
+// bit-untouched — the offset lives only in the detector's
+// arithmetic. The same law serves both ratio modes and
+// the SLOW detector's T4 demand reference (which keeps
+// the shipped COMP constants, reference included), so the
+// demand a peak represents moves with the operating
+// point and the ballistics stay consistent with the GR.
+// (The slow seat's threshold carries its own trim —
+// kBa6aThresholdSlowTrim below — because its envelope
+// equilibrates lower on the same signal.)
+// CALIBRATION: kBa6aThresholdEnvLin chosen so that at
+// knob 5 the onset lands per Nathan's target (GR mean
+// 0-1 dB, p95 <= ~2 dB on the round-3 materials, COMP +
+// LIMIT), knobs 0-4 essentially clean; the measured
+// before/after onset table is in the TEST2 report
+// (western-compressor-release-1.4.2/REPORT-TEST2.md).
+inline constexpr float kBa6aThresholdEnvLin = 0.95f; // pre-sense detector-envelope threshold (calibrated, TEST2)
+// The SLOW attack seat's trim on the threshold: the two
+// seats READ the same signal through different envelope
+// shapes — the T4-shaped slow envelope equilibrates at
+// 0.67-0.87 of the fast peak envelope on the calibration
+// materials (measured open-loop, TEST2 report) — so a
+// threshold stated against the peak envelope would sit
+// above the slow seat's reach on every stimulus (the
+// seat would never engage; it is Nathan's default).
+// The trim states the same programme threshold in the
+// slow envelope's own units, so both seats onset in the
+// same knob region; the slow seat stays the gentler one
+// (its depth at a given knob is its envelope's, as
+// shipped). The T4 demand reference (the slow seat's own
+// law) carries the same trim.
+inline constexpr float kBa6aThresholdSlowTrim = 0.74f;
+inline float ba6aVariMuDb(float envLin, float slope, float toeEnv, float refEnvLin) {
     const float over = ba6aSenseShape(envLin, toeEnv)
-                     - ba6aSenseShape(dbToLinear(kBa6aCeilingDb), toeEnv);
+                     - ba6aSenseShape(refEnvLin, toeEnv);
     if (over <= 0.0f) return 0.0f;
     const float gr = slope * over;
     return gr > kBa6aGrCapDb ? kBa6aGrCapDb : gr;
@@ -274,9 +356,13 @@ inline float ba6aVariMuDb(float envLin, float slope, float toeEnv) {
 // (ba6aDetSlowTau below): the demand a peak represents is a
 // property of the panel physics, not of the selected mode,
 // so the ballistics' dynamics never change with the mode —
-// only the static GR map does (v53, below).
+// only the static GR map does (v53, below). TEST2: the
+// demand reference carries the same operating-point
+// threshold, through the shipped law's own sense (2.2 —
+// the value the COMP mode inherited as kBa6aCompSense).
 inline float ba6aVariMuDb(float envLin) {
-    return ba6aVariMuDb(envLin, kBa6aDbPerVolt, kBa6aDetToeEnv);
+    return ba6aVariMuDb(envLin, kBa6aDbPerVolt, kBa6aDetToeEnv,
+                        kBa6aThresholdEnvLin * 2.2f * kBa6aThresholdSlowTrim);
 }
 // ─────────────────────────────────────────────────────────────────────
 // COMP / LIMIT ratio modes (v53, Nathan): the LIMIT cluster's

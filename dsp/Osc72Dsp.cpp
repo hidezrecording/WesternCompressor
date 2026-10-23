@@ -237,7 +237,9 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
                                      : kBa6aDetDecayScale;
     detEnv_ += (peak - detEnv_) * tauCoef(detTau * detScale, fs_);
 
-    const float target = ba6aVariMuDb(detEnv_, lawSlope_, lawToe_);
+    const float target = ba6aVariMuDb(detEnv_, lawSlope_, lawToe_,
+                                      kBa6aThresholdEnvLin * lawSense_
+                                          * (attackFast_ ? 1.0f : kBa6aThresholdSlowTrim));
 
     // ── Control state: BOTH recovery networks run every
     // sample; the toggle selects which one drives the stage,
