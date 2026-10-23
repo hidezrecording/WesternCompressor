@@ -497,7 +497,7 @@ int main(int argc, char* argv[]) {
     bool phaserOn = false;     // gui-v53: 'modPhaser' (default A)
     float knobVal = 7.0f;      // v33: knob=<0..10> token
     float grOverride = 0.0f;   // v33: gr=<dB> token
-    float compMixVal = -1.0f;  // AB3: compmix=<0..1> token (<0 = leave at the 0.5 default)
+    float compMixVal = -1.0f;  // AB3: compmix=<0..1> token (<0 = leave at the factory default; 1.0 from staging-fix 2)
     float modMixVal = -1.0f;   // AB3: modmix=<0..1> token
     for (int i = 2; i < argc; ++i) {
         const juce::String v(argv[i]);

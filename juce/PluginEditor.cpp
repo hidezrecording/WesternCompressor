@@ -2064,6 +2064,59 @@ juce::Image Osc72Editor::buildGrFieldImage()
 // ~15% taller than v45: (124, 45.8, 192, 60.4), same
 // width, same centre; still nothing else moves.
 // ─────────────────────────────────────────────────────────────────────
+// ── STAGING-FIX 2 (Nathan's GR-meter directive, 2026-10-22
+// — TEST BUILD): a FINER scale in the working range. The
+// marks' PHYSICAL positions do not move (the gui-v61 face);
+// only their values change: the mark that read -5 now
+// reads -2, -10 -> -5, -15 -> -10, and the centre stays
+// the ∞ glyph (= the fronts meeting at the 20 dB display
+// clamp, as in v52). So 0-10 dB of GR now gets the travel
+// 0-15 used to get. The lit law is re-mapped to stay
+// truthful — the fronts must come to rest exactly on the
+// marks: a smooth monotone curve (Fritsch-Carlson monotone
+// cubic Hermite, C1, exact at the knots, monotonic by
+// construction) through knots whose lit values are the
+// v52 law's own outputs, re-assigned:
+//   GR dB:    0         2            5            10           20
+//   lit:      1.0       (0.75)^.85   (0.50)^.85   (0.25)^.85   0.0
+//                     = 0.7831     = 0.5548     = 0.3078
+// i.e. the front sits where the OLD -5 mark stands when
+// the reduction is 2 dB, and so on. The final segment
+// (10 dB -> the centre) covers the rest of the range to
+// the unchanged 20 dB clamp; its interior is deliberately
+// uncalibrated (Nathan: precision between 10 and ∞ does
+// not matter). Display law only — audio and real GR
+// untouched, and > 20 dB still tops the meter out.
+static float grLitFraction(float grDb)
+{
+    static const float kx[5] = { 0.0f, 2.0f, 5.0f, 10.0f, 20.0f };
+    static const float ky[5] = { 1.0f,
+                                 std::pow(0.75f, 0.85f),
+                                 std::pow(0.50f, 0.85f),
+                                 std::pow(0.25f, 0.85f),
+                                 0.0f };
+    if (grDb <= 0.0f)  return 1.0f;
+    if (grDb >= 20.0f) return 0.0f;
+    int i = 0;
+    while (i < 3 && grDb > kx[i + 1]) ++i;
+    const float h  = kx[i + 1] - kx[i];
+    const float dC = (ky[i + 1] - ky[i]) / h;                       // this segment's secant
+    const float dP = i > 0 ? (ky[i] - ky[i - 1]) / (kx[i] - kx[i - 1]) : dC;
+    const float dN = i < 3 ? (ky[i + 2] - ky[i + 1]) / (kx[i + 2] - kx[i + 1]) : dC;
+    // Fritsch-Carlson tangents: harmonic mean of the
+    // neighbouring secants (all same-signed here); the
+    // endpoints take their segment's secant.
+    auto harm = [](float a, float b) { return 2.0f / (1.0f / a + 1.0f / b); };
+    const float m0 = i == 0 ? dC : harm(dP, dC);
+    const float m1 = i == 3 ? dC : harm(dC, dN);
+    const float t  = (grDb - kx[i]) / h;
+    const float t2 = t * t, t3 = t2 * t;
+    return (2.0f * t3 - 3.0f * t2 + 1.0f) * ky[i]
+         + (t3 - 2.0f * t2 + t) * h * m0
+         + (-2.0f * t3 + 3.0f * t2) * ky[i + 1]
+         + (t3 - t2) * h * m1;
+}
+
 void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
 {
     const juce::Rectangle<float> frame(124.0f, 45.8f, 192.0f, 60.4f);
@@ -2074,8 +2127,10 @@ void Osc72Editor::drawGrDisplay(juce::Graphics& g, float grDb, bool dark)
 
     // Lit fraction from GR (the converging-darkness law).
     // v52: full scale is 20 dB (was 28 through v51).
-    const float lit = dark ? 0.0f
-        : std::pow(osc72::clampf(1.0f - grDb / 20.0f, 0.0f, 1.0f), 0.85f);
+    // STAGING-FIX 2: the law is grLitFraction (above) —
+    // the same 20 dB full scale, re-mapped fine in the
+    // working range per Nathan's meter directive.
+    const float lit = dark ? 0.0f : grLitFraction(grDb);
 
     // Phosphor glow spilling onto the panel — scales with how
     // much of the field is lit. (Skipped when dark.)
@@ -2883,16 +2938,25 @@ void Osc72Editor::paint(juce::Graphics& g)
         const float fieldCx = 220.0f;          // drawGrDisplay's field centre
         const float halfW = 169.0f * 0.5f;     // field (135.5, 57.3, 169, 37.4)
         struct GrMark { float gr; const char* label; float towardCentre; bool infinity; };
+        // STAGING-FIX 2 (Nathan's meter directive, 2026-10-22
+        // — TEST BUILD): the marks keep their gui-v61
+        // POSITIONS (the tick offsets below come out of
+        // grLitFraction at these GR values and equal the
+        // v52 offsets 84.50 / 66.17 / 46.88 / 26.01 / 0 by
+        // construction); only the NUMERALS change — the old
+        // -5 mark reads -2, -10 reads -5, -15 reads -10,
+        // and the centre keeps the ∞ glyph. Value set
+        // 0 / 2 / 5 / 10 / 20(∞).
         static constexpr GrMark marks[] = {
             {  0.0f, "0",    0.0f, false },
+            {  2.0f, "-2",   0.0f, false },
             {  5.0f, "-5",   0.0f, false },
             { 10.0f, "-10",  0.0f, false },
-            { 15.0f, "-15",  0.0f, false },
             { 20.0f, "-20",  0.0f, true  },
         };
         g.setColour(kSilk);
         for (const auto& m : marks) {
-            const float lit = std::pow(osc72::clampf(1.0f - m.gr / 20.0f, 0.0f, 1.0f), 0.85f);
+            const float lit = grLitFraction(m.gr);
             const float off = halfW * lit;
             for (int side = -1; side <= 1; side += 2) {
                 if (side > 0 && off < 0.01f) break;   // centre tick drawn once

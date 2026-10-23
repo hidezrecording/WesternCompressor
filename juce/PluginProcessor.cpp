@@ -31,7 +31,11 @@ Osc72Processor::createParameterLayout()
         // v53 (Nathan): the default opening state is INPUT at
         // 5 — the 1.1.5 staging's "barely kissing" point
         // (a nominal -14 dBFS signal draws ~1.8 dB of GR).
-        juce::NormalisableRange<float>(0.0f, 10.0f, 0.01f), 5.0f,
+        // STAGING-FIX 2 (Nathan's factory-defaults directive,
+        // 2026-10-22 — TEST BUILD): INPUT now opens at 4.
+        // APVTS default only: saved sessions restore their
+        // stored value over it (replaceState semantics).
+        juce::NormalisableRange<float>(0.0f, 10.0f, 0.01f), 4.0f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [](float v, int) { return juce::String(v, 1); },
         [](const juce::String& t) { return t.getFloatValue(); }));
@@ -56,8 +60,12 @@ Osc72Processor::createParameterLayout()
     // firmer law. Session note: a pre-1.1.9 session saved OUT
     // (false) loads as LIMIT-active rather than bypassed;
     // saved IN (true) loads as COMP.
+    // STAGING-FIX 2 (Nathan's factory-defaults directive,
+    // 2026-10-22 — TEST BUILD): the opening default is now
+    // COMP (true). Saved sessions still restore their stored
+    // mode over the default.
     params.push_back(std::make_unique<juce::AudioParameterBool>(
-        juce::ParameterID { "limit", 1 }, "Limit", false));
+        juce::ParameterID { "limit", 1 }, "Limit", true));
     // Power (Nathan, 2026-10-14, v19): the strip's POWER toggle,
     // a third switch cluster matching LIMIT/MOD. Default ON.
     // Power off = the whole unit goes off, "like our other
@@ -74,8 +82,11 @@ Osc72Processor::createParameterLayout()
     // SLOW = DUAL, the default — the BA-6A's signature
     // programme setting). Research: docs/engine-v4-research.md
     // §A.6; design: docs/engine-v4-design.md §2.3/§6.
+    // STAGING-FIX 2 (Nathan's factory-defaults directive,
+    // 2026-10-22 — TEST BUILD): ATTACK now opens SLOW
+    // (attackFast default false); RELEASE stays SLOW (DUAL).
     params.push_back(std::make_unique<juce::AudioParameterBool>(
-        juce::ParameterID { "attackFast", 1 }, "Attack Fast", true));
+        juce::ParameterID { "attackFast", 1 }, "Attack Fast", false));
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID { "releaseFast", 1 }, "Release Fast", false));
     // REMOVED in 1.3.1 (v64): the 'timesTwo' 1X/2X timing
@@ -121,9 +132,12 @@ Osc72Processor::createParameterLayout()
     // compression path, modulo the make-up's relocation
     // to the bus). Value strings are plain percents
     // ("0".."100"), as the retired 'mix' pot's were.
+    // STAGING-FIX 2 (Nathan's factory-defaults directive,
+    // 2026-10-22 — TEST BUILD): COMP MIX now opens at
+    // 1.0 (100%) — the unit opens as a pure compressor.
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID { "compMix", 1 }, "Compression Mix",
-        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f,
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 1.0f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [](float v, int) { return juce::String(juce::roundToInt(v * 100.0f)); },
         [](const juce::String& t) { return juce::jlimit(0.0f, 1.0f, t.getFloatValue() / 100.0f); }));
@@ -161,9 +175,15 @@ Osc72Processor::createParameterLayout()
     // make-up. Contributes nothing while MOD is out
     // (the engagement gate). Default 0.5 = 12 o'clock
     // (Nathan: both pots open centred).
+    // STAGING-FIX 2 (Nathan's factory-defaults directive,
+    // 2026-10-22 — TEST BUILD): MOD MIX now opens at 0 —
+    // switching the MOD in adds nothing until the user
+    // raises the pot and levels the channel themselves.
+    // (This, not a DSP trim, is the remedy for the MOD-in
+    // level jump at the old noon/noon opening state.)
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID { "modMix", 1 }, "Mod Mix",
-        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f,
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [](float v, int) { return juce::String(juce::roundToInt(v * 100.0f)); },
         [](const juce::String& t) { return juce::jlimit(0.0f, 1.0f, t.getFloatValue() / 100.0f); }));

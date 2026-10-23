@@ -269,10 +269,14 @@ int main() {
         p.prepareToPlay(kFs, 512);
         auto* pa = p.apvts.getParameter("attackFast");
         auto* pr = p.apvts.getParameter("releaseFast");
-        std::snprintf(b, sizeof b, "attackFast default=%.0f (want 1), releaseFast default=%.0f (want 0)",
+        std::snprintf(b, sizeof b, "attackFast default=%.0f (want 0), releaseFast default=%.0f (want 0)",
                       pa ? (double)pa->getValue() : -1.0, pr ? (double)pr->getValue() : -1.0);
-        check(pa && pr && pa->getValue() > 0.5f && pr->getValue() < 0.5f,
-              "P6a v4 params exist, defaults FAST attack / SLOW (dual) release", b);
+        // STAGING-FIX 2 re-site (cause: Nathan's factory-
+        // defaults directive, 2026-10-22 — TEST BUILD):
+        // ATTACK now opens SLOW (was FAST); RELEASE stays
+        // SLOW (DUAL). The full default set is P13's pin.
+        check(pa && pr && pa->getValue() < 0.5f && pr->getValue() < 0.5f,
+              "P6a v4 params exist, defaults SLOW attack / SLOW (dual) release (staging-fix 2)", b);
 
         // End-to-end attack: a burst's first-10 ms peak passes
         // HIGHER with SLOW attack than with FAST.
@@ -400,9 +404,11 @@ int main() {
     {
         // One processor over typical material, full histories.
         // compMix/modMix < 0 = leave the param untouched
-        // (the 0.5 defaults).
+        // (the factory defaults; 0.5/0.5 through AB3,
+        // 1.0/0.0 from staging-fix 2).
         auto runPots = [](float compMix, float modMix, bool warble, bool phaser,
-                          double seconds, float power = 1.0f, float knob = 0.5f) {
+                          double seconds, float power = 1.0f, float knob = 0.5f,
+                          float limit = -1.0f, float attackFast = -1.0f) {
             struct Hist { std::vector<float> inL, inR, outL, outR; };
             Osc72Processor p;
             p.prepareToPlay(kFs, 512);
@@ -414,6 +420,13 @@ int main() {
                 p.apvts.getParameter("compMix")->setValueNotifyingHost(compMix);
             if (modMix >= 0.0f)
                 p.apvts.getParameter("modMix")->setValueNotifyingHost(modMix);
+            // Optional regime pins (staging-fix 2): < 0 =
+            // leave at the factory default, as every
+            // protocol through staging-fix 1 did.
+            if (limit >= 0.0f)
+                p.apvts.getParameter("limit")->setValueNotifyingHost(limit);
+            if (attackFast >= 0.0f)
+                p.apvts.getParameter("attackFast")->setValueNotifyingHost(attackFast);
             Material mat{ 2 };
             const int block = 512;
             // Whole blocks only — a part-block tail would sit
@@ -440,9 +453,15 @@ int main() {
         };
         const int settle = (int)(0.5 * kFs);
 
-        // P7a: both params exist with 0.5 defaults (12
-        // o'clock, Nathan) and plain percent strings; the
-        // retired 'mix' and 'scCutoff' params are absent.
+        // P7a: both params exist with their opening
+        // defaults and plain percent strings; the retired
+        // 'mix' and 'scCutoff' params are absent.
+        // STAGING-FIX 2 re-site (cause: Nathan's factory-
+        // defaults directive, 2026-10-22 — TEST BUILD):
+        // the unit opens as a pure compressor — COMP MIX
+        // 1.0 ('100'), MOD MIX 0 ('0'); the AB3-era 0.5/0.5
+        // centred opening is retired. P13 pins the full
+        // default set.
         {
             Osc72Processor p;
             p.prepareToPlay(kFs, 512);
@@ -450,31 +469,34 @@ int main() {
             auto* pm = p.apvts.getParameter("modMix");
             auto* pOldMix = p.apvts.getParameter("mix");
             auto* pOldSc = p.apvts.getParameter("scCutoff");
-            std::snprintf(b, sizeof b, "compMix default=%.3f text='%s', modMix default=%.3f; mix %s, scCutoff %s",
+            std::snprintf(b, sizeof b, "compMix default=%.3f text='%s', modMix default=%.3f text='%s'; mix %s, scCutoff %s",
                           pc ? (double)pc->getValue() : -1.0,
                           pc ? pc->getCurrentValueAsText().toRawUTF8() : "",
                           pm ? (double)pm->getValue() : -1.0,
+                          pm ? pm->getCurrentValueAsText().toRawUTF8() : "",
                           pOldMix ? "STILL EXISTS" : "absent",
                           pOldSc ? "STILL EXISTS" : "absent");
             check(pc && pm && !pOldMix && !pOldSc
-                  && std::fabs(pc->getValue() - 0.5f) < 1e-6
-                  && std::fabs(pm->getValue() - 0.5f) < 1e-6
-                  && pc->getCurrentValueAsText() == "50"
-                  && pm->getCurrentValueAsText() == "50",
-                  "P7a AB3 pots exist, default 0.5 ('50'); 'mix'/'scCutoff' removed", b);
+                  && std::fabs(pc->getValue() - 1.0f) < 1e-6
+                  && std::fabs(pm->getValue() - 0.0f) < 1e-6
+                  && pc->getCurrentValueAsText() == "100"
+                  && pm->getCurrentValueAsText() == "0",
+                  "P7a AB3 pots exist, defaults 1.0 ('100') / 0.0 ('0') (staging-fix 2); 'mix'/'scCutoff' removed", b);
         }
-        // P7b: untouched defaults == explicit 0.5/0.5,
-        // sample-for-sample (the defaults ARE the centred
-        // pots; nothing about the opening state is implied
-        // by an untouched instance beyond them).
+        // P7b: untouched defaults == explicit 1.0/0.0,
+        // sample-for-sample (the defaults ARE the pots'
+        // opening state; nothing about the opening state
+        // is implied by an untouched instance beyond them).
+        // STAGING-FIX 2 re-site: the explicit pair follows
+        // the new defaults (cause as P7a).
         for (bool warble : { false, true }) {
             auto a = runPots(-1.0f, -1.0f, warble, false, 2.0);
-            auto c = runPots(0.5f, 0.5f, warble, false, 2.0);
+            auto c = runPots(1.0f, 0.0f, warble, false, 2.0);
             bool exact = a.outL == c.outL && a.outR == c.outR;
-            std::snprintf(b, sizeof b, "warble=%d: explicit 0.5/0.5 identical to untouched defaults: %d",
+            std::snprintf(b, sizeof b, "warble=%d: explicit 1.0/0.0 identical to untouched defaults: %d",
                           (int)warble, (int)exact);
-            check(exact, warble ? "P7b defaults == explicit 0.5/0.5 bit-for-bit (MOD in)"
-                                : "P7b defaults == explicit 0.5/0.5 bit-for-bit (MOD out)", b);
+            check(exact, warble ? "P7b defaults == explicit 1.0/0.0 bit-for-bit (MOD in)"
+                                : "P7b defaults == explicit 1.0/0.0 bit-for-bit (MOD out)", b);
         }
         // P7c (FULL2 form; the AB3 form pinned "output =
         // input delayed" via the crossfade's dry arm —
@@ -566,10 +588,19 @@ int main() {
         // 6e-3 -> 3.5e-2 from the measurement with
         // headroom; the exact algebra remains pinned by
         // L4 and the re-sited P7e.
+        // STAGING-FIX 2 re-site (cause: Nathan's factory-
+        // defaults directive): the 2.68e-02 measurement
+        // was taken in the LIMIT + FAST-attack regime,
+        // which this protocol used to inherit from the
+        // factory defaults; under the new COMP + SLOW
+        // opening defaults the SLOW seat passes more
+        // transient into the cap and the residue read
+        // 3.60e-02. The regime is now set explicitly
+        // (limit 0, attackFast 1); the bound is unchanged.
         {
-            auto d = runPots(1.0f, 0.0f, true, true, 2.0);
-            auto w = runPots(1.0f, 1.0f, true, true, 2.0);
-            auto h = runPots(1.0f, 0.5f, true, true, 2.0);
+            auto d = runPots(1.0f, 0.0f, true, true, 2.0, 1.0f, 0.5f, 0.0f, 1.0f);
+            auto w = runPots(1.0f, 1.0f, true, true, 2.0, 1.0f, 0.5f, 0.0f, 1.0f);
+            auto h = runPots(1.0f, 0.5f, true, true, 2.0, 1.0f, 0.5f, 0.0f, 1.0f);
             double maxErr = 0;
             for (int i = settle; i < (int)w.outL.size(); ++i) {
                 const double mL = 0.5 * ((double)d.outL[(size_t)i] + w.outL[(size_t)i]);
@@ -1148,11 +1179,19 @@ int main() {
         // tolerance unchanged; at matched drive the DSP
         // suite's K-benches reproduce the AB2 figures
         // digit-for-digit (see the candidate report).
+        // STAGING-FIX 2 re-site (cause: Nathan's factory-
+        // defaults directive): the AB2 references are the
+        // LIMIT law's figures (the calibrated mode), and
+        // this protocol silently rode the old LIMIT
+        // factory default — under the new COMP opening
+        // default it read 22.7 ms through COMP's law. The
+        // mode is now set explicitly; reference unchanged.
         auto grRiseT90 = [&]() {
             Osc72Processor q;
             q.prepareToPlay(kFs, 64);
             q.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.5174f);
             q.apvts.getParameter("attackFast")->setValueNotifyingHost(0.0f);
+            q.apvts.getParameter("limit")->setValueNotifyingHost(0.0f);
             juce::MidiBuffer midi;
             const int block = 64;
             const int onset = (int)(0.3 * kFs);
@@ -1195,11 +1234,24 @@ int main() {
         // P11b): protocol knob 0.75 -> 0.5174; the depth
         // the release falls FROM returns to the reference
         // operating point. References unchanged.
+        // STAGING-FIX 2 re-site (same cause as P11b): the
+        // regime is set explicitly — LIMIT mode AND the
+        // FAST attack seat. The AB2 depth reference
+        // (22.3 dB) is the LIMIT law's at the FAST seat;
+        // the protocol used to inherit both from the
+        // factory defaults, and each new default moved
+        // the reading on its own (COMP default: 17.2 dB /
+        // 0.087 s; LIMIT + the new SLOW seat: 24.3 dB /
+        // 0.060 s — the SLOW seat's demand-shaped charge
+        // leaves a different stress state at the hold's
+        // end). References unchanged.
         auto grFallT50 = [&](float& peakGr) {
             Osc72Processor q;
             q.prepareToPlay(kFs, 64);
             q.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.5174f);
             q.apvts.getParameter("releaseFast")->setValueNotifyingHost(0.0f);
+            q.apvts.getParameter("limit")->setValueNotifyingHost(0.0f);
+            q.apvts.getParameter("attackFast")->setValueNotifyingHost(1.0f);
             juce::MidiBuffer midi;
             const int block = 64;
             const int loudEnd = (int)(1.0 * kFs);
@@ -1297,6 +1349,139 @@ int main() {
               "P12a proc: same-rate prepareToPlay re-call mid-stream bit-identical (ADT in)", "");
         check(renderWithEvent(true, true) == renderWithEvent(true, false),
               "P12b proc: same-rate prepareToPlay re-call mid-stream bit-identical (phaser in)", "");
+    }
+
+    // ── P13. FACTORY DEFAULTS (STAGING-FIX 2) ───────────────
+    // Nathan's factory-defaults directive (2026-10-22):
+    // the unit opens as a pure compressor — INPUT 4,
+    // ATTACK SLOW, RELEASE SLOW (DUAL), RATIO COMP, MOD
+    // out, COMP MIX 100%, MOD MIX 0% — the remedy for the
+    // MOD-in level jump at the old noon/noon opening
+    // state: anyone who switches the MOD in levels the
+    // channel themselves from a silent pot. These are
+    // APVTS defaults ONLY (P13a); a saved state must
+    // restore its stored values over them (P13b).
+    {
+        // P13a: a fresh instance's complete default state.
+        {
+            Osc72Processor p;
+            auto norm = [&](const char* id) {
+                auto* q = p.apvts.getParameter(id);
+                return q ? (double)q->getValue() : -1.0;
+            };
+            std::snprintf(b, sizeof b,
+                "knob %.3f warble %.0f phaser %.0f limit %.0f power %.0f attF %.0f relF %.0f comp %.3f mod %.3f link %.0f outL %.3f outR %.3f",
+                norm("allTheWay"), norm("warble"), norm("modPhaser"), norm("limit"),
+                norm("power"), norm("attackFast"), norm("releaseFast"),
+                norm("compMix"), norm("modMix"), norm("outLink"),
+                norm("outLevelL"), norm("outLevelR"));
+            check(std::fabs(norm("allTheWay") - 0.4) < 1e-6      // INPUT 4 (of 0..10)
+                  && norm("warble") == 0.0                        // MOD out
+                  && norm("modPhaser") == 0.0                     // flavour A
+                  && norm("limit") == 1.0                         // RATIO: COMP
+                  && norm("power") == 1.0
+                  && norm("attackFast") == 0.0                    // ATTACK: SLOW
+                  && norm("releaseFast") == 0.0                   // RELEASE: SLOW (DUAL)
+                  && std::fabs(norm("compMix") - 1.0) < 1e-6      // COMP MIX 100%
+                  && norm("modMix") == 0.0                        // MOD MIX 0%
+                  && norm("outLink") == 1.0
+                  && std::fabs(norm("outLevelL") - 0.5) < 1e-6    // 0 dB (of -12..+12)
+                  && std::fabs(norm("outLevelR") - 0.5) < 1e-6,
+                  "P13a fresh instance: the full factory default state (staging-fix 2)", b);
+        }
+        // P13b: stored state wins over the defaults —
+        // every parameter driven to a NON-default value,
+        // the state saved and restored into a fresh
+        // instance: every value must land exactly,
+        // including the five whose defaults just moved.
+        {
+            Osc72Processor src;
+            const std::pair<const char*, float> sets[] = {
+                { "allTheWay", 0.73f }, { "warble", 1.0f }, { "modPhaser", 1.0f },
+                { "limit", 0.0f },      { "power", 0.0f },  { "attackFast", 1.0f },
+                { "releaseFast", 1.0f }, { "compMix", 0.35f }, { "modMix", 0.65f },
+                { "outLink", 0.0f },    { "outLevelL", 0.625f }, { "outLevelR", 0.375f },
+            };
+            for (const auto& s : sets)
+                src.apvts.getParameter(s.first)->setValueNotifyingHost(s.second);
+            juce::MemoryBlock mb;
+            src.getStateInformation(mb);
+            Osc72Processor dst;
+            dst.setStateInformation(mb.getData(), (int)mb.getSize());
+            bool allBack = true;
+            for (const auto& s : sets) {
+                auto* q = dst.apvts.getParameter(s.first);
+                if (!q || std::fabs(q->getValue() - s.second) > 1e-6f)
+                    allBack = false;
+            }
+            std::snprintf(b, sizeof b, "all 12 stored (non-default) values restored exactly: %d",
+                          (int)allBack);
+            check(allBack,
+                  "P13b saved state restores over the factory defaults (defaults never win)", b);
+        }
+    }
+
+    // ── P14. OPENING STATE ON PROGRAMME (STAGING-FIX 2) ─────
+    // The opening state, exercised end-to-end: an
+    // untouched instance must render EXACTLY the explicit
+    // pure-compressor state (P14a), and switching the MOD
+    // in at the default MOD MIX 0 must add nothing (P14b:
+    // bit-exact for the P flavour, whose latency never
+    // moves; for the A flavour the comp channel rides the
+    // 960-sample bus alignment delay — the FULL2 design's
+    // known behaviour — so the settled programme level is
+    // asserted equal instead: the MOD channel's gain is
+    // exactly 0, so there is no MOD content to hear).
+    {
+        auto renderState = [&](bool explicitState, bool modIn, bool phaser) {
+            Osc72Processor p;
+            if (explicitState) {
+                p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.4f);
+                p.apvts.getParameter("limit")->setValueNotifyingHost(1.0f);
+                p.apvts.getParameter("attackFast")->setValueNotifyingHost(0.0f);
+                p.apvts.getParameter("releaseFast")->setValueNotifyingHost(0.0f);
+                p.apvts.getParameter("compMix")->setValueNotifyingHost(1.0f);
+                p.apvts.getParameter("modMix")->setValueNotifyingHost(0.0f);
+            }
+            if (modIn) p.apvts.getParameter("warble")->setValueNotifyingHost(1.0f);
+            if (phaser) p.apvts.getParameter("modPhaser")->setValueNotifyingHost(1.0f);
+            p.prepareToPlay(kFs, 512);
+            Material mat{ 2 };
+            juce::MidiBuffer midi;
+            const int block = 512;
+            std::vector<float> out;
+            for (int base = 0; base < (int)(3.0 * kFs); base += block) {
+                juce::AudioBuffer<float> buf(2, block);
+                for (int j = 0; j < block; ++j) {
+                    float l, r; mat.sample(base + j, l, r);
+                    buf.setSample(0, j, l);
+                    buf.setSample(1, j, r);
+                }
+                p.processBlock(buf, midi);
+                for (int j = 0; j < block; ++j) {
+                    out.push_back(buf.getSample(0, j));
+                    out.push_back(buf.getSample(1, j));
+                }
+            }
+            return out;
+        };
+        check(renderState(false, false, false) == renderState(true, false, false),
+              "P14a untouched instance == explicit factory state bit-for-bit (pure compressor opening)", "");
+        {
+            const auto off = renderState(false, false, false);
+            const auto inP = renderState(false, true, true);
+            check(off == inP,
+                  "P14b MOD in at MOD MIX 0 adds nothing — bit-exact (P flavour)", "");
+            const auto inA = renderState(false, true, false);
+            auto settledRms = [](const std::vector<float>& v) {
+                double ss = 0; long n = 0;
+                for (size_t i = v.size() / 2; i < v.size(); i += 2) { ss += (double)v[i] * v[i]; ++n; }
+                return std::sqrt(ss / (double)n);
+            };
+            const double dDb = std::fabs(20.0 * std::log10(settledRms(inA) / settledRms(off)));
+            std::snprintf(b, sizeof b, "settled RMS delta MOD-in(A) vs MOD-out at defaults: %.4f dB", dDb);
+            check(dDb < 0.05, "P14c MOD in at MOD MIX 0 adds nothing — settled level equal (A flavour)", b);
+        }
     }
 
     std::printf("%s (%d checks, %d failures)\n",

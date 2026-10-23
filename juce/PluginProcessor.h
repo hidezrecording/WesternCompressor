@@ -89,10 +89,10 @@ public:
 
 private:
     osc72::Chain chain_;
-    bool compMode_ = false; // v53: 'limit' param repurposed (true = COMP); default LIMIT
+    bool compMode_ = true; // v53: 'limit' param repurposed (true = COMP); STAGING-FIX 2: opening default COMP
     bool warbleOn_ = false;
     bool modPhaser_ = false; // v55: MOD flavour — false = A (ADT, default), true = P (Phase 90)
-    bool attackFast_ = true;    // v4: stock detector (default FAST)
+    bool attackFast_ = false;   // v4: stock detector; STAGING-FIX 2: opening default SLOW
     bool releaseFast_ = false;  // v4: DUAL recovery (default SLOW)
     bool powerOn_ = true;      // v19 strip POWER toggle (default ON)
     float powerMix_ = 1.0f;    // v19 bypass fade position, 1 = unit on
