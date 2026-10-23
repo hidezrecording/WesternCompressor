@@ -64,6 +64,7 @@ void Ba6aLimiter::reset()
     lpL_ = lpR_ = 0.0f;
     sag_ = 0.0f;
     detEnv_ = 0.0f;
+    detRmsSq_ = 0.0f;
     lastPreL_ = lastPreR_ = 0.0f;
     prePeak_ = 0.0f;
     grSingle_ = grDual1_ = grDual2_ = 0.0f;
@@ -237,7 +238,23 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
                                      : kBa6aDetDecayScale;
     detEnv_ += (peak - detEnv_) * tauCoef(detTau * detScale, fs_);
 
-    const float target = ba6aVariMuDb(detEnv_, lawSlope_, lawToe_,
+    // TEST4 detector blend: a slow RMS of the detector
+    // source (unsensed, like the peak above before its
+    // sense scaling) runs beside the peak envelope; the
+    // law is fed whichever is higher. The branch carries
+    // the mode's sense and the slow seat's trim, stating
+    // it in the peak envelope's units (see the
+    // kBa6aBlendGain note in the header). On transients
+    // the peak envelope wins and the blend is inert.
+    {
+        const float rawPk = std::max(std::fabs(lastPreL_), std::fabs(lastPreR_));
+        detRmsSq_ += (rawPk * rawPk - detRmsSq_) * tauCoef(kBa6aBlendRmsTauSec, fs_);
+    }
+    const float blendTerm = kBa6aBlendGain * lawSense_ * std::sqrt(detRmsSq_)
+                          * (attackFast_ ? 1.0f : kBa6aThresholdSlowTrim);
+    const float detIn = std::max(detEnv_, blendTerm);
+
+    const float target = ba6aVariMuDb(detIn, lawSlope_, lawToe_,
                                       kBa6aThresholdEnvLin * lawSense_
                                           * (attackFast_ ? 1.0f : kBa6aThresholdSlowTrim));
 

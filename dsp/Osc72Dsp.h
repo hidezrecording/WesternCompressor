@@ -374,6 +374,45 @@ inline constexpr float kBa6aThresholdEnvLin = 0.80f; // pre-sense detector-envel
 // in the working range without it, at this threshold
 // exactly as at TEST2's. Value unchanged: 0.74.
 inline constexpr float kBa6aThresholdSlowTrim = 0.74f;
+// TEST4 DETECTOR BLEND (2026-10-23, Nathan's directive
+// after the sustained-material diagnosis — see
+// DIAGNOSIS-test3-sustained-material.md in the 1.4.2
+// release folder). His TEST3 ear report on a vocal:
+// "by five and a half on the input knob it is beyond
+// blown out... no compression has even come close to
+// starting." The diagnosis: the sustained detector
+// envelope is bounded by the path's own tanh cascade
+// and grows only ~0.2-0.6 dB per knob while the drive
+// taper grows ~7-8 dB per knob beneath it, so onset
+// position is hypersensitive to a material's envelope
+// level (~0.5 dB of envelope = ~1 knob of onset); a
+// real vocal settling ~2 dB under the lab vocal onsets
+// at ~9.5-10.5 instead of 5.5. A threshold trim cannot
+// fix that without spending the drums' silence ~1:1
+// (measured). The blend instead raises the envelope's
+// FLOOR: the sense value fed to the law becomes
+//   max(peak envelope,
+//       kBa6aBlendGain * lawSense * RMS250ms(source)
+//           * (SLOW seat trim, when the slow seat))
+// where the RMS is a one-pole (tau = kBa6aBlendRmsTauSec)
+// mean-square of the detector source (the same unsensed
+// last-sample output the peak envelope reads). The
+// branch is stated in the peak envelope's own units —
+// sensed, and carrying the slow seat's trim exactly as
+// the threshold does — so both seats read it in their
+// own envelope units. On transients the peak envelope
+// already rides above the branch and the blend never
+// wins (drums bit-identical to TEST3 on sweep and step
+// bench, both seats, measured in the diagnosis'
+// blend-2 prototype); on sustained material the branch
+// lifts the floor between peaks, and the margin it buys
+// grows with the material's crest — the axis on which a
+// real vocal differs from the lab one. The threshold
+// (0.80) and the slow trim (0.74) are unchanged; the
+// law, ballistics, staging, taper, defaults and meter
+// are untouched.
+inline constexpr float kBa6aBlendGain      = 1.35f;  // TEST4 detector blend branch gain
+inline constexpr float kBa6aBlendRmsTauSec = 0.250f; // TEST4 detector blend RMS window
 inline float ba6aVariMuDb(float envLin, float slope, float toeEnv, float refEnvLin) {
     const float over = ba6aSenseShape(envLin, toeEnv)
                      - ba6aSenseShape(refEnvLin, toeEnv);
@@ -778,6 +817,7 @@ private:
 
     float sag_ = 0.0f;                // B+ sag state (linked), 0..1 — v1.1.2 (study §2.3a)
     float detEnv_ = 0.0f;             // detector envelope (linear peak)
+    float detRmsSq_ = 0.0f;           // TEST4: blend branch mean-square of the detector source
     float stress_ = 0.0f;             // v45: T4 memory state (dB of sustained GR)
     float lastPreL_ = 0.0f, lastPreR_ = 0.0f; // post-iron, pre-makeup (detector source)
     float prePeak_ = 0.0f;            // slow-decay peak of the pre-makeup output (make-up ceiling)

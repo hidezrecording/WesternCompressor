@@ -1321,7 +1321,7 @@ int main() {
         };
         float pk = 0;
         double f = grFallT50(pk);
-        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: TEST3 %.3f s vs ref 0.044 s, peak %.1f dB (ref 34.8, TEST3 re-base)",
+        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: TEST4 %.3f s vs ref 0.092 s, peak %.1f dB (ref 34.8, TEST4 re-base)",
                       f, pk);
         // TEST2 re-base of the time only (cause: Nathan's
         // operating-point directive): the protocol is
@@ -1351,8 +1351,26 @@ int main() {
         // unchanged by the DSP suite: C4/K5 hold the
         // AB2 references unmoved; C5/K6 re-based at
         // TEST3 figures inside the AB2 window.
-        check(std::fabs(f - 0.044) <= (64.0 / kFs) && std::fabs(pk - 34.8f) < 0.3f,
-              "P11c proc: DUAL release 50% recovery == TEST3 ref from the TEST3 depth (re-based, operating point)", b);
+        // TEST4 re-base (cause: Nathan's detector-blend
+        // directive): the DEPTH reference is unmoved
+        // (peak reads 34.8 dB, exactly the TEST3 figure —
+        // the matched-depth control), and the 50%
+        // recovery reads 0.092 s. Mechanism: this
+        // protocol's loud second is a sustained tone, so
+        // the blend's RMS branch is fully charged when
+        // the tone stops; the branch then drains with
+        // its 250 ms tau and holds the GR target up
+        // through the early release, stretching the 50%
+        // crossing. It is the blend's one ballistics
+        // side effect, and it is bounded to the
+        // post-sustained-passage case: the DSP suite's
+        // release family (C3/C4/K4/K5) passes UNMOVED on
+        // this tree, the programme-step bench is
+        // identical in every cell, and P11b's attack
+        // figure holds its TEST3 reference. Flagged in
+        // REPORT-TEST4.md.
+        check(std::fabs(f - 0.092) <= (64.0 / kFs) && std::fabs(pk - 34.8f) < 0.3f,
+              "P11c proc: DUAL release 50% recovery == TEST4 ref from the TEST3 depth (re-based, detector blend)", b);
 
         // P11d: the reported latency is untouched by the
         // bake (MOD in A: 992; MOD out: 32).

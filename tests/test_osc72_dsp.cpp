@@ -483,12 +483,25 @@ int main() {
         // of that calibration is pinned here; the programme
         // half is pinned by the report's onset table (the
         // DSP suite's own programme proxy is D3).
+        // TEST4 RE-BASE (2026-10-23, cause: Nathan's
+        // detector-blend directive): a steady tone is the
+        // limiting case of sustained material — the blend's
+        // RMS branch legitimately engages on it, so the
+        // -10 dBFS tone at knob 0.5 now draws a real kiss
+        // (measured 2.10 dB on this tree; TEST3 control on
+        // the identical bench: 0.00). The -20 tone stays at
+        // the TEST2 kiss (0.00). Programme silence at knob
+        // 5 is NOT given up: all five onset materials read
+        // 0.000 mean GR at knob 5 in both modes and seats
+        // (REPORT-TEST4.md onset tables) — the tone half of
+        // the home calibration is what the blend changes,
+        // by design.
         Meas h20 = runLim(0.5f, 0.1f, 1000.0f);
         Meas h10 = runLim(0.5f, 0.316f, 1000.0f);
-        std::snprintf(d, sizeof d, "knob 0.5 GR at -20/-10 (1 kHz): %.2f / %.2f dB (TEST2 home kiss)",
+        std::snprintf(d, sizeof d, "knob 0.5 GR at -20/-10 (1 kHz): %.2f / %.2f dB (TEST4 blend tone kiss)",
                       h20.meanGr, h10.meanGr);
-        check(h20.meanGr < 0.5f && h10.meanGr < 0.5f,
-              "B2c knob 5 home kiss: tones sub-threshold at INPUT 5 (TEST2)", d);
+        check(h20.meanGr < 0.5f && h10.meanGr > 1.0f && h10.meanGr < 3.0f,
+              "B2c knob 5 home kiss: -20 tone sub-threshold; -10 steady tone engages via the TEST4 blend", d);
     }
     {
         // B3: GR monotone in the knob at a fixed hot input,
@@ -844,7 +857,19 @@ int main() {
         // The pin asserts that working band (the digging
         // the v1.1.1 note above asked for, at the
         // corrected operating point).
-        check(grAt1 > 4.0f && grAt1 < 12.0f, "D3 programme mean GR at max = working depth 4-12 dB (TEST3 recalibration)", d);
+        // TEST4 RE-BASE (cause: Nathan's detector-blend
+        // directive): at full drive (+51 dB) ProgGen's
+        // continuous bed (the 220 Hz component and the
+        // hit train, driven into the bounded path) is
+        // sustained content, and the blend's RMS branch
+        // engages on it — measured mean GR at max 19.8 dB
+        // on this tree (TEST3 control on the identical
+        // bench: 7.3 dB). The band asserts the blend's
+        // deepened working depth at max; the transient
+        // anchor is unmoved (drums onset rows identical
+        // to TEST3 except <= +0.64 dB at knob 8 SLOW —
+        // REPORT-TEST4.md).
+        check(grAt1 > 14.0f && grAt1 < 24.0f, "D3 programme mean GR at max = blend-deepened depth 14-24 dB (TEST4)", d);
     }
 
     // ═══════════════ E. COLOUR / DRYNESS / THD / FR ═══════════════
@@ -1877,28 +1902,28 @@ int main() {
             { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0xa48a95a078561902u, 0x476f6096d8e1a383u },
             { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0xa48a95a078561902u, 0x476f6096d8e1a383u },
             // MOD out, knob 0.75
-            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x9cce7d87cace2f8eu, 0xadadabc00b12f21eu },
-            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0xbb7c237acccc6361u, 0x77cd465071cf1b69u },
-            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x0cbc2f7851e00812u, 0xea97459c4dd66fe3u },
-            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0xf3436a1d8a0838f0u, 0x13222b5309825643u },
-            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0x113ce4dd6f93e59bu, 0x21040338d1ee8050u },
-            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x1150d122c3a2f7deu, 0x538b630cf72674acu },
-            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x9fe03e85215b1248u, 0x9956c0f143405022u },
-            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x1b96079530cde86du, 0x5e02afe0dbec4143u },
+            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x20f6bfb4ce855a40u, 0xb3e0d4acd219ae1bu },
+            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x153bfb9ebab53086u, 0x3cba023bac8ddd75u },
+            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x0714b4ccf4498554u, 0xbec8b26fa39df122u },
+            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0x8e836e0da331ba5au, 0x7e6b73c9c03e7523u },
+            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0xb1fc2df4977d5681u, 0xd3af46116c070790u },
+            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0xf9dd237b98188db8u, 0x5bd25ce9b08b90ebu },
+            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x2284900e6ebd9f49u, 0x5f6851b488cd32f7u },
+            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0xffd93efe5c89f8a2u, 0x7d97e0d907f2ae9bu },
             // MOD out, knob 1.00
-            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x8e3765aec2bc56feu, 0x67c57be5074967ffu },
-            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0xcc789595b05faf36u, 0x67b03bd42f307554u },
-            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x968b94a78d7e8dcbu, 0x969bb335678b97d2u },
-            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x8fde2152418fbe4au, 0xc7b94b05a14c5b51u },
-            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x7f2ca6b47dbb9760u, 0xd07acf3977c2067cu },
-            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0xbb20ffa70a4e3a4eu, 0xe918c0031c10bd08u },
+            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x418eaa909c6e8f22u, 0x967c914198fb712cu },
+            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0xdc59c1482e2a0d3bu, 0xbdeb695a6cd4211fu },
+            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0xd687621475a5bef1u, 0xc2fcd44a7d1cf45bu },
+            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x992f4f0953a49ecbu, 0x62ccbe4d5e5f3f2fu },
+            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x1c977fa7492b4f0au, 0xbef4b9c23ccd0869u },
+            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x601f6994c32cf026u, 0xff4652becc45e9f6u },
             { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x64169497b587a688u, 0xb3370cc04e9da7e6u },
             { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x7a18e4ad33535d7eu, 0xb61c277304b15981u },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x626ee653c8f81fb5u, 0xda654531cdc71661u },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x856ef9ce24a46bc2u, 0x70c526c3de439ea3u },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x5a4983a1ceac1770u, 0xce058cb9ccb7a04bu },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0xfbfcd27da487b962u, 0xe3b222d48aa60310u },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x2ea038821306a600u, 0x6972d4c5beaad2a2u },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x2d35312b28ba4cddu, 0x2287b82ced9e896au },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x2044a8a950dd547cu, 0x1055157d41e973b1u },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x7e094a4ea6bcee03u, 0x4bc9a96d1340b5dau },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -1910,8 +1935,8 @@ int main() {
             // FULL: re-captured again on the merged tree at
             // the AB2 ballistics (pure cascade renders under
             // the re-timed limiter).
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0xa3e45d5d957ea330u, 0x70c526c3de439ea3u },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0xef99ea22bc4d9cfdu, 0xe3b222d48aa60310u },
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x8478c8adb4995cc2u, 0x2287b82ced9e896au },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x88a03337a9a4fa28u, 0x4bc9a96d1340b5dau },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
@@ -1946,6 +1971,22 @@ int main() {
         // the only seat-coupled term); the SLOW-seat and
         // MOD-in configs carry the new onsets. Prior
         // references: git history (staging-fix candidate).
+        // TEST4 RE-CAPTURE (2026-10-23, cause: Nathan's
+        // detector-blend directive): configs 8-21 and
+        // 24-29 re-captured on this tree (capture harness
+        // verified faithful: it reproduces TEST3's table
+        // exactly on the TEST3 tree). Configs 0-7 (knob
+        // 0.50) and 22/23 (knob 1.00 COMP attS) are
+        // UNCHANGED from TEST3 — the blend is inert where
+        // ProgGen sits below onset, and in the attS COMP
+        // corner the trimmed branch never overtakes the
+        // slow envelope. The moved configs are the blend
+        // engaging on ProgGen's continuous bed at knobs
+        // 0.75/1.00 (see REPORT-TEST4.md). The k1.00 GR
+        // references are therefore no longer the FULL2
+        // values verbatim; that identity was TEST3's,
+        // and it ends with the deliberate detector change
+        // Nathan directed.
         auto renderHash = [&](const Cfg& c, float modMix = 1.0f, uint64_t* grOut = nullptr) {
             osc72::Chain ch;
             ch.prepare(kFs);
@@ -2002,7 +2043,7 @@ int main() {
                     break;
                 }
             }
-            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == staging-fix candidate references (k1.00 GR == FULL2 verbatim)" : bad);
+            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == TEST4 candidate references (configs 0-7, 22/23 == TEST3 verbatim)" : bad);
             check(ok, g.pin, d);
         }
         // K7f RETIRED in FULL2 (cause: its subject no
