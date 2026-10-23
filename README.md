@@ -840,6 +840,40 @@ xvfb-run ../build/OscSnapshot ../docs/gui-v32-off.png poweroff
 
 ## Status
 
+v1.4.2 — TEST BUILD, NOT RELEASED (stamped
+2026-10-22 from the staging-fix candidate line for
+Nathan's own testing; the current public release
+remains v1.4.1). Contents over 1.4.1: (1) the
+staging fix — peak-referenced bus makeup bound by
+a −5.5 dBFS park (applied makeup FALLS with drive:
++10.31 dB at knob 3 → +3.32 dB at knob 10), the
+instant 1.600 ceiling replaced by a soft tanh-knee
+ceiling (asymptote 0.981 = −0.17 dBFS; 0.000%
+over-0 samples grid-wide), and the drive taper
+re-spread (per-step increments 1.76–8.38 dB;
+INPUT 5 = +16.08 dB drive; INPUT 5 at noon mixes
+measures near-unity on vocal/dense programme);
+(2) factory defaults — the plugin opens as a pure
+compressor: INPUT 4, attack SLOW, release SLOW,
+ratio COMP, MOD out, COMP MIX 100%, MOD MIX 0%
+(the MOD-in level step is remedied by the opening
+state, not DSP compensation: engaging the MOD
+adds nothing until the user raises MOD MIX);
+(3) the GR meter rescale — marks unmoved, numerals
+renumbered 0/−2/−5/−10/∞ (∞ kept at centre), the
+mask law re-knotted through the old law's outputs
+so 2/5/10 dB land exactly on the marks (finer scale
+in the working range; precision between −10 and ∞
+does not matter, per Nathan 2026-10-22). Measured:
+peak slope −0.043 dB per dB of drive (drums, INPUT
+5→10) with crest 19.0→10.7; ballistics bit-exact
+at matched drive (K7 GR hashes identical to
+1.4.1 — the GR loop itself is untouched, only
+staging moved). Suites: DSP 97/97, processor 45/45.
+Staging reports: ~/workspace/
+western-compressor-staging-fix/REPORT.md and
+REPORT2.md.
+
 v1.4.1 — HOST RE-PREPARE FIX (diagnosis
 ~/workspace/western-compressor-release-1.4.0/
 DIAGNOSIS-adt-power-toggle.md). No sound change:
