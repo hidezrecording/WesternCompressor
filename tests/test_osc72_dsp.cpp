@@ -101,7 +101,7 @@ static float thdLim(float knob, float amp, float freq, bool attackFast = true,
 
 // GR step response: silence -> loud sine at t=0. Returns the
 // GR trace (per-sample) for `seconds`.
-static std::vector<float> grStep(bool attackFast, bool releaseFast, float knob = 0.75f,
+static std::vector<float> grStep(bool attackFast, bool releaseFast, float knob = 0.5174f,
                                  float amp = 0.5f, double seconds = 1.2, bool comp = false) {
     // v64 (1.3.1): through 1.3.0 this helper took an x2 flag
     // (v62) that engaged the 1X/2X selector before reset;
@@ -111,6 +111,16 @@ static std::vector<float> grStep(bool attackFast, bool releaseFast, float knob =
     // with it, and every protocol on this helper now reads
     // the baked timings (the C bands were re-based to
     // their 1.3.0-at-2X values, ledgered per pin).
+    // STAGING-FIX CANDIDATE (2026-10-22): the bench knob
+    // 0.75 -> 0.5174 — the MATCHED-DRIVE operating point.
+    // The re-spread taper puts the AB2 benches' drive
+    // (+17.44 dB, formerly at knob 0.75) at knob 0.5174;
+    // the ballistics themselves are untouched, and at
+    // this drive the candidate reproduces every AB2
+    // timing reference DIGIT-FOR-DIGIT against a 1.4.1
+    // control build (bench proof in the candidate
+    // report). Only the protocols' operating point moves
+    // — no timing reference or band in C/K changes.
     osc72::Ba6aLimiter lim;
     lim.prepare(kFs);
     lim.setCompMode(comp);
@@ -134,7 +144,7 @@ static std::vector<float> grRelease(bool releaseFast, double seconds = 6.5, bool
     osc72::Ba6aLimiter lim;
     lim.prepare(kFs);
     lim.setCompMode(comp);
-    lim.setKnob(0.75f);
+    lim.setKnob(0.5174f);   // STAGING-FIX: matched-drive bench point (below)
     lim.setAttackFast(true);
     lim.setReleaseFast(releaseFast);
     lim.reset();
@@ -327,9 +337,15 @@ int main() {
         // the effective ratio RISES with depth. Static ratios
         // are read PRE-make-up (peak - applied make-up): the
         // make-up is an output-level behaviour, not loop law.
-        Meas m20 = runLim(0.5f, 0.1f, 1000.0f);   // -20 dBFS peak
-        Meas m10 = runLim(0.5f, 0.316f, 1000.0f); // -10
-        Meas m0  = runLim(0.5f, 1.0f, 1000.0f);   // 0
+        // STAGING-FIX CANDIDATE: the bench knob 0.5 -> 0.1502
+        // — the matched-drive point (the v1.1.5 law's drive
+        // at knob 0.5, -2.01 dB, sits at knob 0.1502 under
+        // the re-spread taper). The kiss/growth/ratio
+        // substance and every band are unchanged; B2c below
+        // pins the NEW home-position depth at knob 0.5.
+        Meas m20 = runLim(0.1502f, 0.1f, 1000.0f);   // -20 dBFS peak
+        Meas m10 = runLim(0.1502f, 0.316f, 1000.0f); // -10
+        Meas m0  = runLim(0.1502f, 1.0f, 1000.0f);   // 0
         float pre20 = db(m20.peakL) - m20.makeupDb;
         float pre10 = db(m10.peakL) - m10.makeupDb;
         float pre0  = db(m0.peakL) - m0.makeupDb;
@@ -343,9 +359,22 @@ int main() {
         // pin itself; the growth clauses carry the vari-mu
         // substance (measured 0.1 / 3.4 / 8.8).
         check(m20.meanGr < 2.0f && m10.meanGr > m20.meanGr + 2.5f && m0.meanGr > m10.meanGr + 4.0f,
-              "B2a knob 5 kisses at -20 (0-2 dB), GR grows steeply with level (vari-mu)", d);
+              "B2a kiss at -20 (0-2 dB) at the matched-drive bench knob, GR grows steeply with level (vari-mu)", d);
         check(riseLo < 7.5f && riseHi < riseLo,
               "B2b static ratio > 1.3:1 and RISING with depth", d);
+        // B2c (STAGING-FIX CANDIDATE): the new staging map's
+        // home position — at knob 0.5 (INPUT 5) the box is
+        // WORKING, not kissing: the -20 dBFS tone draws
+        // ~9.6 dB of GR (measured on the candidate), the
+        // redesign's stated intent (drive re-spread across
+        // the knob; the home position re-anchored at the
+        // bus). Band = measured +/- ~15%.
+        Meas h20 = runLim(0.5f, 0.1f, 1000.0f);
+        Meas h10 = runLim(0.5f, 0.316f, 1000.0f);
+        std::snprintf(d, sizeof d, "knob 0.5 GR at -20/-10: %.1f / %.1f dB (candidate home depth)",
+                      h20.meanGr, h10.meanGr);
+        check(h20.meanGr > 8.0f && h20.meanGr < 11.2f && h10.meanGr > h20.meanGr + 4.0f,
+              "B2c knob 5 home depth: -20 dBFS tone draws ~9.6 dB GR (staging-fix map)", d);
     }
     {
         // B3: GR monotone in the knob at a fixed hot input,
@@ -399,7 +428,7 @@ int main() {
         // (the mode offset is intrinsic to the law map;
         // flagged in the AB2 report, band = ref +/-15%).
         for (bool comp : { false, true }) {
-            auto tr = grStep(true, false, 0.75f, 0.5f, 1.2, comp);
+            auto tr = grStep(true, false, 0.5174f, 0.5f, 1.2, comp);
             float settled = tr.back();
             double t90 = -1;
             for (size_t i = 0; i < tr.size(); ++i)
@@ -451,7 +480,7 @@ int main() {
         // static map (the C2 band above). Detector dynamics
         // are mode-independent (demand uses the shipped
         // law in both modes).
-        auto trSC = grStep(false, false, 0.75f, 0.5f, 1.2, true);
+        auto trSC = grStep(false, false, 0.5174f, 0.5f, 1.2, true);
         double tSC = t90of(trSC);
         std::snprintf(d, sizeof d, "COMP full-step t90 %.2f ms", tSC);
         // v64 pin move (cause as C1): reads 21.15 ms baked
@@ -459,7 +488,7 @@ int main() {
         // ref +/-15%.
         check(tSC > 18.0 && tSC < 24.3,
               "C2c attack SLOW (COMP): full-step t90 18.0-24.3 ms (baked 2X, ref 21.15, v64)", d);
-        auto trSmall = grStep(false, false, 0.75f, 0.12f);
+        auto trSmall = grStep(false, false, 0.5174f, 0.12f);
         double tSmall = t90of(trSmall);
         std::snprintf(d, sizeof d, "small-step (amp .12) t90 %.2f ms, settled GR %.1f dB",
                       tSmall, trSmall.back());
@@ -1475,7 +1504,7 @@ int main() {
             // K1: attack FAST, full step (the calibrated seat).
             // AB2 refs: LIMIT 3.000 (the brief's target,
             // +/-10% band); COMP 4.438 (flagged, +/-15%).
-            double a = t90of(grStep(true, false, 0.75f, 0.5f, 1.2, comp));
+            double a = t90of(grStep(true, false, 0.5174f, 0.5f, 1.2, comp));
             double aRef = comp ? 4.438 : 3.000;
             std::snprintf(d, sizeof d, "%s t90 %.3f ms vs AB2 ref %.3f ms", mn, a, aRef);
             check(nearRef(a, aRef, comp ? 0.15 : 0.10),
@@ -1484,7 +1513,7 @@ int main() {
             // K2: attack SLOW, full step.
             // AB2 refs: LIMIT 14.958 (target 15.0, +/-10%);
             // COMP 21.021 (flagged, +/-15%).
-            double s = t90of(grStep(false, false, 0.75f, 0.5f, 1.2, comp));
+            double s = t90of(grStep(false, false, 0.5174f, 0.5f, 1.2, comp));
             double sRef = comp ? 21.021 : 14.958;
             std::snprintf(d, sizeof d, "%s t90 %.2f ms vs AB2 ref %.2f ms", mn, s, sRef);
             check(nearRef(s, sRef, comp ? 0.15 : 0.10),
@@ -1492,7 +1521,7 @@ int main() {
                        : "K2 AB2 attack SLOW full-step t90 == 15.0 ms target", d);
             // K3: attack SLOW, small step (the T4-shaped seat).
             // AB2 refs: 24.000 / 24.542 (report-only, +/-15%).
-            double m = t90of(grStep(false, false, 0.75f, 0.12f, 1.2, comp));
+            double m = t90of(grStep(false, false, 0.5174f, 0.12f, 1.2, comp));
             double mRef = comp ? 24.542 : 24.000;
             std::snprintf(d, sizeof d, "%s t90 %.2f ms vs AB2 ref %.2f ms", mn, m, mRef);
             check(nearRef(m, mRef, 0.15),
@@ -1601,6 +1630,21 @@ int main() {
         // through the new bus — that is the cross-build
         // identity proof of this revision, asserted per
         // config below alongside the audio regression.
+        // STAGING-FIX RE-BASE (2026-10-22, TEST BUILD —
+        // Nathan's staging redesign directive): the whole
+        // table is re-captured on the candidate. AUDIO
+        // moves everywhere (the bus output stage is the
+        // redesign). GR moves at knobs 0.50/0.75 — the
+        // re-spread taper changes the DRIVE at those knob
+        // positions by design — and is asserted in the
+        // candidate report at matched drive instead. The
+        // identity proof that survives intact: at knob
+        // 1.00, whose drive (+51 dB) is the taper's kept
+        // endpoint, all eight GR references are the FULL2
+        // values VERBATIM (61e63567..., 3b934701...,
+        // 2e65e386..., 9e59c419..., 97de766f..., 95fc1aa0...,
+        // 7c13c924..., 2e40e026...) — the module's GR
+        // generation is bit-untouched.
         auto fnvF = [](uint64_t h, float f) {
             uint32_t u;
             std::memcpy(&u, &f, 4);
@@ -1613,37 +1657,37 @@ int main() {
         struct Cfg { const char* name; float knob; bool comp, att, rel; int mod; double secs; uint64_t want; uint64_t grWant; };
         const Cfg cfgs[] = {
             // MOD out, knob 0.50 (4 s each)
-            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0x13cb03f39f2de77full, 0x8acd6d3cea89facfull },
-            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0x4272aa0263def60eull, 0xb4751a42b384fc52ull },
-            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x6b3bd5c4ce9bb313ull, 0xc7d05a997ff17cd1ull },
-            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0xcd80138d9cf08442ull, 0x60d6ffaf181b4f68ull },
-            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0x8911048ab18b6ed8ull, 0x96a3bbae466c7593ull },
-            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x389b00e42f51a1bdull, 0x26e7695b300e3f6cull },
-            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0xb62900384ac755e5ull, 0x947336edff9ad97full },
-            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x415519d6ad0b0b0eull, 0xc500c7bb1131f928ull },
+            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0x835e58901392d8e7u, 0xd5036d026f0f9c88u },
+            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0x674f47939e1de879u, 0x5b9b189df3e96577u },
+            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0xdd6059f94e683a7eu, 0x1d74cf0d4ce8e186u },
+            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0xfc4cd0888f34c22cu, 0x3c96c31114f1fc1du },
+            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0x5c5c851189c158e5u, 0xe81f79c4bbadfcafu },
+            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x2ac8e592a6f25583u, 0xf33a14b4f04593beu },
+            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0x1c63566d77ec7d2fu, 0x8cfc399b5701f029u },
+            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0xb08b10490f37cc70u, 0x007ab65ee9257e07u },
             // MOD out, knob 0.75
-            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0xd0802e5f28451823ull, 0x1a2cc03c04e1887cull },
-            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x1704854f90bfd397ull, 0x4cd1c3ebf591731full },
-            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0xc2f918b678cb1892ull, 0x1bfebf7952c5905full },
-            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0x8da52871caa0a1efull, 0x7e493c16b57cd843ull },
-            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0xa585bb63339366dbull, 0x377ff7abf24236f2ull },
-            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0xb590f63b90eef119ull, 0x8188506c24fe5904ull },
-            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0xfcdd6949daf996b7ull, 0x705251c1f6776cdbull },
-            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0xcbb85dbb8ab04c37ull, 0x2966c219558cec7dull },
+            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x1e164db5f10bd2f9u, 0x491bbd1ebb72ed97u },
+            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0xef8dc3bfac27c13fu, 0x31c41c292edf8714u },
+            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x866ab3d1e3beb60du, 0x437b05a6f1727b2eu },
+            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0x2e15ac75c10bb2ecu, 0x7eb7aa16f1ecef40u },
+            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0x2974fd38ffb8e764u, 0xd81494106686b653u },
+            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0xac4c48240836abefu, 0x825a8609d9dddb5fu },
+            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0xbdd71630ff2dc5ffu, 0x20a581c8ae87d4e1u },
+            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x1b73fc411d903744u, 0xad3d66860b5d16fcu },
             // MOD out, knob 1.00
-            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x1e436d6f501a074cull, 0x61e63567661e5d6eull },
-            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0xaa107d3e9b7f81bbull, 0x3b934701f2849c01ull },
-            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x3d36c4fec4464d82ull, 0x2e65e3869d9b2f93ull },
-            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x8521daf7c2f05317ull, 0x9e59c419ae95ba94ull },
-            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x07a7425e004febb8ull, 0x97de766fefbaebfcull },
-            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x0afc1e7ff1d2a37dull, 0x95fc1aa031a6bff7ull },
-            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x2df481de0128ec83ull, 0x7c13c92443240b4aull },
-            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x598bf008092a7343ull, 0x2e40e026ba60ace1ull },
+            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x74a8f60f33761925u, 0x61e63567661e5d6eu },
+            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0x1a4b2eef4238d0b8u, 0x3b934701f2849c01u },
+            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0xe637ab8717b4a7bau, 0x2e65e3869d9b2f93u },
+            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x75c74c7be7c834f4u, 0x9e59c419ae95ba94u },
+            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0xeeefc23f2845035fu, 0x97de766fefbaebfcu },
+            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x127eb3dcb840a3deu, 0x95fc1aa031a6bff7u },
+            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0xa6a92e65d8b9c4c2u, 0x7c13c92443240b4au },
+            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x2eb182bbcc51ffe6u, 0x2e40e026ba60ace1u },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x7d5fb3fb69855c0eull, 0x6b75ffda48caeaf4ull },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0xc78229ac05398df2ull, 0x08e0d81317822abbull },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x7e5e4a48a48e9816ull, 0x4c4ca400af88a56eull },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0xd5300f5a24658e1bull, 0x68aa3373eae50787ull },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x0272837e474ffa64u, 0xf53fd6dcae60c170u },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0xa9e2905b077bdc1fu, 0xb5f0be1774b19584u },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0xb3a8552d48818fd7u, 0x017b919370da2853u },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x0d89bf3725ddda01u, 0x9b2a3c52afd0e706u },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -1655,8 +1699,8 @@ int main() {
             // FULL: re-captured again on the merged tree at
             // the AB2 ballistics (pure cascade renders under
             // the re-timed limiter).
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x099ab97a17ec8819ull, 0x08e0d81317822abbull },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0xe49cd7c939cf3b41ull, 0x68aa3373eae50787ull },
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0xe2d1eabc3bea9920u, 0xb5f0be1774b19584u },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x3b01507cb47b1c88u, 0x9b2a3c52afd0e706u },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
@@ -1731,7 +1775,7 @@ int main() {
                     break;
                 }
             }
-            std::snprintf(d, sizeof d, "%s", ok ? "audio == FULL2 references; GR traces bit-identical to the FULL candidate" : bad);
+            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == staging-fix candidate references (k1.00 GR == FULL2 verbatim)" : bad);
             check(ok, g.pin, d);
         }
         // K7f RETIRED in FULL2 (cause: its subject no
@@ -1859,10 +1903,26 @@ int main() {
         // still bounded — M2 — but no longer linear; that
         // is the ceiling doing its job, as it did inside
         // the module.)
+        // STAGING-FIX CANDIDATE re-site (cause: Nathan's
+        // staging redesign): the peak-referenced cap binds
+        // BY DESIGN at working levels — it is the staging
+        // mechanism, not an overload guard — so the non-
+        // binding precondition now lives lower: knob 0.1
+        // programme at 0.15 gains (tracked bus peak ~0.13
+        // in the fullest render vs the 0.531 park — the
+        // ride cap sits ~+12 dB, ~5.7 dB above the desired
+        // make-up, and the post-make-up peak ~0.33 stays
+        // under the park, so the knee never bends either;
+        // the same clearance holds through the settle,
+        // where both trackers only charge upward from 0).
+        // The assertion is the same substance at the same
+        // tolerance: the bus is a true sum and each
+        // channel's gain is linear in its pot wherever
+        // neither bound engages.
         {
-            auto both = renderMix(1.0f, 1.0f, 1, 0.25f, 3.0);
-            auto compOnly = renderMix(1.0f, 0.0f, 1, 0.25f, 3.0);
-            auto modOnly = renderMix(0.0f, 1.0f, 1, 0.25f, 3.0);
+            auto both = renderMix(0.15f, 0.15f, 1, 0.1f, 3.0);
+            auto compOnly = renderMix(0.15f, 0.0f, 1, 0.1f, 3.0);
+            auto modOnly = renderMix(0.0f, 0.15f, 1, 0.1f, 3.0);
             double mx = 0;
             for (size_t i = 0; i < both.outL.size(); ++i) {
                 mx = std::max(mx, (double)std::fabs(both.outL[i] - (compOnly.outL[i] + modOnly.outL[i])));
@@ -1870,7 +1930,7 @@ int main() {
             }
             // And each channel's gain is linear in its pot
             // under the same precondition.
-            auto half = renderMix(0.5f, 0.0f, 1, 0.25f, 3.0);
+            auto half = renderMix(0.075f, 0.0f, 1, 0.1f, 3.0);
             double mxG = 0;
             for (size_t i = 0; i < half.outL.size(); ++i) {
                 mxG = std::max(mxG, (double)std::fabs(half.outL[i] - 0.5f * compOnly.outL[i]));
@@ -2458,6 +2518,89 @@ int main() {
             }
             check(same, "N4 rate-change prepare rebuilds fresh (== fresh 44.1 k instance past the settle, bit-exact)", "");
         }
+    }
+
+    std::printf("\n=== O. STAGING-FIX CANDIDATE (Nathan's staging redesign, 2026-10-22) ===\n");
+    {
+        // O1: the re-spread drive taper — the published
+        // table, endpoints exact, increments evened from
+        // the old law's ~27:1 half-step bunching to ~5:1.
+        const double want[11] = { -5.00, -3.24, -0.53, 3.46, 9.00, 16.08,
+                                  24.25, 32.63, 40.23, 46.41, 51.00 };
+        double worst = 0, prev = -1e9, incMin = 1e9, incMax = 0;
+        for (int k = 0; k <= 10; ++k) {
+            const double dv = osc72::ba6aDriveDb(k / 10.0);
+            worst = std::max(worst, std::fabs(dv - want[k]));
+            if (k > 0) {
+                const double inc = dv - prev;
+                incMin = std::min(incMin, inc); incMax = std::max(incMax, inc);
+            }
+            prev = dv;
+        }
+        std::snprintf(d, sizeof d, "taper worst dev %.3f dB; full-step increments %.2f..%.2f dB (ratio %.1f:1)",
+                      worst, incMin, incMax, incMax / incMin);
+        check(worst < 0.06 && incMin > 0.0 && incMax / incMin < 6.0,
+              "O1 drive taper re-spread: published table, monotone, increments evened", d);
+
+        // Settled programme renders for O2-O4 (ProgGen,
+        // second-half statistics; knob/gains per pin).
+        auto settled = [&](float knob, float cm, float mm, int mod, double& pk, double& rms, double& mk) {
+            osc72::Chain ch;
+            ch.prepare(kFs);
+            ch.setKnob(knob);
+            ch.setCompMix(cm);
+            ch.setModMix(mm);
+            ch.setModPhaser(mod == 2);
+            ch.reset();
+            ch.setModIn(mod != 0);
+            ProgGen pg;
+            const int total = (int)(4.0 * kFs), half = total / 2;
+            double sq = 0; pk = 0; long n = 0;
+            for (int i = 0; i < total; ++i) {
+                float l, r; pg.sample(i, l, r);
+                float oL, oR; ch.process(l, r, oL, oR);
+                if (i >= half) {
+                    pk = std::max(pk, (double)std::max(std::fabs(oL), std::fabs(oR)));
+                    sq += (double)oL * oL + (double)oR * oR; n += 2;
+                }
+            }
+            rms = std::sqrt(sq / (double)n);
+            mk = ch.busMakeupDb();
+        };
+        // O2: the soft ceiling's hard bound — no render,
+        // however hot, exceeds the knee asymptote.
+        double pkA, rmsA, mkA, pkB, rmsB, mkB;
+        settled(1.0f, 1.0f, 1.0f, 0, pkA, rmsA, mkA);
+        settled(1.0f, 1.0f, 1.0f, 1, pkB, rmsB, mkB);
+        std::snprintf(d, sizeof d, "settled peaks at knob 1.0: MOD out %.4f, MOD in A %.4f (asymptote 0.9809)",
+                      pkA, pkB);
+        check(pkA <= 0.9811 && pkB <= 0.9811,
+              "O2 soft ceiling: output never exceeds the knee asymptote", d);
+        // O3: parking + density at noon gains — peaks hold
+        // while RMS climbs from knob 0.75 to 1.0.
+        double pk75, rms75, mk75, pk100, rms100, mk100;
+        settled(0.75f, 0.5f, 0.5f, 0, pk75, rms75, mk75);
+        settled(1.0f, 0.5f, 0.5f, 0, pk100, rms100, mk100);
+        const double pkDb = 20.0 * std::log10(pk100 / pk75);
+        const double rmsDb = 20.0 * std::log10(rms100 / rms75);
+        std::snprintf(d, sizeof d, "knob 0.75 -> 1.0 at noon gains: peak %+.2f dB, RMS %+.2f dB",
+                      pkDb, rmsDb);
+        // Measured on the candidate: peak -1.22 dB over
+        // the 25 dB drive span (a -0.05 dB/dB parking
+        // slope), RMS +2.86 dB. Band: |peak| < 1.5 dB
+        // across the span with density climbing > 2 dB.
+        check(std::fabs(pkDb) < 1.5 && rmsDb > 2.0,
+              "O3 peaks park while density climbs (noon gains, programme)", d);
+        // O4: the peak-referenced law gives back LESS as
+        // drive rises — settled bus make-up at knob 1.0
+        // sits below knob 0.5 (the 1.4.1 law's applied
+        // make-up also fell at the top, but only through
+        // cap starvation at +4 dBFS output peaks).
+        double pk50, rms50, mk50;
+        settled(0.5f, 0.5f, 0.5f, 0, pk50, rms50, mk50);
+        std::snprintf(d, sizeof d, "settled bus make-up: knob 0.5 %+.2f dB, knob 1.0 %+.2f dB",
+                      mk50, mk100);
+        check(mk100 < mk50, "O4 bus make-up falls as drive rises (peak-referenced bound)", d);
     }
 
     std::printf("\n%s (%d checks, %d failures)\n",

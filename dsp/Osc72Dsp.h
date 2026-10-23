@@ -194,9 +194,28 @@ inline constexpr float kBa6aGrCapDb     = 46.0f;
 // 5.8 / 9.3); at knob 0, -20 -> 0.0 and -10 -> 2.2 (colour
 // and hot peaks only); programme mean GR 2.6 / 3.3 / 31.2 dB
 // at knob 0 / 0.5 / 1. Full table: docs/build-report-v46.md.
+// STAGING-FIX CANDIDATE (2026-10-22, TEST BUILD — Nathan's
+// staging redesign directive; diagnosis: western-compressor-
+// release-1.4.1/DIAGNOSIS-compression-action.md, F6): the
+// v1.1.5 logistic bunched 45 of its 56 dB into the last 3.5
+// knob steps (per-step ratio 27:1 at the half-step grain) —
+// the knob felt empty through its middle and violent at the
+// top. The taper is RE-SPREAD with the endpoints kept
+// EXACTLY (-5 dB at knob 0, +51 dB at knob 10): the logistic
+// flattens (steepness 9.5 -> 5.0) and re-centres (0.82 ->
+// 0.62), giving per-full-step increments of
+//   +1.76 +2.71 +3.99 +5.54 +7.09 +8.17 +8.38 +7.60 +6.18 +4.59
+// (max/min 4.8:1). The staging map is re-voiced BY DESIGN:
+// drive at knob 5 is now +16.1 dB (was -2.0) — the INPUT-5
+// home position is re-anchored at the bus instead (the
+// peak-referenced make-up + staging anchor, see the bus
+// constants below), not by withholding drive. The vari-mu
+// law, ballistics and GR generation downstream of this law
+// are untouched: at MATCHED DRIVE the loop's work is the
+// shipped loop's work.
 inline float ba6aDriveDb(float knob01) {
     const float k = clampf(knob01, 0.0f, 1.0f);
-    auto sig = [](float x) { return 1.0f / (1.0f + std::exp(-9.5f * (x - 0.82f))); };
+    auto sig = [](float x) { return 1.0f / (1.0f + std::exp(-5.0f * (x - 0.62f))); };
     const float g = (sig(k) - sig(0.0f)) / (sig(1.0f) - sig(0.0f));
     return -5.0f + 56.0f * g;
 }
@@ -469,6 +488,59 @@ inline constexpr float kBa6aMakeupCapDb  = 40.0f;
 // limiter: the automated OUTPUT control riding against the
 // ceiling an operator would respect.
 inline constexpr float kBa6aMakeupPeakCeil = 1.6f;
+
+// ─────────────────────────────────────────────────────────────────────
+// STAGING-FIX CANDIDATE (2026-10-22, TEST BUILD) — the FULL2
+// BUS output stage, re-voiced in two linked moves (diagnosis
+// remedies 1+2; the module above, its law and its 1.600
+// discipline are untouched — this is the bus's own stage,
+// applied in Chain::process):
+//  (1) PEAK-REFERENCED MAKE-UP. The shipped bus law capped
+//      make-up only against the 1.600 bound, so through the
+//      working travel it handed the GR straight back as
+//      level (diagnosis F1/F2: output peaks rose +1.53 dB
+//      per dB of drive; give-back +56 dB at INPUT 10). The
+//      candidate caps the same law (0.92.avgGR + 7k^2, plus
+//      the staging anchor) against a WORKING ceiling — the
+//      park level — read off a slow feed-forward tracker of
+//      the bus's own pre-make-up peak. Past the working
+//      point the cap falls 1 dB per dB of arriving peak:
+//      output peaks park, and further INPUT buys density
+//      (RMS), not peak level. The tracker is STAGING, not
+//      dynamics (fast charge, ~3 s decay — quasi-static
+//      over programme phrases), so the make-up does not
+//      pump at hit rate; per-hit overshoot is the soft
+//      knee's job. The make-up floor is NEGATIVE (-30 dB):
+//      at extreme drive the law attenuates to hold the
+//      park instead of surrendering to the ceiling.
+//  (2) SOFT CEILING. The bus's per-sample instant clamp at
+//      1.600 is replaced by a LINKED soft knee whose onset
+//      is the park level itself: below it the pair's gain
+//      is exactly 1; above it the pair's peak bends along
+//      a tanh toward the knee asymptote (park + span =
+//      0.981, -0.17 dBFS) — overshoot arrives as progressive,
+//      stage-like squash, never a flat top, and the stereo
+//      pair's balance is preserved (one gain, taken from
+//      the pair's peak). The absolute 1.600 bound is never
+//      reached: the knee's asymptote sits below it.
+// The staging anchor is the PARK LEVEL itself, with the
+// law's constant trim as its fine adjustment: in the
+// capped regime (which includes the home position) the
+// output RMS sits at park - (the bus's own crest), so the
+// park is chosen to land INPUT 5, noon mixes, on sane
+// -14 dBFS programme (vocal/dense: bus crest ~8-9 dB) at
+// near-unity output RMS: park -5.5 dBFS -> out ~-14 dBFS.
+// A corollary of the knee asymptote (0.981) sitting just
+// under 0 dBFS: the candidate's output cannot cross
+// 0 dBFS at any setting. The trim's measured residual is
+// recorded in the candidate report.
+// ─────────────────────────────────────────────────────────────────────
+inline constexpr float kBusParkCeilLin      = 0.530884f; // -5.5 dBFS: the working (park) ceiling — also the staging anchor (see note)
+inline constexpr float kBusKneeSpan         = 0.45f;     // soft-knee span; asymptote = park + span = 0.981 (-0.17 dBFS)
+inline constexpr float kBusRideChargeTauSec = 0.004f;    // riding peak tracker: charge (staging reference)
+inline constexpr float kBusRideDecayTauSec  = 3.0f;      // riding peak tracker: decay (quasi-static)
+inline constexpr float kBusMakeupFloorDb    = -30.0f;    // make-up may attenuate to hold the park
+inline constexpr float kStagingAnchorDb     = 0.0f;      // staging anchor trim (measured; see candidate report)
 
 class Ba6aLimiter {
 public:
@@ -870,6 +942,15 @@ private:
 // folder) — at AB3's compMix=0 the insert feed was the
 // raw input (INPUT-invariant, bit-proven); here the send
 // carries the module output unconditionally.
+// STAGING-FIX CANDIDATE (2026-10-22, TEST BUILD): the
+// bus law's demand side is unchanged, but its bound is
+// re-voiced — the cap is peak-referenced to a -2 dBFS
+// park ceiling via a slow riding tracker, the make-up
+// floor is negative, a constant staging anchor re-
+// anchors INPUT 5, and the instant 1.600 clamp is
+// replaced by a linked soft knee (asymptote 0.981).
+// See the bus constants block (kBusParkCeilLin) for the
+// full note.
 // ─────────────────────────────────────────────────────────────────────
 
 class Chain {
@@ -1004,11 +1085,14 @@ private:
     float modTapFade_ = 1.0f;   // 1 = settled on modDelayB_
     // The bus make-up law's state (FULL2): the shipped
     // law's trackers, running at host rate on the bus —
-    // avg-GR (charge/decay taus), the slow-decay peak of
-    // the bus's own pre-make-up signal, and the slewed
-    // make-up itself. See process().
+    // avg-GR (charge/decay taus) and the slewed make-up
+    // itself. See process(). STAGING-FIX CANDIDATE: the
+    // 0.6 s peak tracker (busPrePeak_) is replaced by the
+    // riding peak tracker (charge ~4 ms / decay ~3 s) —
+    // the slow staging reference the peak-referenced cap
+    // reads. See the bus constants in the header.
     float busAvgGrDb_ = 0.0f;
-    float busPrePeak_ = 0.0f;
+    float busRidePeak_ = 0.0f;
     float busMakeupDb_ = 0.0f;
     // Insert-feed introspection (the send tap).
     float lastFeedL_ = 0.0f, lastFeedR_ = 0.0f;

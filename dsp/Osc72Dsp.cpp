@@ -690,7 +690,7 @@ void Chain::reset()
     modDelayA_ = modDelayB_ = modExtraTarget();
     modTapFade_ = 1.0f;
     busAvgGrDb_ = 0.0f;
-    busPrePeak_ = 0.0f;
+    busRidePeak_ = 0.0f;
     busMakeupDb_ = 0.0f;
     lastFeedL_ = lastFeedR_ = 0.0f;
 }
@@ -801,30 +801,42 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // ── Auto make-up AT THE BUS (FULL2): the shipped law
     // (design §3.2), computed from the module's GR exactly
     // as the limiter computes it internally — 0.92 x avgGR
-    // + 7 x knob^2, capped against the pre-make-up peak so
-    // the automated output never pushes peaks past the
-    // unit's headroom — but the peak it reads is the BUS's
-    // own pre-make-up peak (the summed feeds), and the
-    // trackers run at host rate. The make-up may want
-    // ~37 dB at INPUT 10 (diagnosis §4); the cap and the
-    // instant ceiling below are the only bounds, exactly
-    // as they were inside the module. ──
+    // + 7 x knob^2 — and the peak it reads is the BUS's
+    // own pre-make-up peak (the summed feeds), with the
+    // trackers at host rate. STAGING-FIX CANDIDATE: the
+    // bound is re-voiced — the cap is peak-referenced to
+    // the park ceiling via the riding tracker below (plus
+    // the constant staging anchor in the demand), and the
+    // instant ceiling is replaced by the soft knee at the
+    // end of this function. See the bus constants in the
+    // header for the full note. ──
     const float grNow = limiter_.gainReductionDb();
     const float avgTau = grNow > busAvgGrDb_ ? kBa6aMakeupAvgChargeTauSec
                                              : kBa6aMakeupAvgDecayTauSec;
     busAvgGrDb_ += (grNow - busAvgGrDb_) * tauCoef(avgTau, fs_);
     const float peakNow = std::max(std::fabs(busL), std::fabs(busR));
-    if (peakNow > busPrePeak_)
-        busPrePeak_ += (peakNow - busPrePeak_) * tauCoef(0.0002f, fs_);
+    // STAGING-FIX CANDIDATE: the riding peak tracker (fast
+    // charge / ~3 s decay — a quasi-static STAGING
+    // reference, not a dynamics element) replaces the
+    // shipped 0.6 s peak tracker as the cap's reference.
+    if (peakNow > busRidePeak_)
+        busRidePeak_ += (peakNow - busRidePeak_) * tauCoef(kBusRideChargeTauSec, fs_);
     else
-        busPrePeak_ += (peakNow - busPrePeak_) * tauCoef(0.6f, fs_);
+        busRidePeak_ += (peakNow - busRidePeak_) * tauCoef(kBusRideDecayTauSec, fs_);
     const float knobS = limiter_.knob();
     const float desired = kBa6aMakeupFactor * busAvgGrDb_
-                        + kBa6aMakeupCrankDb * knobS * knobS;
-    const float peakCapDb = linearToDb(kBa6aMakeupPeakCeil
-                                       / std::max(busPrePeak_, 0.05f));
-    const float makeupTarget = clampf(std::min(desired, peakCapDb),
-                                      0.0f, kBa6aMakeupCapDb);
+                        + kBa6aMakeupCrankDb * knobS * knobS
+                        + kStagingAnchorDb;
+    // STAGING-FIX CANDIDATE: the cap is PEAK-REFERENCED to
+    // the park ceiling (kBusParkCeilLin), not to the 1.600
+    // absolute bound — past the working point it falls 1 dB
+    // per dB of arriving peak, so peaks park and density
+    // does the climbing. The floor is negative (the law
+    // may attenuate to hold the park at extreme drive).
+    const float rideCapDb = linearToDb(kBusParkCeilLin
+                                       / std::max(busRidePeak_, 0.05f));
+    const float makeupTarget = clampf(std::min(desired, rideCapDb),
+                                      kBusMakeupFloorDb, kBa6aMakeupCapDb);
     // Make-up slew: falls instantly (the ceiling discipline
     // is never late), rises over ~50 ms (no gain-step
     // zipper) — the module law's own slew discipline.
@@ -832,15 +844,27 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
         busMakeupDb_ = makeupTarget;
     else
         busMakeupDb_ += (makeupTarget - busMakeupDb_) * tauCoef(0.05f, fs_);
-    // Instant ceiling: the per-sample bound covers the
-    // transient case — a hit's first overshoot peak
-    // arriving before the slow peak state registers it.
-    // |out| <= 1.600 whenever it binds, by construction.
-    const float instPeak = std::max(peakNow, 0.05f);
-    const float appliedLin = std::min(dbToLinear(busMakeupDb_),
-                                      kBa6aMakeupPeakCeil / instPeak);
-    outL = busL * appliedLin;
-    outR = busR * appliedLin;
+    // Soft ceiling (STAGING-FIX CANDIDATE): the shipped
+    // per-sample instant clamp at 1.600 is replaced by a
+    // LINKED soft knee whose onset is the park ceiling.
+    // Below it the pair's gain is exactly 1; above it the
+    // pair's peak bends along a tanh toward the knee
+    // asymptote (park + span = 0.981), one gain for both
+    // channels taken from the pair's peak — overshoot
+    // arrives as progressive squash, never a flat top,
+    // and the 1.600 absolute bound is never reached.
+    const float mkLin = dbToLinear(busMakeupDb_);
+    float oL = busL * mkLin, oR = busR * mkLin;
+    const float pairPk = std::max(std::fabs(oL), std::fabs(oR));
+    if (pairPk > kBusParkCeilLin) {
+        const float soft = kBusParkCeilLin
+            + kBusKneeSpan * (float)std::tanh(
+                  (double)(pairPk - kBusParkCeilLin) / (double)kBusKneeSpan);
+        const float g = soft / pairPk;
+        oL *= g; oR *= g;
+    }
+    outL = oL;
+    outR = oR;
 }
 
 } // namespace osc72
