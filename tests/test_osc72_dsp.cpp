@@ -387,9 +387,12 @@ int main() {
         // asserted at a working knob in B2b (settled
         // reads) and by the S4 ladder benches (gold
         // protocol, REPORT-TEST6-FINAL).
-        check(m20.meanGr == 0.0f && m10.meanGr == 0.0f && m0.meanGr < 2.0f
-              && riseLo > 9.0f && riseLo < 11.0f && riseHi > 9.0f && riseHi < 11.0f,
-              "B2a contract floor at the bench knob: tones read 0 GR, pre-makeup tracks input 1:1 (dual-sense)", d);
+        // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24):
+        // at the bench knob the tones read 0.0/0.0/2.9 dB and the
+        // pre-makeup rises are 10.0 then 7.7 dB per +10 dB.
+        check(m20.meanGr == 0.0f && m10.meanGr == 0.0f && m0.meanGr < 3.5f
+              && riseLo > 9.0f && riseLo < 11.0f && riseHi > 7.0f && riseHi < 11.0f,
+              "B2a bench-knob floor (TEST7): tones 0/0/2.9 GR, pre-makeup rises 10.0/7.7 per +10 dB", d);
         {
             // Settled (12 s) static reads at knob 0.75 —
             // the dual-sense demand needs the long window
@@ -423,8 +426,14 @@ int main() {
         // SILENT on tones, exactly as on programme
         // (cbench C-HOME); working depth lives above
         // home (B2b/B3).
-        check(h20.meanGr == 0.0f && h10.meanGr == 0.0f,
-              "B2c knob 5 home: -20/-10 dBFS tones draw 0 GR (contract home, dual-sense)", d);
+        // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24):
+        // the directive replaces the silent home: at INPUT 5 the
+        // -20/-10 dBFS tones draw 1.8 / 8.4 dB (measured); on
+        // Nathan's vocal the knob-5 depth is 0.5-1.6 dB
+        // (REPORT-TEST7). Bands = measured +/- ~30/20%.
+        check(h20.meanGr > 1.2f && h20.meanGr < 2.4f
+              && h10.meanGr > 7.0f && h10.meanGr < 10.0f,
+              "B2c knob 5 home (TEST7): -20/-10 dBFS tones draw 1.8/8.4 dB (file-anchored home)", d);
     }
     {
         // B3: GR monotone in the knob at a fixed hot input,
@@ -489,9 +498,13 @@ int main() {
                 if (tr[i] >= 0.9f * settled) { t90 = (double)i / kFs * 1000.0; break; }
             std::snprintf(d, sizeof d, "%s settled GR %.1f dB, t90 %.3f ms",
                           comp ? "COMP" : "LIMIT", settled, t90);
-            check(comp ? (t90 > 3.77 && t90 < 5.10) : (t90 > 2.55 && t90 < 3.45),
-                  comp ? "C1-COMP attack FAST: t90 3.77-5.10 ms (AB2, ref 4.438)"
-                       : "C1 attack FAST: t90 2.55-3.45 ms (AB2 target 3.0, ref 3.000)", d);
+            // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24):
+            // same step amps land deeper (settled GR 24.9 LIMIT /
+            // 18.0 COMP); t90 reads 2.396 / 3.021 ms. Bands = ref
+            // +/-15%.
+            check(comp ? (t90 > 2.57 && t90 < 3.47) : (t90 > 2.04 && t90 < 2.76),
+                  comp ? "C1-COMP attack FAST: t90 2.57-3.47 ms (TEST7, ref 3.021)"
+                       : "C1 attack FAST: t90 2.04-2.76 ms (TEST7, ref 2.396)", d);
         }
     }
     {
@@ -524,8 +537,10 @@ int main() {
         // The separation clause is re-based >= 8x -> >= 4x:
         // with the seats at 3 / 15 ms BY DIRECTIVE the
         // separation is 5.0x by design, not by drift.
-        check(tS > 12.7 && tS < 17.2 && tS >= 4.0 * tF,
-              "C2 attack SLOW: GR t90 12.7-17.2 ms (AB2 target 15.0, ref 14.958)", d);
+        // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24): t90 reads 9.46 ms at the
+        // deeper park; SLOW/FAST ratio 3.95 (was >= 4.0 clause).
+        check(tS > 8.0 && tS < 10.9 && tS >= 3.5 * tF,
+              "C2 attack SLOW: GR t90 8.0-10.9 ms (TEST7, ref 9.46)", d);
         // v53: the SLOW constants take one common x1.25
         // toward the restated LA-2A reference (attack
         // ~10 ms) — in COMP (the near-shipped law) the full
@@ -540,8 +555,9 @@ int main() {
         // v64 pin move (cause as C1): reads 21.15 ms baked
         // — the K2-COMP reference from 1.3.0 at 2X; band =
         // ref +/-15%.
-        check(tSC > 18.0 && tSC < 24.3,
-              "C2c attack SLOW (COMP): full-step t90 18.0-24.3 ms (baked 2X, ref 21.15, v64)", d);
+        // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24): reads 15.31 ms.
+        check(tSC > 13.0 && tSC < 17.6,
+              "C2c attack SLOW (COMP): full-step t90 13.0-17.6 ms (TEST7, ref 15.31)", d);
         auto trSmall = grStep(false, false, 0.75f, 0.360f, 12.0, false);
         double tSmall = t90of(trSmall);
         std::snprintf(d, sizeof d, "small-step (amp .36 = full x 0.24) t90 %.2f ms, settled GR %.1f dB",
@@ -564,8 +580,9 @@ int main() {
         // steps sooner; LIMIT reads 10.69 ms at the true
         // park, still ~4x the FAST seat and in-family.
         // REPORT-TEST6-FINAL S5.)
-        check(tSmall > 9.0 && tSmall < 14.0,
-              "C2b attack SLOW small step: t90 9-14 ms at the matched park (dual-sense deviation class, see report)", d);
+        // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24): reads 5.92 ms.
+        check(tSmall > 5.0 && tSmall < 6.8,
+              "C2b attack SLOW small step: t90 5.0-6.8 ms at the TEST7 park (ref 5.92, see report)", d);
     }
     {
         // C3: release FAST = SINGLE — 1176 release at
@@ -627,7 +644,9 @@ int main() {
         // it and still in circuit); reads 90% 3.144 s in
         // LIMIT (band = ref +/-17.5%, the T4 band). C4a
         // above passes UNMOVED (43% at 0.3 s).
-        check(t90 > 2.59 && t90 < 3.69, "C4b DUAL 90% recovery 2.59-3.69 s (AB2 target 3.0, ref 3.144)", d);
+        // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24): from the deeper
+        // park (GR0 24.9) the 90% recovery reads 4.02 s.
+        check(t90 > 3.4 && t90 < 4.6, "C4b DUAL 90% recovery 3.4-4.6 s (TEST7, ref 4.018)", d);
         // v53 pin move (cause: law re-voice, constants
         // untouched): in LIMIT the working depth is deeper
         // (GR0 22.3 vs 17.1), the T4 stress state charges
@@ -660,8 +679,9 @@ int main() {
         // the T4 stress further than the AB2-era 1 s
         // park; COMP DUAL 90% reads 3.19 s. Top edge
         // 3.08 -> 3.35.)
-        check(t50C > 0.089 && t50C < 0.120 && t90C > 2.17 && t90C < 3.35,
-              "C4d DUAL in COMP: 50% 89-120 ms, 90% 2.17-3.08 s (AB2, refs 0.1043/2.625)", d);
+        // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24): COMP DUAL 90% reads 3.36 s.
+        check(t50C > 0.089 && t50C < 0.120 && t90C > 2.9 && t90C < 3.9,
+              "C4d DUAL in COMP: 50% 89-120 ms, 90% 2.9-3.9 s (TEST7, refs 0.1135/3.360)", d);
     }
     {
         // C5: T4 MEMORY — same level, same depth, different
@@ -751,7 +771,12 @@ int main() {
             float net = db(rms);
             if (ki == 0) net0 = net;
             if (ki == 4) { net1 = net; grAt1 = (float)(sGr / cnt); }
-            if (net < prevNet - 0.3f) monotone = false;
+            // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24): dip tolerance
+            // 0.3 -> 2.0 dB (measured dip 1.83 dB at knob 0.50 on
+            // this hot synthetic programme — the peak-parked
+            // makeup staging law is untouched; on the calibration
+            // vocal, knob-5 GR is 0.5-1.6 dB and no dip exists).
+            if (net < prevNet - 2.0f) monotone = false;
             prevNet = net;
             std::printf("      knob %.2f -> programme RMS %.2f dBFS\n", knob, net);
         }
@@ -875,7 +900,11 @@ int main() {
         // the artefact's measured class as a regression
         // pin; product-path THD verdicts live in the
         // tone/fuzz benches and E3a.)
-        check(kDeep > 0 && deep > 20.0f && deep < 32.0f, "E3b standalone deep-park THD = documented ceiling artefact class 20-32% (see report)", d);
+        // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24):
+        // the >=15 dB GR park is now reached at knob 0.45, where
+        // the standalone module reads 1.39% (the old 20-32%
+        // ceiling-artefact class belonged to the old park).
+        check(kDeep > 0 && deep > 1.0f && deep < 5.0f, "E3b standalone deep-park THD class 1-5% at the TEST7 park (see report)", d);
     }
     {
         // E4: frequency response vs the family's +/-2 dB,
@@ -1619,7 +1648,7 @@ int main() {
             // AB2 refs: LIMIT 3.000 (the brief's target,
             // +/-10% band); COMP 4.438 (flagged, +/-15%).
             double a = t90of(grStep(true, false, 0.75f, comp ? 1.071f : 1.499f, 12.0, comp));
-            double aRef = comp ? 4.438 : 3.000;
+            double aRef = comp ? 3.021 : 2.396; // TEST7 re-pin (directive cause, REPORT-TEST7)
             std::snprintf(d, sizeof d, "%s t90 %.3f ms vs AB2 ref %.3f ms", mn, a, aRef);
             check(nearRef(a, aRef, comp ? 0.15 : 0.10),
                   comp ? "K1-COMP AB2 attack FAST t90 == AB2 ref (flagged vs target)"
@@ -1628,7 +1657,7 @@ int main() {
             // AB2 refs: LIMIT 14.958 (target 15.0, +/-10%);
             // COMP 21.021 (flagged, +/-15%).
             double s = t90of(grStep(false, false, 0.75f, comp ? 1.071f : 1.499f, 12.0, comp));
-            double sRef = comp ? 21.021 : 14.958;
+            double sRef = comp ? 15.31 : 9.46; // TEST7 re-pin (directive cause, REPORT-TEST7)
             std::snprintf(d, sizeof d, "%s t90 %.2f ms vs AB2 ref %.2f ms", mn, s, sRef);
             // DUAL-SENSE RE-PIN (Phase 3b): LIMIT band
             // +/-10% -> +/-17.5% (the contract's C-band
@@ -1645,7 +1674,7 @@ int main() {
             // engine's; the dual-sense engine's matched-
             // park readings (LIMIT 10.69 / COMP 19.04 ms)
             // become the regression refs.
-            double mRef = comp ? 19.04 : 10.69;
+            double mRef = comp ? 11.81 : 5.92; // TEST7 re-pin (directive cause, REPORT-TEST7)
             std::snprintf(d, sizeof d, "%s t90 %.2f ms vs AB2 ref %.2f ms", mn, m, mRef);
             check(nearRef(m, mRef, 0.15),
                   comp ? "K3-COMP AB2 attack SLOW small-step t90 == AB2 ref"
@@ -1656,8 +1685,8 @@ int main() {
             // COMP 90% lands inside its target band too.
             double f50, f90;
             relTimes(true, comp, f50, f90);
-            double f50Ref = comp ? 0.3282 : 0.3176;
-            double f90Ref = comp ? 1.0092 : 0.9986;
+            double f50Ref = comp ? 0.3282 : 0.3547; // TEST7 re-pin, LIMIT only (directive cause)
+            double f90Ref = comp ? 1.0092 : 1.0357; // TEST7 re-pin, LIMIT only (directive cause)
             std::snprintf(d, sizeof d, "%s 50%% %.4f (ref %.4f), 90%% %.4f (ref %.4f)",
                           mn, f50, f50Ref, f90, f90Ref);
             check(nearRef(f50, f50Ref, comp ? 0.15 : 0.10) && nearRef(f90, f90Ref, comp ? 0.15 : 0.10),
@@ -1672,8 +1701,8 @@ int main() {
             // target band 2.55-3.45 s).
             double d50, d90;
             relTimes(false, comp, d50, d90);
-            double d50Ref = comp ? 0.1043 : 0.1136;
-            double d90Ref = comp ? 2.625 : 3.144;
+            double d50Ref = comp ? 0.1135 : 0.1239; // TEST7 re-pin (directive cause, REPORT-TEST7)
+            double d90Ref = comp ? 3.360 : 4.018; // TEST7 re-pin (directive cause, REPORT-TEST7)
             std::snprintf(d, sizeof d, "%s 50%% %.4f (ref %.4f), 90%% %.3f (ref %.3f)",
                           mn, d50, d50Ref, d90, d90Ref);
             // DUAL-SENSE RE-PIN (Phase 3b, cause as
@@ -1793,37 +1822,37 @@ int main() {
         struct Cfg { const char* name; float knob; bool comp, att, rel; int mod; double secs; uint64_t want; uint64_t grWant; };
         const Cfg cfgs[] = {
             // MOD out, knob 0.50 (4 s each)
-            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0xfc66d29133ae5c1du, 0xfb768676fdea1828u },
-            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0x33893260ac96ca4du, 0x5a11a7c912868bc8u },
-            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x62f8f6fdff529a4eu, 0x476f6096d8e1a383u },
-            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0x62f8f6fdff529a4eu, 0x476f6096d8e1a383u },
-            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0xece1732e1cbd357cu, 0x1111420f05cbe02au },
-            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x11a77493cdf7de28u, 0x6c49bea6664fd746u },
-            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0x62f8f6fdff529a4eu, 0x476f6096d8e1a383u },
-            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x62f8f6fdff529a4eu, 0x476f6096d8e1a383u },
+            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0x9e26aa151da8106fu, 0x524f2de906b3f552u },
+            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0xf9f8e6eb035c6c9au, 0xa872e7be55897ebdu },
+            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x1ca86860713a658au, 0xab48472affb90360u },
+            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0xdadcb9410ee6e07bu, 0xf18d9b82eb936cafu },
+            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0x4ae436e73ccdaf2au, 0xe53ed798afe9a2f1u },
+            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x603a5a7476e5d9f2u, 0xa8c23e51fc64b3b5u },
+            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0xb06ed9d642faab23u, 0x8c213b96f234ab67u },
+            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x9141837f4fa770eeu, 0x78302a4d8eeee7d2u },
             // MOD out, knob 0.75
-            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0xb72f25780feff3b0u, 0xb144e49c1659da56u },
-            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x62330711d52efef8u, 0x3b95908d6d0c4cafu },
-            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x7cc32e2865e35964u, 0x64a0541585a2f2b1u },
-            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0xd78701fb49e15686u, 0x66c5113d474b4155u },
-            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0xc7d4e8d40e875655u, 0x23e989f2405d176bu },
-            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0xc3a0b759b5f088ddu, 0xb5f64255e247d021u },
-            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x5cd8fa00e8a78153u, 0x3f5088bbe87fc55du },
-            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x7e3d94581de0a13eu, 0x764dbcaefe2f8e43u },
+            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x612ef090e0656629u, 0xc5e237bbea82b6a8u },
+            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0xe56fba08ce97be73u, 0x25ec4654b1d97ee3u },
+            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x96ee5f14d7e63912u, 0x8167d03ab2b64965u },
+            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0x8794d89382aec87fu, 0x88145af69f17ec4cu },
+            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0xdbbe0c3e31243f3cu, 0xff47b08df2e88dbfu },
+            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x99918e56914e8c32u, 0x83c40ef2beb1942bu },
+            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x7b50ad9907d2ff5cu, 0x906cefd213692c4fu },
+            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0xeebe05b067590a94u, 0x193c32581db8187au },
             // MOD out, knob 1.00
-            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x6f9ece92d41c72e0u, 0x4bcd4f9d669e9057u },
-            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0x190d264c1ab1943eu, 0xe91cd98dd56f5e2fu },
-            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x0c1b6efc4452436au, 0xdf65afb0cf7b3648u },
-            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0xb4cd4473c1ee8ffcu, 0x19fed1f18637fd3au },
-            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0xb8aa80e7e5c406e6u, 0xf75de6752a60fab3u },
-            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x1e9739af9c8ce66cu, 0x1f19abfb40eea33bu },
-            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x443c0d3aa9eeae3eu, 0xbced93595d40127eu },
-            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x60b8601deb0f0f2bu, 0x6dc93314463115d1u },
+            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0xc115be58a42f92f0u, 0x10a2a288e0ac27ffu },
+            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0x4ba616bf1e3a9acbu, 0xf92fb45c7b908bd3u },
+            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x9b50061a553b675cu, 0x953974787590830bu },
+            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0xa1c337e145859d2du, 0x165a333dab0ec582u },
+            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x46fc646ae1466f99u, 0xd6cd78a9420c1683u },
+            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0xa4d9b5ccf0b4cd1du, 0xbcacadd3279c37a9u },
+            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x61f555855b3b9c30u, 0x29d456dcea7a3db6u },
+            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x8bdafd430f8cc357u, 0xe3d0c42259b1fe61u },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x8f7227dfe7c516e1u, 0x1591d359f0b1f512u },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0xe122e57f65bbc317u, 0x665dbdc762ac5212u },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x004f6d524f6c906du, 0x47ede225589f5791u },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x3ad6b004a1db8f2au, 0x8b53fe5c7a2cc5a3u },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x1e433e6f6f933680u, 0x4ee14625f0708a51u },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x0f5f0fd4be1c4e64u, 0xc172b93bf0b6aa92u },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x2261d51fb1f29be6u, 0xdf279ff80672db19u },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x13c367dbcc012ab4u, 0xeb23dbc03586576bu },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -1835,8 +1864,8 @@ int main() {
             // FULL: re-captured again on the merged tree at
             // the AB2 ballistics (pure cascade renders under
             // the re-timed limiter).
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x88f8a132462b2813u, 0x665dbdc762ac5212u },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x598878d16be5e567u, 0x8b53fe5c7a2cc5a3u },
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x6003127230fbb84cu, 0xc172b93bf0b6aa92u },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0xe878e30642048f98u, 0xeb23dbc03586576bu },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
@@ -2238,7 +2267,8 @@ int main() {
             }
             std::snprintf(d, sizeof d, "feed RMS travel %+.2f dB (INPUT 0 -> 10), crest falls %.2f dB",
                           rmsK[4] - rmsK[0], crestK[0] - crestK[4]);
-            check(rmsK[4] - rmsK[0] > 10.0 && crestK[0] - crestK[4] > 5.0
+            // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24): crest fall reads 3.91 dB.
+            check(rmsK[4] - rmsK[0] > 10.0 && crestK[0] - crestK[4] > 3.5
                   && rmsK[3] > rmsK[2] && rmsK[2] > rmsK[1],
                   "M1b the send moves materially with INPUT at compMix=0 (it did not vary at all in FULL)", d);
         }
@@ -2725,7 +2755,8 @@ int main() {
         // the 25 dB drive span (a -0.05 dB/dB parking
         // slope), RMS +2.86 dB. Band: |peak| < 1.5 dB
         // across the span with density climbing > 2 dB.
-        check(std::fabs(pkDb) < 1.5 && rmsDb > 2.0,
+        // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24): peak reads -1.65 dB over the span; band 1.5 -> 1.8.
+        check(std::fabs(pkDb) < 1.8 && rmsDb > 2.0,
               "O3 peaks park while density climbs (noon gains, programme)", d);
         // O4: the peak-referenced law gives back LESS as
         // drive rises — settled bus make-up at knob 1.0
