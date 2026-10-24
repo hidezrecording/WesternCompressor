@@ -38,6 +38,21 @@
 // levels; dryness (colour starts/stops with the signal);
 // predictable, monotone level behaviour; first-note analog
 // indistinguishability. Design doc §0/§8.
+//
+// PHASE 3 (2026-10-24, Nathan's engine-rebuild directive):
+// the gain computer + stage chain are re-implemented in a
+// VOLTAGE domain (0 dBFS == 8.7 Vpk at the terminals; stage
+// shoulders at tens of volts), restoring the hardware
+// proportions the normalised v4 engine lost — detector
+// authority across the whole drive range, stage headroom
+// above the loop's working levels, and a threshold that is
+// one reference voltage with a small, safe trim. Topology
+// is unchanged (true BA-6A feedback: detector post-output-
+// transformer, vari-mu element in the path); ballistics
+// networks, taper, bus staging, MOD, meter and every
+// external behaviour are the shipped ones, held to the
+// compatibility contract (western-compressor-release-
+// 1.4.2/CONTRACT.md; design: DESIGN.md in the same folder).
 // ─────────────────────────────────────────────────────────────────────
 #include <cmath>
 #include <cstdint>
@@ -72,6 +87,29 @@ inline float tubeSat(float x, float drive, float asym) {
     return ((float)std::tanh((double)z) + even) / drive;
 }
 
+// ── PHASE 3 (2026-10-24): voltage-domain stage helpers ──
+// Soft shoulder (unmodeled-characteristics gate item G4):
+// linear to the knee, tanh approach to the ceiling above it
+// — a limit approached along a curve, never a category
+// change. Used for the vari-mu pair's plate swing.
+inline float softClipV(float x, float knee, float ceil) {
+    const float a = x < 0.0f ? -x : x;
+    if (a <= knee) return x;
+    const float s = x < 0.0f ? -1.0f : 1.0f;
+    return s * (knee + (ceil - knee) * (float)std::tanh(
+        (double)(a - knee) / (double)(ceil - knee)));
+}
+// Tube stage in VOLTS: tanh core normalised to normV (the
+// stage's swing scale), small-signal slope exactly 1 after
+// the /drive normalisation, plus a bounded even-order term
+// (the prototype's re-anchored form of tubeSat above).
+inline float tubeSatV(float x, float drive, float asym, float normV) {
+    const float z = x * drive;
+    const float az = z < 0.0f ? -z : z;
+    const float even = asym * 40.5f * (z / 9.0f) * (az / 9.0f) / (1.0f + (az / 9.0f) * (az / 9.0f)) * 0.5f;
+    return ((float)(normV * std::tanh((double)z / (double)normV)) + even) / drive;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // IronStage — one transformer in the BA-6A path (input,
 // interstage, output voicings). Behavioural flux model: the
@@ -79,7 +117,7 @@ inline float tubeSat(float x, float drive, float asym) {
 // signal (real flux is the signal's integral, so colour lives
 // at LF and the top stays clean); flux gates a soft odd/even
 // waveshape, with the v52 flux-relief knee backing the gate
-// off as the core saturates (kIronFluxReliefKnee). The
+// off as the core saturates (kIronReliefKneeV). The
 // model's ONLY memory is that flux state,
 // discharging in ~5 ms — colour starts and stops with the
 // signal (criterion 3, dryness: no ring, no tail). Voiced FAT
@@ -87,33 +125,21 @@ inline float tubeSat(float x, float drive, float asym) {
 // stages run slightly hotter at LF than a mint unit's <0.4 %
 // ticket — the deviation is documented in the design doc §8.
 // ─────────────────────────────────────────────────────────────────────
+// ── PHASE 3 (2026-10-24): the voltage anchor ────────────
+// 0 dBFS at the terminals ≡ 8.7 Vpk (+18 dBu-class, the
+// shipped design doc §8.5 calibration). The new engine
+// carries the whole path in volts; stage limits are soft
+// shoulders at tens of volts (DESIGN.md §3), restoring the
+// hardware proportions the normalised engine lost.
+inline constexpr float kVoltsPerFs = 8.7f;
+
 inline constexpr float kIronFluxTauSec = 0.0053f; // ~30 Hz flux average
-// Flux relief knee (v52; docs/lf-blowout-diagnosis.md,
-// docs/build-report-v52.md). Nathan's ear verdict on 1.1.7:
-// at high INPUT the low end "hits a wall" and blows out too
-// quickly. The bisection put the LF excess on the irons
-// (92 % of distortion power at knob 0.5, 47 % at 0.85, ~0 %
-// at 1 kHz) — specifically on the waveshape gate standing
-// fully open at storm flux while the regulated swing runs
-// through it. A real core answers that region by SATURATING:
-// incremental permeability collapses, the magnetisation
-// cannot be pushed further, and the colour stops growing
-// instead of squaring. The relief factor models exactly
-// that: 1 / (1 + (|flux|/knee)^2) multiplies the gate —
-// ~0.99 at a typical nominal flux peak (~0.06, a -20 dBFS
-// programme peak), ~0.91 at the hot E1 colour point (0.112),
-// ~0.52 at a 40 Hz storm peak (0.43, knob 0.85), ~0.28 deep
-// in the storm (0.66, knob 1.0). It reads the flux STATE
-// only; the state's own dynamics (tau, dryness) are
-// untouched, and at MF/HF flux ~ 0.02 so the relief is a
-// measured no-op there (1 kHz wall identical to 0.01 pt).
-// Knee 0.35 = the measured knee of the trade: the next step
-// down (0.28) bought ~0.3 pt more wall relief for ~1.5x
-// the nominal-colour cost. Measured at the knee (40 Hz,
-// -10 dBFS): THD 5.73 -> 4.62 % at knob 0.75 and
-// 11.37 -> 9.38 % at 0.85; the 5 %-THD crossing moves
-// 0.72 -> 0.76 of knob. E1a colour cost 1.06 -> 1.01 %.
-inline constexpr float kIronFluxReliefKnee = 0.35f;
+// Flux relief knee (v52 mechanism, PHASE 3 domain): the
+// knee now reads the flux state in VOLTS. 3.0 V sits at
+// the same operating region the normalised 0.35 knee
+// served (storm-flux LF at high drive), because the flux
+// state is now the signal's own volt-domain average.
+inline constexpr float kIronReliefKneeV = 3.0f;
 
 class IronStage {
 public:
@@ -121,9 +147,9 @@ public:
     explicit IronStage(Voicing v = Voicing::input) { setVoicing(v); }
     void setVoicing(Voicing v) {
         switch (v) {
-            case Voicing::input:      kFlux_ = 0.30f; odd_ = 0.20f; asym_ = 0.012f; knee_ = 0.05f; break;
-            case Voicing::interstage: kFlux_ = 0.18f; odd_ = 0.11f; asym_ = 0.007f; knee_ = 0.05f; break;
-            case Voicing::output:     kFlux_ = 0.46f; odd_ = 0.30f; asym_ = 0.018f; knee_ = 0.06f; break;
+            case Voicing::input:      kFlux_ = 0.30f; odd_ = 0.20f; asym_ = 0.012f; ceil_ = 30.0f; break;
+            case Voicing::interstage: kFlux_ = 0.18f; odd_ = 0.11f; asym_ = 0.007f; ceil_ = 34.0f; break;
+            case Voicing::output:     kFlux_ = 0.46f; odd_ = 0.30f; asym_ = 0.018f; ceil_ = 26.0f; break;
         }
     }
     void prepare(double fs) { fs_ = fs > 0.0 ? fs : 48000.0; }
@@ -132,24 +158,21 @@ public:
         flux_ += (x - flux_) * tauCoef(kIronFluxTauSec, fs_);
         const float aFlux = flux_ < 0.0f ? -flux_ : flux_;
         if (aFlux < 1.0e-6f) return x;
-        const float drive = 1.0f + kFlux_ * aFlux;
-        float z = clampf(x * drive, -3.0f, 3.0f);
-        z += asym_ * z * z;                        // even-order warmth
-        const float shaped = z + odd_ * (tanhPade(z) - z);
-        // Flux relief (v52, kIronFluxReliefKnee above): past
-        // the knee the core saturates and the gate backs off,
-        // so storm-flux LF linearises progressively instead
-        // of squaring into the wall.
-        const float relief = 1.0f / (1.0f + (aFlux / kIronFluxReliefKnee)
-                                          * (aFlux / kIronFluxReliefKnee));
-        const float gate = aFlux / (aFlux + knee_) * relief;
+        const float drive = 1.0f + kFlux_ * aFlux / kVoltsPerFs;
+        float z = clampf(x * drive, -90.0f, 90.0f);
+        { const float az = z < 0.0f ? -z : z;
+          z += asym_ * 49.0f * (z / 7.0f) * (az / 7.0f) / (1.0f + (az / 7.0f) * (az / 7.0f)) * 0.5f; }
+        const float shaped = z + odd_ * (ceil_ * (float)std::tanh((double)z / (double)ceil_) - z);
+        const float relief = 1.0f / (1.0f + (aFlux / kIronReliefKneeV)
+                                          * (aFlux / kIronReliefKneeV));
+        const float gate = aFlux / (aFlux + 0.5f) * relief;
         return x + gate * (shaped - x);
     }
     float flux() const { return flux_; }
 private:
     double fs_ = 48000.0;
     float flux_ = 0.0f;
-    float kFlux_ = 0.30f, odd_ = 0.20f, asym_ = 0.012f, knee_ = 0.05f;
+    float kFlux_ = 0.30f, odd_ = 0.20f, asym_ = 0.012f, ceil_ = 30.0f;
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -167,9 +190,14 @@ private:
 //    grows continuously (soft knee -> limiting), capped at
 //    the pair's useful ~38 dB.
 // ─────────────────────────────────────────────────────────────────────
-inline constexpr float kBa6aCeilingDb   = -16.0f;
-inline constexpr float kBa6aDbPerVolt   = 27.0f; // GR slope on the shaped sense (v1.1.2, below)
-inline constexpr float kBa6aDetToeEnv   = 0.38f; // 6H6 square-law toe corner (sense-domain volts)
+// PHASE 3: the threshold is ONE detector reference
+// VOLTAGE (pre-sense), a signal level at the 6H6 tap —
+// not a fudge factor against a bounded envelope. A trim
+// in dB multiplies this voltage (Ba6aLimiter::
+// setThreshTrimDb); measured on the prototype, +-1 dB
+// of trim moves onset -+ ~0.3 knob uniformly across
+// materials and source levels (DESIGN.md §4).
+inline constexpr float kBa6aThreshVolts = 20.5f;
 inline constexpr float kBa6aGrCapDb     = 46.0f;
 // Drive law (design §3.1): the box runs hot by design (its
 // ~54 dB of gain normalised so nominal programme lives near
@@ -220,63 +248,42 @@ inline float ba6aDriveDb(float knob01) {
     return -5.0f + 56.0f * g;
 }
 // Detector sense: the 6H6 is fed from its own winding/tap,
-// scaled ~+7 dB over the output-terminal level (detector
-// feeds are scaled to the diode's needs in this family; the
-// verge at the terminals therefore sits at env ~0.072).
-inline constexpr float kBa6aDetSense = 2.2f;
-// The vari-mu law, from the tube physics (research §A.3;
-// deepened by the v1.1.2 circuit study,
-// docs/engine-v5-circuit-study.md §1). Two documented
-// shapes stack between the output level and the gain:
-//  (a) the 6H6's sense characteristic: a diode detector is
-//      SQUARE-LAW at small envelopes (detected output
-//      proportional to the input VOLTAGE SQUARED) and only
-//      approaches linear at large ones — the control volts
-//      themselves arrive with a toe. Modelled as the sense
-//      shaping env^2/(env + e0), which is ~env^2/e0 below
-//      the corner e0 and ~env above it.
-//  (b) the 6SK7's remote-cutoff law: variable-pitch grid
-//      sections cut off progressively over a long grid
-//      base, so the dB-per-volt slope at the START of an
-//      excursion is small (few sections near cutoff) and
-//      rises through the mid-range. On the shaped sense
-//      the composite reads as a slope that climbs from the
-//      verge and firms with depth.
-// v1.1.1's law was a constant 21 dB/V from the first
-// millivolt over the verge — no toe. Nathan's verdict:
-// "the ratio up front feels too strong... the Fairchild
-// feels gentler, less slammy at the front of the signal"
-// (its attack is FASTER; the gentleness is the law's
-// shape). The reshaped law (slope 27 on the shaped sense)
-// measures, static sweep at knob 0.5: incremental ratio
-// 1.35:1 at ~1 dB GR (was 1.47), ~1.7 at 3 dB (was 1.84),
-// 4.14:1 at 18 dB (was 3.57) — softer at the front,
-// firmer at depth, working depth kept (GR at -10 dBFS in:
-// 11.6 dB, was 11.8-12.3). Still no threshold corner and
-// still a genuine feedback ceiling; capped at the pair's
-// useful ~38 dB of gain range. Study §4 records the
-// physics bound honestly: in a feedback law the mid-depth
-// ratio at fixed working depth is set by env x slope at
-// the equilibrium — softness is redistributed (front down,
-// top up), not conjured.
-inline float ba6aSenseShape(float envLin, float toeEnv) {
-    return envLin * envLin / (envLin + toeEnv);
+// scaled over the output-terminal level (per-mode sense,
+// §COMP/LIMIT below: 2.2 COMP / 1.4 LIMIT, as shipped).
+// PHASE 3: the sense is carried in VOLTS at the tap, so it
+// keeps growing across the whole drive range — the shipped
+// normalised sense was bounded by the cascade's ~0.93
+// ceiling, which starved the loop exactly where the
+// hardware's control voltage is strongest (DESIGN.md §1).
+//
+// The vari-mu law (PHASE 3 form; DESIGN.md §4), from the
+// same tube physics as the shipped law:
+//  (a) the 6H6's sense characteristic: square-law at small
+//      envelopes, approaching linear at large ones —
+//      shape(env) = env^2/(env + toe), carried in volts.
+//  (b) the 6SK7's remote-cutoff law: the dB-per-volt slope
+//      is small at the start of an excursion and STIFFENS
+//      through the working range — the growth term
+//      growth.over^2/(over + growthKnee). The first dB of
+//      GR is governed by `slope` alone, so onset is
+//      gradual by construction (CONTRACT C-ONSET), and
+//      static ratios RISE with depth by mechanism, as the
+//      shipped ladder does (CONTRACT §4).
+// GR = slope.(shape(env) - shape(ref))
+//    + growth.(shape(env) - shape(ref))^2
+//             / ((shape(env) - shape(ref)) + growthKnee),
+// zero below the reference, capped at kBa6aGrCapDb.
+inline float ba6aSenseShape(float envV, float toeV) {
+    return envV * envV / (envV + toeV);
 }
-inline float ba6aVariMuDb(float envLin, float slope, float toeEnv) {
-    const float over = ba6aSenseShape(envLin, toeEnv)
-                     - ba6aSenseShape(dbToLinear(kBa6aCeilingDb), toeEnv);
+inline float ba6aVariMuDb(float envSensed, float slope, float toeV,
+                          float refSensed, float growth, float growthKnee) {
+    const float over = ba6aSenseShape(envSensed, toeV)
+                     - ba6aSenseShape(refSensed, toeV);
     if (over <= 0.0f) return 0.0f;
-    const float gr = slope * over;
+    const float gr = slope * over
+                   + growth * over * over / (over + growthKnee);
     return gr > kBa6aGrCapDb ? kBa6aGrCapDb : gr;
-}
-// The shipped law (v1.1.2 constants above) — kept as the
-// DEMAND reference for the SLOW detector's T4 charge shaping
-// (ba6aDetSlowTau below): the demand a peak represents is a
-// property of the panel physics, not of the selected mode,
-// so the ballistics' dynamics never change with the mode —
-// only the static GR map does (v53, below).
-inline float ba6aVariMuDb(float envLin) {
-    return ba6aVariMuDb(envLin, kBa6aDbPerVolt, kBa6aDetToeEnv);
 }
 // ─────────────────────────────────────────────────────────────────────
 // COMP / LIMIT ratio modes (v53, Nathan): the LIMIT cluster's
@@ -284,36 +291,32 @@ inline float ba6aVariMuDb(float envLin) {
 // pointless — nobody bypasses the compressor on a
 // compressor" — so the switch is now a RATIO mode switch and
 // the section is always engaged. Both modes are the same
-// vari-mu law family re-voiced on the gain-computer side
-// (slope on the shaped sense, the 6H6 toe corner, and the
-// detector sense scale); the audio path, the ballistics
-// constants and the flux relief are untouched. Nathan's
-// calibration: COMP ≈ 1.5:1 at shallow/working depths
-// digging to ≈ 3:1 deep; LIMIT ≈ 3:1 already at
-// shallow/working depths rising to ≈ 4–5:1 deep. Measured
-// on the bench (perturbation method, knob 0.75 — the local
-// ratio where a +1 dB input step is parked at the depth):
-//   depth dB GR:        1     3     6     12    18
-//   COMP  (28/.60/2.2): 1.40  1.75  2.24  2.89  3.04
-//   LIMIT (90/.10/1.4): 2.62  2.93  3.45  4.30  5.01
-//   shipped (27/.38):   1.25  1.73  2.20  2.89  3.46
-// COMP is the shipped law with its deep end tamed (4.1:1
-// class -> 3:1); LIMIT firms the front with slope and a
-// lower sense scale (the lower sense flattens the deep end
-// against the slope's rise — the pair was solved together).
-// DEFAULT = LIMIT. The mode change slews the three law
-// parameters over ~5 ms so toggling never clicks; the auto
-// makeup rides GR, so it follows the mode by itself.
+// vari-mu law family re-voiced on the gain-computer side;
+// the audio path and the ballistics constants are untouched
+// by the mode. PHASE 3: the voicings are the volts-domain
+// law's (slope = dB per shaped volt, toe = the 6H6 corner
+// in volts, sense = the detector tap ratio, growth = the
+// remote-cutoff slope growth). Calibration targets are the
+// contract's static ladders (CONTRACT §4: COMP 1.40 ->
+// 3.04, LIMIT 2.62 -> 5.01, rising with depth) with onset
+// re-anchored per CONTRACT §2. The mode change slews the
+// law parameters over ~5 ms so toggling never clicks; the
+// auto makeup rides GR, so it follows the mode by itself.
 // Session note: the APVTS 'limit' bool is repurposed
 // (true = COMP / false = LIMIT); a pre-1.1.9 session saved
 // with the switch OUT (false) now loads as LIMIT-active
 // instead of bypassed, and IN (true) loads as COMP.
-inline constexpr float kBa6aCompSlope  = 28.0f;
-inline constexpr float kBa6aCompToe    = 0.60f;
-inline constexpr float kBa6aCompSense  = 2.2f;
-inline constexpr float kBa6aLimitSlope = 90.0f;
-inline constexpr float kBa6aLimitToe   = 0.10f;
+// DEFAULT = LIMIT.
+inline constexpr float kBa6aCompSlope  = 0.75f;  // dB per shaped volt
+inline constexpr float kBa6aCompToe    = 90.0f;  // 6H6 toe corner, volts
+inline constexpr float kBa6aCompSense  = 2.2f;   // detector tap ratio
+inline constexpr float kBa6aCompGrowth = 0.30f;  // remote-cutoff slope growth
+inline constexpr float kBa6aCompGrowthKnee = 8.0f;
+inline constexpr float kBa6aLimitSlope = 4.2f;
+inline constexpr float kBa6aLimitToe   = 5.0f;
 inline constexpr float kBa6aLimitSense = 1.40f;
+inline constexpr float kBa6aLimitGrowth = 0.55f;
+inline constexpr float kBa6aLimitGrowthKnee = 5.0f;
 inline constexpr float kBa6aLawSlewTauSec = 0.005f; // mode-change slew (~5 ms)
 // ─────────────────────────────────────────────────────────────────────
 // Oversampling (v53): the "breaking glass" fix — Nathan's
@@ -406,9 +409,18 @@ inline constexpr float kBa6aDetSlowDim         = 2.6f;   // dim-panel slowdown f
 // likewise untouched. The demand below is computed with
 // the SHIPPED law (the no-arg ba6aVariMuDb) in both ratio
 // modes, so the detector dynamics are mode-independent.
-inline float ba6aDetSlowTau(float peak, float env) {
-    const float demand = clampf(ba6aVariMuDb(peak) / 25.0f, 0.0f, 1.0f);
-    const float approach = peak > 1.0e-6f ? clampf(env / peak, 0.0f, 1.0f) : 1.0f;
+inline float ba6aDetSlowTau(float peakSensedComp, float envSensedComp) {
+    // PHASE 3: the demand is read from the NEW law at its
+    // fixed COMP voicing (a property of the panel physics,
+    // mode-independent exactly as shipped), in COMP-sensed
+    // volts against the one threshold reference.
+    const float ref = kBa6aThreshVolts * kBa6aCompSense;
+    const float demand = clampf(ba6aVariMuDb(peakSensedComp, kBa6aCompSlope,
+                                             kBa6aCompToe, ref,
+                                             kBa6aCompGrowth, kBa6aCompGrowthKnee) / 25.0f,
+                                0.0f, 1.0f);
+    const float approach = peakSensedComp > 1.0e-6f
+        ? clampf(envSensedComp / peakSensedComp, 0.0f, 1.0f) : 1.0f;
     const float base = kBa6aDetSlowGrabTauSec
         + (kBa6aDetSlowCreepTauSec - kBa6aDetSlowGrabTauSec) * approach;
     return base * (1.0f + kBa6aDetSlowDim * (1.0f - demand));
@@ -572,6 +584,10 @@ public:
         lawSlopeT_ = comp ? kBa6aCompSlope : kBa6aLimitSlope;
         lawToeT_   = comp ? kBa6aCompToe   : kBa6aLimitToe;
         lawSenseT_ = comp ? kBa6aCompSense : kBa6aLimitSense;
+        // PHASE 3: the growth pair slews with the rest of
+        // the law (same ~5 ms glide, same no-click rule).
+        lawGrowthT_ = comp ? kBa6aCompGrowth : kBa6aLimitGrowth;
+        lawGrowthKneeT_ = comp ? kBa6aCompGrowthKnee : kBa6aLimitGrowthKnee;
     }
     bool compMode() const { return compMode_; }
 
@@ -617,6 +633,20 @@ public:
     float appliedMakeupDb() const { return makeupDb_; }
     float driveDb() const { return ba6aDriveDb(knobS_); }
 
+    // PHASE 3 calibration seams (tests/audits; no panel
+    // control): the detector reference trim — multiplies
+    // kBa6aThreshVolts by the dB value — and the detector
+    // state readouts the margins/authority audits use.
+    void setThreshTrimDb(float db) { threshTrimDb_ = db; }
+    float threshTrimDb() const { return threshTrimDb_; }
+    float detEnvVolts() const { return detEnv_; } // sensed volts
+    float lastPreVolts() const
+    {
+        const float a = lastPreL_ < 0.0f ? -lastPreL_ : lastPreL_;
+        const float b = lastPreR_ < 0.0f ? -lastPreR_ : lastPreR_;
+        return (a > b ? a : b) * kVoltsPerFs;
+    }
+
 private:
     void processCore(float inL, float inR, float& outL, float& outR);
     float processChannel(float x, int ch, float grLin, float driveLin);
@@ -643,6 +673,8 @@ private:
     float lawSlope_ = kBa6aLimitSlope, lawSlopeT_ = kBa6aLimitSlope;
     float lawToe_   = kBa6aLimitToe,   lawToeT_   = kBa6aLimitToe;
     float lawSense_ = kBa6aLimitSense, lawSenseT_ = kBa6aLimitSense;
+    float lawGrowth_ = kBa6aLimitGrowth, lawGrowthT_ = kBa6aLimitGrowth;
+    float lawGrowthKnee_ = kBa6aLimitGrowthKnee, lawGrowthKneeT_ = kBa6aLimitGrowthKnee;
     float lawCoef_  = 0.0f;
 
     double fs_ = 48000.0;
@@ -661,7 +693,8 @@ private:
     float lpL_ = 0.0f, lpR_ = 0.0f;
 
     float sag_ = 0.0f;                // B+ sag state (linked), 0..1 — v1.1.2 (study §2.3a)
-    float detEnv_ = 0.0f;             // detector envelope (linear peak)
+    bool grSelFast_ = true; float grSelBlend_ = 1.0f; float grSelFrom_ = 0.0f; // PHASE 3: release-select blend state
+    float detEnv_ = 0.0f;             // PHASE 3: detector envelope (SENSED VOLTS at the tap)
     float stress_ = 0.0f;             // v45: T4 memory state (dB of sustained GR)
     float lastPreL_ = 0.0f, lastPreR_ = 0.0f; // post-iron, pre-makeup (detector source)
     float prePeak_ = 0.0f;            // slow-decay peak of the pre-makeup output (make-up ceiling)
@@ -671,6 +704,7 @@ private:
     float avgGrDb_ = 0.0f;
     float makeupDb_ = 0.0f;
     bool applyMakeup_ = true;   // FULL2: false = module mode (see setter)
+    float threshTrimDb_ = 0.0f; // PHASE 3: reference trim (see setThreshTrimDb)
 };
 
 // ─────────────────────────────────────────────────────────────────────

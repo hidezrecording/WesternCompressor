@@ -55,6 +55,7 @@ void Ba6aLimiter::reset()
         osHighL_[i] = osHighR_[i] = 0.0f;
     osHighPos_ = 0;
     lawSlope_ = lawSlopeT_; lawToe_ = lawToeT_; lawSense_ = lawSenseT_;
+    lawGrowth_ = lawGrowthT_; lawGrowthKnee_ = lawGrowthKneeT_;
     // v64: no timing-scale state to settle — the scales
     // are compile-time constants, live from sample 0.
     ironInL_.reset();  ironInR_.reset();
@@ -67,6 +68,7 @@ void Ba6aLimiter::reset()
     lastPreL_ = lastPreR_ = 0.0f;
     prePeak_ = 0.0f;
     grSingle_ = grDual1_ = grDual2_ = 0.0f;
+    grSelFast_ = releaseFast_; grSelBlend_ = 1.0f; grSelFrom_ = 0.0f;
     stress_ = 0.0f;
     grDb_ = 0.0f;
     avgGrDb_ = 0.0f;
@@ -82,51 +84,50 @@ float Ba6aLimiter::processChannel(float x, int ch, float grLin, float driveLin)
     float& hpLp = ch == 0 ? hpLpL_ : hpLpR_;
     float& lp   = ch == 0 ? lpL_   : lpR_;
 
-    // 1. Input transformer.
-    float y = ironIn.process(x);
-    // 2. Drive + the vari-mu stage's gain (the 6SK7 pair under
-    //    the shared control voltage), then the pair's own
-    //    plate-swing limit — a tube stage cannot pass more
-    //    than its swing, however hard it is driven; that
-    //    ceiling is part of the squash at extreme drive.
+    // PHASE 3: the path works in VOLTS between the two
+    // terminal crossings (in: x * kVoltsPerFs; out: / the
+    // same at the return). Every stage limit is a soft
+    // shoulder in volts, far above the levels the settled
+    // loop allows (DESIGN.md §3) — no hard clip exists
+    // anywhere in the engine.
+    // 1. Input transformer (volts).
+    float y = ironIn.process(x * kVoltsPerFs);
+    // 2. Drive + the vari-mu stage's gain (the 6SK7 pair
+    //    under the shared control voltage), then the pair's
+    //    plate swing — a soft shoulder at 55 V, asymptote
+    //    105 V (+21.6 dB over the terminal reference).
     y = y * driveLin * grLin;
-    y = tubeSat(y, 0.9f, 0.0f);
-    //    Residual push-pull imbalance, growing with depth (the
-    //    hardware truth the BAL trim pots exist to null; kept
-    //    at the musical end of "ragged").
+    y = softClipV(y, 55.0f, 105.0f);
+    //    Residual push-pull imbalance, growing with depth
+    //    (the hardware truth the BAL trim pots exist to
+    //    null; kept at the musical end of "ragged").
     const float depth = clampf(grDb_ / 30.0f, 0.0f, 1.0f);
-    y += 0.02f * depth * y * y;
+    y += 0.02f * depth * (y * y / (1.0f + (y / 30.0f) * (y / 30.0f))) / kVoltsPerFs;
     // 3. Interstage transformer.
     y = ironMid.process(y);
-    // 4. 6J7 driver: soft saturation (ceiling ~1.8 — it bends
-    //    late, approaching the output stage's territory).
-    y = tubeSat(y, 0.55f, 0.05f);
-    // 5. 6V6 push-pull output: odd-dominant; its asymptote
-    //    (~1.43) IS the unit's output ceiling — the bend a
-    //    +30 dBm-class stage gives approaching full swing.
-    //    B+ sag (v1.1.2, study §2.3a): the 5R4-era rail sags
-    //    under programme current demand while the OD3 holds
-    //    the screens/bias stiff — so the sag lands here, on
-    //    the output stage: under load it bends earlier and
-    //    gives back a fraction of a dB (x(1 - 0.05.sag),
-    //    -0.45 dB max). The state is driven by the output
-    //    level itself (in process()), charges in ~25 ms and
-    //    recovers over ~240 ms — the box breathes with the
-    //    programme, and because the detector reads the
-    //    sagged output the loop feels it too.
-    y = tubeSat(y, 0.7f * (1.0f + 0.30f * sag_), 0.015f);
+    // 4. 6J7 driver (swing scale 60 V).
+    y = tubeSatV(y, 0.55f, 0.05f, 60.0f);
+    // 5. 6V6 push-pull output (swing scale 48 V; asymptote
+    //    ~68.6 V ≈ +17.9 dB over the terminal reference,
+    //    the +30 dBm-class swing), B+ sag as shipped
+    //    (charge ~25 ms / recover ~240 ms; driven in
+    //    processCore from the output level, and because
+    //    the detector reads the sagged output the loop
+    //    feels it too).
+    y = tubeSatV(y, 0.7f * (1.0f + 0.30f * sag_), 0.015f, 48.0f);
     y *= (1.0f - 0.05f * sag_);
     // 6. Output transformer (the fat one).
     y = ironOut.process(y);
     // 7. Response shaping: the family's ±2 dB / 30 Hz–15 kHz
     //    envelope as a gentle LF droop (~16 Hz) + HF droop
-    //    (~19 kHz). Also strips any DC the imbalance term made
-    //    (the LF pole's settle is the iron's natural recovery —
-    //    measured in the dryness test, suite E2).
+    //    (~19 kHz). Also strips any DC the imbalance term
+    //    made. (The poles are linear, so running them in
+    //    volts and converting at the return is identical
+    //    to the shipped normalised placement.)
     hpLp += (y - hpLp) * tauCoef(0.00995f, fs_);
     y -= hpLp;
     lp += (y - lp) * tauCoef(0.00000838f, fs_);
-    return lp;
+    return lp / kVoltsPerFs;
 }
 
 void Ba6aLimiter::process(float inL, float inR, float& outL, float& outR)
@@ -188,6 +189,8 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
     lawSlope_ += (lawSlopeT_ - lawSlope_) * lawCoef_;
     lawToe_   += (lawToeT_   - lawToe_)   * lawCoef_;
     lawSense_ += (lawSenseT_ - lawSense_) * lawCoef_;
+    lawGrowth_ += (lawGrowthT_ - lawGrowth_) * lawCoef_;
+    lawGrowthKnee_ += (lawGrowthKneeT_ - lawGrowthKnee_) * lawCoef_;
 
     // Baked timing scales (v64 / 1.3.1: the v62 selector's
     // settled 2X value as one compile-time constant; AB2
@@ -223,12 +226,31 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
     // pot (repurposed as COMP MIX) — the detector hears
     // the raw sense, exactly as it did at the feature's
     // 10 Hz bottom stop, so this line is the shipped one.
-    const float peak = lawSense_
-                     * std::max(std::fabs(lastPreL_), std::fabs(lastPreR_));
+    // PHASE 3: the sense is carried in VOLTS (the tap
+    // reads the same post-transformer point; lastPre is
+    // normalised, so x kVoltsPerFs at the tap). Nothing
+    // bounds this signal inside the working range — the
+    // detector's authority is proportional across the
+    // whole drive range, which is the design's point.
+    const float peakV = std::max(std::fabs(lastPreL_), std::fabs(lastPreR_))
+                      * kVoltsPerFs;
+    const float peak = lawSense_ * peakV;
     const bool detRising = peak > detEnv_;
-    const float detTau = detRising
-        ? (attackFast_ ? kBa6aDetFastTauSec : ba6aDetSlowTau(peak, detEnv_))
-        : kBa6aDetDecayTauSec;
+    float detTau;
+    if (detRising) {
+        if (attackFast_) {
+            detTau = kBa6aDetFastTauSec;
+        } else {
+            // SLOW shaped tau: the demand is read in the
+            // fixed COMP-sense domain (DESIGN.md §5), as
+            // the shipped design reads its fixed law in
+            // both modes — the seat's dynamics never
+            // change with the mode.
+            const float peakC = kBa6aCompSense * peakV;
+            const float envC = detEnv_ * (kBa6aCompSense / lawSense_);
+            detTau = ba6aDetSlowTau(peakC, envC);
+        }
+    } else detTau = kBa6aDetDecayTauSec;
     // AB2: the rising charge takes its seat's scale (FAST
     // or the SLOW shaped tau); the decay keeps its own
     // held scale (release-side infrastructure).
@@ -237,7 +259,10 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
                                      : kBa6aDetDecayScale;
     detEnv_ += (peak - detEnv_) * tauCoef(detTau * detScale, fs_);
 
-    const float target = ba6aVariMuDb(detEnv_, lawSlope_, lawToe_);
+    const float threshV = kBa6aThreshVolts * dbToLinear(threshTrimDb_);
+    const float target = ba6aVariMuDb(detEnv_, lawSlope_, lawToe_,
+                                      threshV * lawSense_,
+                                      lawGrowth_, lawGrowthKnee_);
 
     // ── Control state: BOTH recovery networks run every
     // sample; the toggle selects which one drives the stage,
@@ -264,7 +289,30 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
         grDual2_ += (t2 - grDual2_) * tauCoef(attTau, fs_);
     else
         grDual2_ += (t2 - grDual2_) * tauCoef(dualSlowTau, fs_);
-    grDb_ = releaseFast_ ? grSingle_ : grDual1_ + grDual2_;
+    // PHASE 3 (select blend): the shipped design runs both
+    // recovery networks continuously so a RELEASE flip never
+    // jumps -- true while both networks sit on a common
+    // target. The voltage engine has a true zero-target
+    // region: mid-release from a deep excursion the networks
+    // legitimately sit dBs apart (measured 6.5 dB on the A3
+    // bench history), and a hard select would step the gain.
+    // The select therefore blends over ~15 ms from the
+    // pre-flip value; the networks, attack path and all
+    // ballistics are untouched.
+    {
+        const float sel = releaseFast_ ? grSingle_ : grDual1_ + grDual2_;
+        if (releaseFast_ != grSelFast_) {
+            grSelFast_ = releaseFast_;
+            grSelFrom_ = grDb_;
+            grSelBlend_ = 0.0f;
+        }
+        if (grSelBlend_ < 1.0f) {
+            grSelBlend_ = std::min(1.0f, grSelBlend_ + 1.0f / (0.015f * (float)fs_));
+            const float t = grSelBlend_;
+            const float sm = t * t * (3.0f - 2.0f * t);
+            grDb_ = grSelFrom_ + (sel - grSelFrom_) * sm;
+        } else grDb_ = sel;
+    }
 
     // ── T4 memory state (v45): charges toward the GR being
     // done (tau ~1.2 s), forgets in quiet (tau ~8 s). Bounded

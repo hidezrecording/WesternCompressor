@@ -33,9 +33,13 @@ Osc72Processor::createParameterLayout()
         // (a nominal -14 dBFS signal draws ~1.8 dB of GR).
         // STAGING-FIX 2 (Nathan's factory-defaults directive,
         // 2026-10-22 — TEST BUILD): INPUT now opens at 4.
+        // PHASE 3 (Nathan's directive, 2026-10-24 — TEST6):
+        // with the voltage-domain engine the home point moves
+        // to INPUT 5 (contract C-HOME: knob 5 = 0.000 GR on
+        // -10-peak programme), so the factory default is 5.
         // APVTS default only: saved sessions restore their
         // stored value over it (replaceState semantics).
-        juce::NormalisableRange<float>(0.0f, 10.0f, 0.01f), 4.0f,
+        juce::NormalisableRange<float>(0.0f, 10.0f, 0.01f), 5.0f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [](float v, int) { return juce::String(v, 1); },
         [](const juce::String& t) { return t.getFloatValue(); }));
