@@ -262,9 +262,63 @@ inline constexpr float kBa6aDetSense = 2.2f;
 inline float ba6aSenseShape(float envLin, float toeEnv) {
     return envLin * envLin / (envLin + toeEnv);
 }
-inline float ba6aVariMuDb(float envLin, float slope, float toeEnv) {
+// ─────────────────────────────────────────────────────────────────────
+// OPERATING POINT (TEST5 candidate, 2026-10-23 — Nathan, after
+// re-verifying the 1.4.2 TEST build in Luna: the gain, tone and
+// knob range of that build are right; its ONE fault is that the
+// compression onset sits ~1 knob too low — first real reduction
+// at INPUT ≈ 4.5 where ≈ 5.5 is wanted, "push a little bit
+// harder before you start getting compression"). EXACTLY ONE
+// change vs the TEST build: the law's verge — the reference the
+// shaped envelope is compared against — is raised from the bare
+// ceiling envelope to kBa6aThresholdEnvLin, a level at the
+// DETECTOR TAP (pre-sense): each mode's reference is the
+// threshold times its own sense, so the threshold is a signal
+// level, the same for both modes in the units the hardware
+// would know. The law's response to sense-domain OVERSHOOT
+// above the verge is the shipped law unchanged (same slope on
+// the same shape), so at matched overshoot the ratios and the
+// toe are preserved by construction. It is deliberately NOT a
+// drive re-map and NOT a pad: the drive taper, the level into
+// the iron/tube stages and so the tone at a given knob are
+// bit-untouched — the offset lives only in the detector's
+// arithmetic.
+// Deliberate NON-changes (the discipline of this round):
+//  * NO SLOW-seat trim: the shift is ~1 knob, small enough
+//    that the slow envelope still reaches the verge in the
+//    same knob region — the seat tracks proportionally, as
+//    shipped (verified on the onset table, REPORT-TEST5).
+//  * The T4 DEMAND reference (the no-arg overload below)
+//    keeps the shipped ceiling verge EXACTLY, so the SLOW
+//    detector's charge shaping — the ballistics — is the
+//    shipped build's bit for bit.
+// CALIBRATION: kBa6aThresholdEnvLin chosen on the processor
+// onset sweep (programme peaking ≈ −10 dBFS; drums / dense /
+// vocal / pad; COMP + LIMIT; FAST seat) so first ~1 dB mean
+// GR lands at knob 5.5 ± 0.25, vs the TEST build's ≈ 4.5 on
+// the same table. Table: western-compressor-release-1.4.2/
+// REPORT-TEST5.md.
+// ─────────────────────────────────────────────────────────────────────
+// SOFT KNEE (TEST5, same directive): "the onset of
+// compression slightly less obvious at lower compression
+// amounts — between 1 and 4 dB of gain reduction not
+// clamping down as hard, waiting until it's driven harder."
+// The live law's output passes a smoothstep knee of width
+// kBa6aKneeDb: below it, GR grows quadratically-ish
+// (gr = g²(2K−g)/K² — zero slope at the verge, C1 into the
+// shipped law at g = K); at and above K the law is the
+// SHIPPED law EXACTLY, so deep-GR behaviour at matched
+// overshoot is unchanged by construction. The knee lives
+// ONLY on the live target path (ba6aVariMuDbLive, used at
+// the one call site in processCore): the T4 demand
+// reference below does NOT pass it, so the ballistics'
+// shaping is untouched.
+// ─────────────────────────────────────────────────────────────────────
+inline constexpr float kBa6aThresholdEnvLin = 0.75f; // pre-sense detector-envelope threshold (calibrated, TEST5)
+inline constexpr float kBa6aKneeDb          = 5.0f;  // soft-knee width on the live law's output (dB GR, TEST5)
+inline float ba6aVariMuDb(float envLin, float slope, float toeEnv, float refEnvLin) {
     const float over = ba6aSenseShape(envLin, toeEnv)
-                     - ba6aSenseShape(dbToLinear(kBa6aCeilingDb), toeEnv);
+                     - ba6aSenseShape(refEnvLin, toeEnv);
     if (over <= 0.0f) return 0.0f;
     const float gr = slope * over;
     return gr > kBa6aGrCapDb ? kBa6aGrCapDb : gr;
@@ -276,7 +330,19 @@ inline float ba6aVariMuDb(float envLin, float slope, float toeEnv) {
 // so the ballistics' dynamics never change with the mode —
 // only the static GR map does (v53, below).
 inline float ba6aVariMuDb(float envLin) {
-    return ba6aVariMuDb(envLin, kBa6aDbPerVolt, kBa6aDetToeEnv);
+    return ba6aVariMuDb(envLin, kBa6aDbPerVolt, kBa6aDetToeEnv,
+                        dbToLinear(kBa6aCeilingDb));
+}
+// The LIVE law (processCore's GR target): the threshold-
+// referenced law above, softened through the knee. Below
+// the knee width the shipped law's output g is remapped
+// g -> g²(2K−g)/K² (0 at the verge with zero slope, value
+// AND slope matched to the shipped law at g = K); at and
+// above K the shipped law passes verbatim.
+inline float ba6aVariMuDbLive(float envLin, float slope, float toeEnv, float refEnvLin) {
+    const float g = ba6aVariMuDb(envLin, slope, toeEnv, refEnvLin);
+    if (g <= 0.0f || g >= kBa6aKneeDb) return g;
+    return g * g * (2.0f * kBa6aKneeDb - g) / (kBa6aKneeDb * kBa6aKneeDb);
 }
 // ─────────────────────────────────────────────────────────────────────
 // COMP / LIMIT ratio modes (v53, Nathan): the LIMIT cluster's
