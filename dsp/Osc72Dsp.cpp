@@ -56,6 +56,10 @@ void Ba6aLimiter::reset()
     osHighPos_ = 0;
     lawSlope_ = lawSlopeT_; lawToe_ = lawToeT_; lawSense_ = lawSenseT_;
     lawGrowth_ = lawGrowthT_; lawGrowthKnee_ = lawGrowthKneeT_;
+    lawSlowSlope_ = lawSlowSlopeT_; lawSlowToe_ = lawSlowToeT_; lawSlowSense_ = lawSlowSenseT_;
+    lawSlowGrowth_ = lawSlowGrowthT_; lawSlowGrowthKnee_ = lawSlowGrowthKneeT_;
+    lawSlowGrowth2_ = lawSlowGrowth2T_; lawSlowGrowthKnee2_ = lawSlowGrowthKnee2T_;
+    lawSlowRef_ = lawSlowRefT_;
     // v64: no timing-scale state to settle — the scales
     // are compile-time constants, live from sample 0.
     ironInL_.reset();  ironInR_.reset();
@@ -65,6 +69,9 @@ void Ba6aLimiter::reset()
     lpL_ = lpR_ = 0.0f;
     sag_ = 0.0f;
     detEnv_ = 0.0f;
+    detSlowV_ = 0.0f;
+    peakHoldV_ = 0.0f;
+    susW_ = 0.0f;
     lastPreL_ = lastPreR_ = 0.0f;
     prePeak_ = 0.0f;
     grSingle_ = grDual1_ = grDual2_ = 0.0f;
@@ -191,6 +198,14 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
     lawSense_ += (lawSenseT_ - lawSense_) * lawCoef_;
     lawGrowth_ += (lawGrowthT_ - lawGrowth_) * lawCoef_;
     lawGrowthKnee_ += (lawGrowthKneeT_ - lawGrowthKnee_) * lawCoef_;
+    lawSlowSlope_ += (lawSlowSlopeT_ - lawSlowSlope_) * lawCoef_;
+    lawSlowToe_   += (lawSlowToeT_   - lawSlowToe_)   * lawCoef_;
+    lawSlowSense_ += (lawSlowSenseT_ - lawSlowSense_) * lawCoef_;
+    lawSlowGrowth_ += (lawSlowGrowthT_ - lawSlowGrowth_) * lawCoef_;
+    lawSlowGrowthKnee_ += (lawSlowGrowthKneeT_ - lawSlowGrowthKnee_) * lawCoef_;
+    lawSlowGrowth2_ += (lawSlowGrowth2T_ - lawSlowGrowth2_) * lawCoef_;
+    lawSlowGrowthKnee2_ += (lawSlowGrowthKnee2T_ - lawSlowGrowthKnee2_) * lawCoef_;
+    lawSlowRef_   += (lawSlowRefT_   - lawSlowRef_)   * lawCoef_;
 
     // Baked timing scales (v64 / 1.3.1: the v62 selector's
     // settled 2X value as one compile-time constant; AB2
@@ -259,10 +274,52 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
                                      : kBa6aDetDecayScale;
     detEnv_ += (peak - detEnv_) * tauCoef(detTau * detScale, fs_);
 
+    // DUAL-SENSE (Phase 3b): the sustained sense -- a slow
+    // follower of the same rectified tap, in RAW volts. It
+    // reads what the signal has BEEN, where detEnv_ reads
+    // what it IS.
+    {
+        // Gap dump: a ~30 ms max-hold of the tap. On any
+        // sustained tone the hold rides at the tone peak
+        // (~1.47x the slow sense, safe margin down to
+        // 20 Hz); when the signal truly stops it falls
+        // below 0.35x the slow sense in ~45 ms, and the
+        // sustained memory discharges quickly so the slow
+        // demand exits with the signal instead of tailing
+        // the release networks.
+        const float phDecay = tauCoef(0.030f, fs_);
+        peakHoldV_ = peakV > peakHoldV_ ? peakV
+                       : peakHoldV_ + (0.0f - peakHoldV_) * phDecay;
+        const float dnTau = (peakV <= detSlowV_
+                             && peakHoldV_ < 0.35f * detSlowV_)
+                                ? 0.06f : kBa6aSlowSenseDnTauSec;
+        detSlowV_ += (peakV - detSlowV_) * tauCoef(
+            peakV > detSlowV_ ? kBa6aSlowSenseUpTauSec : dnTau, fs_);
+    }
+
     const float threshV = kBa6aThreshVolts * dbToLinear(threshTrimDb_);
-    const float target = ba6aVariMuDb(detEnv_, lawSlope_, lawToe_,
+    const float targetFast = ba6aVariMuDb(detEnv_, lawSlope_, lawToe_,
                                       threshV * lawSense_,
                                       lawGrowth_, lawGrowthKnee_);
+    const float targetSlow = ba6aVariMuDb2(detSlowV_ * lawSlowSense_,
+                                      lawSlowSlope_, lawSlowToe_,
+                                      threshV * lawSlowSense_ * lawSlowRef_,
+                                      lawSlowGrowth_, lawSlowGrowthKnee_,
+                                      lawSlowGrowth2_, lawSlowGrowthKnee2_);
+    // Sustainedness blend: rho = slow/fast envelope ratio
+    // (the sense cancels -- both read the same tap). w
+    // ducks fast (a hit is programme, the fast law keeps
+    // it), recovers slower (sustained material earns the
+    // slow law's static curve).
+    {
+        const float peakRaw = detEnv_ / (lawSense_ > 0.01f ? lawSense_ : 1.0f);
+        const float rho = detSlowV_ / (peakRaw > 0.05f ? peakRaw : 0.05f);
+        float wT = (rho - kBa6aSusRho0) / (kBa6aSusRho1 - kBa6aSusRho0);
+        wT = wT < 0.0f ? 0.0f : (wT > 1.0f ? 1.0f : wT);
+        susW_ += (wT - susW_) * tauCoef(wT < susW_ ? kBa6aSusDnTauSec
+                                                  : kBa6aSusUpTauSec, fs_);
+    }
+    const float target = targetFast + susW_ * (targetSlow - targetFast);
 
     // ── Control state: BOTH recovery networks run every
     // sample; the toggle selects which one drives the stage,

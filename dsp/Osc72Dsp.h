@@ -285,6 +285,21 @@ inline float ba6aVariMuDb(float envSensed, float slope, float toeV,
                    + growth * over * over / (over + growthKnee);
     return gr > kBa6aGrCapDb ? kBa6aGrCapDb : gr;
 }
+// Two-breakpoint variant (SLOW law only, Phase 3b): a
+// second, wider growth stage keeps the law's slope rising
+// into the deep parks. Still bounded: the total slope
+// tends to slope + growth + growth2 (G4 discipline).
+inline float ba6aVariMuDb2(float envSensed, float slope, float toeV,
+                           float refSensed, float growth, float growthKnee,
+                           float growth2, float growthKnee2) {
+    const float over = ba6aSenseShape(envSensed, toeV)
+                     - ba6aSenseShape(refSensed, toeV);
+    if (over <= 0.0f) return 0.0f;
+    const float gr = slope * over
+                   + growth * over * over / (over + growthKnee)
+                   + growth2 * over * over / (over + growthKnee2);
+    return gr > kBa6aGrCapDb ? kBa6aGrCapDb : gr;
+}
 // ─────────────────────────────────────────────────────────────────────
 // COMP / LIMIT ratio modes (v53, Nathan): the LIMIT cluster's
 // IN/OUT bypass was, in his words, "rendered somewhat
@@ -317,6 +332,48 @@ inline constexpr float kBa6aLimitToe   = 5.0f;
 inline constexpr float kBa6aLimitSense = 1.40f;
 inline constexpr float kBa6aLimitGrowth = 0.55f;
 inline constexpr float kBa6aLimitGrowthKnee = 5.0f;
+// ── DUAL-SENSE DETECTOR (Phase 3b; DESIGN S8 gap 1,
+// lever (b), Nathan's decision 2026-10-24) ──
+// A second sense path beside the peak follower: a slow
+// follower of the same 6H6 tap (raw volts; programme-time
+// constants -- quick to fall, slow to charge) feeding its
+// own voicing of the same law family, with its own
+// reference scale (the 6H6's second diode section, in the
+// hardware fiction). The demand is a sustainedness blend
+// of the two laws: w follows rho = slow/fast envelope
+// ratio -- ~0.68-0.73 on sustained tones (w = 1: the slow
+// law governs statics, CONTRACT S4 ladders), dipping on
+// transients (the fast law -- the approved programme
+// voicing -- keeps programme peaks). Fitted on the
+// statics + programme benches; see REPORT-TEST6-FINAL.
+inline constexpr float kBa6aSlowSenseUpTauSec = 0.40f;
+inline constexpr float kBa6aSlowSenseDnTauSec = 0.35f;
+inline constexpr float kBa6aCompSlowSlope  = 0.1425f;
+inline constexpr float kBa6aCompSlowToe    = 304.15f;
+inline constexpr float kBa6aCompSlowSense  = 2.770f;
+inline constexpr float kBa6aCompSlowGrowth = 1.555f;
+inline constexpr float kBa6aCompSlowGrowthKnee = 18.77f;
+inline constexpr float kBa6aCompSlowRef    = 0.633f;
+inline constexpr float kBa6aLimitSlowSlope = 0.4019f;
+inline constexpr float kBa6aLimitSlowToe   = 33.96f;
+inline constexpr float kBa6aLimitSlowSense = 1.5782f;
+inline constexpr float kBa6aLimitSlowGrowth = 1.1989f;
+inline constexpr float kBa6aLimitSlowGrowthKnee = 14.58f;
+inline constexpr float kBa6aLimitSlowRef   = 0.8753f;
+// Second, wider growth breakpoint of the SLOW law
+// (Phase 3b): lets the slow law's slope keep rising into
+// the deep parks, where the tap's own sensitivity (V per
+// dB) falls. The total slope stays bounded
+// (slope + growth + growth2) — the G4 asymptotic
+// discipline holds.
+inline constexpr float kBa6aCompSlowGrowth2 = 0.0f;
+inline constexpr float kBa6aCompSlowGrowthKnee2 = 40.0f;
+inline constexpr float kBa6aLimitSlowGrowth2 = 0.5339f;
+inline constexpr float kBa6aLimitSlowGrowthKnee2 = 76.39f;
+inline constexpr float kBa6aSusRho0 = 0.40f;
+inline constexpr float kBa6aSusRho1 = 0.63f;
+inline constexpr float kBa6aSusUpTauSec = 0.90f;
+inline constexpr float kBa6aSusDnTauSec = 0.03f;
 inline constexpr float kBa6aLawSlewTauSec = 0.005f; // mode-change slew (~5 ms)
 // ─────────────────────────────────────────────────────────────────────
 // Oversampling (v53): the "breaking glass" fix — Nathan's
@@ -588,6 +645,14 @@ public:
         // the law (same ~5 ms glide, same no-click rule).
         lawGrowthT_ = comp ? kBa6aCompGrowth : kBa6aLimitGrowth;
         lawGrowthKneeT_ = comp ? kBa6aCompGrowthKnee : kBa6aLimitGrowthKnee;
+        lawSlowSlopeT_ = comp ? kBa6aCompSlowSlope : kBa6aLimitSlowSlope;
+        lawSlowToeT_   = comp ? kBa6aCompSlowToe   : kBa6aLimitSlowToe;
+        lawSlowSenseT_ = comp ? kBa6aCompSlowSense : kBa6aLimitSlowSense;
+        lawSlowGrowthT_ = comp ? kBa6aCompSlowGrowth : kBa6aLimitSlowGrowth;
+        lawSlowGrowthKneeT_ = comp ? kBa6aCompSlowGrowthKnee : kBa6aLimitSlowGrowthKnee;
+        lawSlowGrowth2T_ = comp ? kBa6aCompSlowGrowth2 : kBa6aLimitSlowGrowth2;
+        lawSlowGrowthKnee2T_ = comp ? kBa6aCompSlowGrowthKnee2 : kBa6aLimitSlowGrowthKnee2;
+        lawSlowRefT_   = comp ? kBa6aCompSlowRef   : kBa6aLimitSlowRef;
     }
     bool compMode() const { return compMode_; }
 
@@ -675,6 +740,15 @@ private:
     float lawSense_ = kBa6aLimitSense, lawSenseT_ = kBa6aLimitSense;
     float lawGrowth_ = kBa6aLimitGrowth, lawGrowthT_ = kBa6aLimitGrowth;
     float lawGrowthKnee_ = kBa6aLimitGrowthKnee, lawGrowthKneeT_ = kBa6aLimitGrowthKnee;
+    float lawSlowSlope_ = kBa6aLimitSlowSlope, lawSlowSlopeT_ = kBa6aLimitSlowSlope;
+    float lawSlowToe_   = kBa6aLimitSlowToe,   lawSlowToeT_   = kBa6aLimitSlowToe;
+    float lawSlowSense_ = kBa6aLimitSlowSense, lawSlowSenseT_ = kBa6aLimitSlowSense;
+    float lawSlowGrowth_ = kBa6aLimitSlowGrowth, lawSlowGrowthT_ = kBa6aLimitSlowGrowth;
+    float lawSlowGrowthKnee_ = kBa6aLimitSlowGrowthKnee, lawSlowGrowthKneeT_ = kBa6aLimitSlowGrowthKnee;
+    float lawSlowGrowth2_ = kBa6aLimitSlowGrowth2, lawSlowGrowth2T_ = kBa6aLimitSlowGrowth2;
+    float lawSlowGrowthKnee2_ = kBa6aLimitSlowGrowthKnee2, lawSlowGrowthKnee2T_ = kBa6aLimitSlowGrowthKnee2;
+    float lawSlowRef_ = kBa6aLimitSlowRef, lawSlowRefT_ = kBa6aLimitSlowRef;
+    float susW_ = 0.0f;               // DUAL-SENSE: sustainedness weight 0..1
     float lawCoef_  = 0.0f;
 
     double fs_ = 48000.0;
@@ -695,6 +769,8 @@ private:
     float sag_ = 0.0f;                // B+ sag state (linked), 0..1 — v1.1.2 (study §2.3a)
     bool grSelFast_ = true; float grSelBlend_ = 1.0f; float grSelFrom_ = 0.0f; // PHASE 3: release-select blend state
     float detEnv_ = 0.0f;             // PHASE 3: detector envelope (SENSED VOLTS at the tap)
+    float detSlowV_ = 0.0f;           // DUAL-SENSE: slow sustained sense (RAW volts at the tap)
+    float peakHoldV_ = 0.0f;          // DUAL-SENSE: ~30 ms tap max-hold (gap-dump trigger)
     float stress_ = 0.0f;             // v45: T4 memory state (dB of sustained GR)
     float lastPreL_ = 0.0f, lastPreR_ = 0.0f; // post-iron, pre-makeup (detector source)
     float prePeak_ = 0.0f;            // slow-decay peak of the pre-makeup output (make-up ceiling)
