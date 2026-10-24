@@ -197,7 +197,16 @@ private:
 // setThreshTrimDb); measured on the prototype, +-1 dB
 // of trim moves onset -+ ~0.3 knob uniformly across
 // materials and source levels (DESIGN.md §4).
-inline constexpr float kBa6aThreshVolts = 20.5f;
+// TEST7 (Nathan's file-anchored directive, 2026-10-24):
+// 3.5 V = -15.35 dB vs the TEST6 20.5 V. Calibrated by
+// binary search on Nathan's actual Luna-session vocal
+// (PV_verb_test_-_MAIN_0_axb2.wav dry L channel at
+// native level + the session's -0.8 dB clip gain) so
+// compression onsets at knob ~5 through the real
+// processor path; both senses' references scale
+// proportionally (single seam, nothing else changed).
+// Full evidence: REPORT-TEST7.md.
+inline constexpr float kBa6aThreshVolts = 3.5f;
 inline constexpr float kBa6aGrCapDb     = 46.0f;
 // Drive law (design §3.1): the box runs hot by design (its
 // ~54 dB of gain normalised so nominal programme lives near
