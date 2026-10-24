@@ -1233,14 +1233,19 @@ int main() {
             return -1.0;
         };
         double r = grRiseT90();
-        std::snprintf(b, sizeof b, "SLOW attack GR rise t90: dual-sense %.1f ms vs pin 13.3 ms (matched park, end-to-end)", r);
+        std::snprintf(b, sizeof b, "SLOW attack GR rise t90: dual-sense %.1f ms vs pin 10.7 ms (TEST7 park, end-to-end)", r);
         // Measured end-to-end on this tree: 13.3 ms —
         // the module figure at the same park is
         // 12.85 ms (bal); the readout adds its block
         // granularity. Pin = the measured figure,
         // tolerance unchanged (one block).
-        check(std::fabs(r - 13.3) <= (64.0 / kFs * 1000.0),
-              "P11b proc: SLOW attack rise == AB2 end-to-end at the matched park (readout)", b);
+        // TEST7 RE-PIN (cause: Nathan's file-anchored
+        // threshold directive, 2026-10-24): the matched
+        // park lands ~15 dB deeper at the same protocol
+        // knob; the end-to-end SLOW rise reads 10.7 ms
+        // (module C2 seat reads 9.46 ms at its park).
+        check(std::fabs(r - 10.7) <= (64.0 / kFs * 1000.0),
+              "P11b proc: SLOW attack rise at the TEST7 park, end-to-end (readout)", b);
 
         // P11c: end-to-end release — the GR readout's 50%
         // recovery time after a loud passage (DUAL seat),
@@ -1314,7 +1319,7 @@ int main() {
         };
         float pk = 0;
         double f = grFallT50(pk);
-        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: dual-sense %.3f s vs pin 0.10 s, peak %.1f dB (pin 21.0)",
+        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: dual-sense %.3f s vs pin 0.124 s, peak %.1f dB (pin 24.9)",
                       f, pk);
         // DUAL-SENSE RE-PIN (Phase 3b): measured
         // end-to-end at the settled park: 0.097 s from
@@ -1332,8 +1337,11 @@ int main() {
         // slope at the 50% crossing is shallow (the
         // slow pole's tail), so block quantisation
         // moves the crossing by a few blocks.
-        check(std::fabs(f - 0.097) <= 4.0 * (64.0 / kFs) && std::fabs(pk - 21.0f) < 1.0f,
-              "P11c proc: DUAL release 50% recovery at the matched park (dual-sense class)", b);
+        // TEST7 RE-PIN (cause as P11b): at the deeper
+        // TEST7 park the settled depth is 24.9 dB and the
+        // 50% recovery reads 0.124 s end-to-end.
+        check(std::fabs(f - 0.124) <= 4.0 * (64.0 / kFs) && std::fabs(pk - 24.9f) < 1.0f,
+              "P11c proc: DUAL release 50% recovery at the TEST7 park (dual-sense class)", b);
 
         // P11d: the reported latency is untouched by the
         // bake (MOD in A: 992; MOD out: 32).
