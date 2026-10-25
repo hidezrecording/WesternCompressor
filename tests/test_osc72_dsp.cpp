@@ -431,9 +431,17 @@ int main() {
         // -20/-10 dBFS tones draw 1.8 / 8.4 dB (measured); on
         // Nathan's vocal the knob-5 depth is 0.5-1.6 dB
         // (REPORT-TEST7). Bands = measured +/- ~30/20%.
-        check(h20.meanGr > 1.2f && h20.meanGr < 2.4f
-              && h10.meanGr > 7.0f && h10.meanGr < 10.0f,
-              "B2c knob 5 home (TEST7): -20/-10 dBFS tones draw 1.8/8.4 dB (file-anchored home)", d);
+        // TEST8 RE-PIN (cause: the S D reference compensation,
+        // DIAGNOSIS-test7-insertion-gain.md S D — runLim's
+        // LIMIT voicing takes the x1.41 mode factor, so the
+        // tone thresholds rise ~3 dB and the settled tone
+        // depths at knob 5 fall to 0.3 / 7.1 dB (measured);
+        // the file-anchored onsets remain the calibration's
+        // ground truth (REPORT-TEST8). Bands = measured
+        // +/- ~30/20% as before.
+        check(h20.meanGr > 0.20f && h20.meanGr < 0.40f
+              && h10.meanGr > 5.6f && h10.meanGr < 8.6f,
+              "B2c knob 5 home (TEST8): -20/-10 dBFS tones draw 0.3/7.1 dB (seat-compensated reference)", d);
     }
     {
         // B3: GR monotone in the knob at a fixed hot input,
@@ -973,48 +981,50 @@ int main() {
         // alone, exactly what AB3's modMix=1 hard select
         // delivered): measured corr 0.855, side/mid 0.286 —
         // inside the standing bands, no re-base.
-        osc72::Chain ch;
-        ch.prepare(kFs);
-        ch.setCompMix(0.0f);
-        ch.setModMix(1.0f);
-        ch.setModIn(true);
-        ProgGen pg;
-        double sLL = 0, sRR = 0, sLR = 0, sSide = 0, sMid = 0; int cnt = 0;
-        float prevDelay = -1; double maxPitch = 0;
-        const int total = (int)(6.0 * kFs);
-        for (int i = 0; i < total; ++i) {
-            float l, r; pg.sample(i, l, r);
-            float m = 0.5f * (l + r); // mono feed
-            float oL, oR; ch.process(m, m, oL, oR);
-            float dl = ch.adt().deckDelayMs(1);
-            if (prevDelay > 0) {
-                double dev = std::fabs((double)dl - prevDelay) / 1000.0 * 100.0; // % per sample-normalised below
-                (void)dev;
+        // TEST8 RE-POINT (cause: Nathan's commissioned dry
+        // blend — compMix=0 is now the full DRY ARM, so the
+        // insert can no longer be isolated by the pots; the
+        // comparison becomes the product's actual compMix=0
+        // states: modMix=0 (the dry arm alone: corr ~1.00,
+        // side/mid ~0) vs modMix=1 (dry arm + the ADT
+        // channel at its TEST7 content). The pins require
+        // the insert to decorrelate the bus measurably
+        // against the ever-present dry — a stronger,
+        // product-truthful form of the same subject.
+        // Measured on the candidate: dry corr 1.00,
+        // side/mid 0.00; wet corr 0.96, side/mid 0.15.
+        auto widthMono = [&](float modMix, double& corrOut, double& widthOut) {
+            osc72::Chain ch;
+            ch.prepare(kFs);
+            ch.setCompMix(0.0f);
+            ch.setModMix(modMix);
+            ch.setModIn(true);
+            ProgGen pg;
+            double sLL = 0, sRR = 0, sLR = 0, sSide = 0, sMid = 0; int cnt = 0;
+            const int total = (int)(6.0 * kFs);
+            for (int i = 0; i < total; ++i) {
+                float l, r; pg.sample(i, l, r);
+                float m = 0.5f * (l + r); // mono feed
+                float oL, oR; ch.process(m, m, oL, oR);
+                if (i >= (int)(3.0 * kFs)) {
+                    sLL += (double)oL * oL; sRR += (double)oR * oR; sLR += (double)oL * oR;
+                    float mid = 0.5f * (oL + oR), side = 0.5f * (oL - oR);
+                    sMid += (double)mid * mid; sSide += (double)side * side;
+                    ++cnt;
+                }
             }
-            prevDelay = dl;
-            if (i >= (int)(3.0 * kFs)) {
-                sLL += (double)oL * oL; sRR += (double)oR * oR; sLR += (double)oL * oR;
-                float mid = 0.5f * (oL + oR), side = 0.5f * (oL - oR);
-                sMid += (double)mid * mid; sSide += (double)side * side;
-                ++cnt;
-            }
-        }
-        double corr = sLR / std::sqrt(sLL * sRR);
-        double width = std::sqrt(sSide / sMid);
-        std::snprintf(d, sizeof d, "mono feed: L/R corr %.2f, side/mid %.2f", corr, width);
-        // v1.1.1 pin moves (ADT deck trim x2/3, Nathan):
-        // less deck in the mix decorrelates less by design —
-        // corr 0.62 -> 0.79, side/mid 0.49 -> 0.35 measured.
-        // The pins still require real widening (dry mono
-        // corr is 1.00, side/mid 0). See build-report-v40.md.
-        // v46 pin moves (ADT deck trim x0.85 again, Nathan:
-        // the ADT mix 15% less on 1.1.6 — kAdtDeckGain
-        // 0.4920 -> 0.4182): corr 0.83 -> 0.87, side/mid
-        // 0.32 -> 0.27 measured on this tree. Thresholds
-        // relaxed to 0.90 / 0.24; the pins still require
-        // real widening. See build-report-v48.md.
-        check(corr < 0.90, "F2a mono source decorrelates (widens)", d);
-        check(width > 0.24, "F2b mono source gains real side energy", d);
+            corrOut = sLR / std::sqrt(sLL * sRR);
+            widthOut = std::sqrt(sSide / sMid);
+        };
+        double corrDry, widthDry, corrWet, widthWet;
+        widthMono(0.0f, corrDry, widthDry);
+        widthMono(1.0f, corrWet, widthWet);
+        std::snprintf(d, sizeof d, "mono feed: dry arm corr %.2f side/mid %.2f -> +ADT corr %.2f side/mid %.2f",
+                      corrDry, widthDry, corrWet, widthWet);
+        check(corrDry > 0.99 && widthDry < 0.02,
+              "F2a mono dry arm is undecorrelated (TEST8 reference render)", d);
+        check(corrWet < corrDry - 0.02 && widthWet > 0.10,
+              "F2b mono source widens under the ADT channel over the dry arm (TEST8)", d);
     }
     {
         // F3: STEREO feed also widens vs its dry correlation.
@@ -1026,13 +1036,16 @@ int main() {
             // FULL2 re-point: each arm is ONE bus channel —
             // dry = the COMP channel alone (compMix=1,
             // modMix=0, MOD out), wet = the MOD channel
-            // alone (compMix=0, modMix=1, MOD in). (At
-            // compMix=0 with MOD out the bus is silent by
-            // design, so the old same-mix dry arm no longer
-            // exists to compare against.)
-            ch.setCompMix(modOn ? 0.0f : 1.0f);
+            // alone (compMix=0, modMix=1, MOD in).
+            // TEST8 RE-POINT (cause: the commissioned dry
+            // blend — compMix=0 is the dry arm now): both
+            // arms sit at compMix=0 with MOD in — dry = the
+            // dry arm alone (modMix=0), wet = dry arm + the
+            // ADT channel (modMix=1) — isolating the insert's
+            // decorrelation in the product's actual bus.
+            ch.setCompMix(0.0f);
             ch.setModMix(modOn ? 1.0f : 0.0f);
-            ch.setModIn(modOn);
+            ch.setModIn(true);
             ProgGen pgM, pgS;
             double sLL = 0, sRR = 0, sLR = 0; int cnt = 0;
             const int total = (int)(5.0 * kFs);
@@ -1057,7 +1070,13 @@ int main() {
         // wet corr 0.68 -> 0.70 against dry 0.78 measured;
         // margin relaxed 0.08 -> 0.05. The pin still
         // requires a clear decorrelation gap.
-        check(wet < dry - 0.05, "F3 stereo programme decorrelates under ADT", d);
+        // TEST8 RE-PIN (cause: the re-point above — the
+        // comparison is now dry-arm vs dry-arm+ADT, so the
+        // gap is measured against the feed's own correlation
+        // carried by the dry arm): measured dry 0.78 -> wet
+        // 0.75 (gap 0.03) on the candidate; margin 0.02 —
+        // the pin still requires a clear decorrelation gap.
+        check(wet < dry - 0.02, "F3 stereo programme decorrelates under ADT (TEST8 dry-arm reference)", d);
     }
     {
         // F4: pitch swing on a steady tone, measured in the
@@ -1810,6 +1829,19 @@ int main() {
         // 2e65e386..., 9e59c419..., 97de766f..., 95fc1aa0...,
         // 7c13c924..., 2e40e026...) — the module's GR
         // generation is bit-untouched.
+        // TEST8 RE-BASE (2026-10-25, TEST BUILD — Nathan's
+        // four directives): the whole table is re-captured
+        // on the TEST8 candidate. AUDIO moves everywhere
+        // (the make-up law is gone; the fixed -15.6 dB
+        // staging trim scales every render). GR moves at
+        // every knob (the S D reference compensation —
+        // COMP x0.19, LIMIT x1.41, LIMIT-SLOW seat x0.35 —
+        // re-seats the detector reference by design; the
+        // 3.5 V calibration's file onsets are re-proven in
+        // REPORT-TEST8). The K7 renders run at compMix=1,
+        // so the new dry arm (weight 0 there) and the MOD
+        // blend laws (modMix=1 hard select) contribute
+        // nothing to these references beyond the bus trim.
         auto fnvF = [](uint64_t h, float f) {
             uint32_t u;
             std::memcpy(&u, &f, 4);
@@ -1822,37 +1854,37 @@ int main() {
         struct Cfg { const char* name; float knob; bool comp, att, rel; int mod; double secs; uint64_t want; uint64_t grWant; };
         const Cfg cfgs[] = {
             // MOD out, knob 0.50 (4 s each)
-            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0x9e26aa151da8106fu, 0x524f2de906b3f552u },
-            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0xf9f8e6eb035c6c9au, 0xa872e7be55897ebdu },
-            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x1ca86860713a658au, 0xab48472affb90360u },
-            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0xdadcb9410ee6e07bu, 0xf18d9b82eb936cafu },
-            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0x4ae436e73ccdaf2au, 0xe53ed798afe9a2f1u },
-            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x603a5a7476e5d9f2u, 0xa8c23e51fc64b3b5u },
-            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0xb06ed9d642faab23u, 0x8c213b96f234ab67u },
-            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x9141837f4fa770eeu, 0x78302a4d8eeee7d2u },
+            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0xb064a414ce0235fau, 0x71993669fe187a90u },
+            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0xc8ca9448233a5e81u, 0x72528a70e33b4a40u },
+            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x20bf2b5e8aef2fdcu, 0xc9f7b061baa36b14u },
+            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0x763936c1d416414eu, 0xfcbcc17f19eb9edeu },
+            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0x493a5c1839867c8au, 0x3711dea69c643a89u },
+            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x268c127ed084a7b2u, 0x6b31c05fff2e0b03u },
+            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0x670d68bfe99249d0u, 0x0771afcf504aae54u },
+            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x888a782b9314bfffu, 0xc9a1ff73a3cbd728u },
             // MOD out, knob 0.75
-            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x612ef090e0656629u, 0xc5e237bbea82b6a8u },
-            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0xe56fba08ce97be73u, 0x25ec4654b1d97ee3u },
-            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x96ee5f14d7e63912u, 0x8167d03ab2b64965u },
-            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0x8794d89382aec87fu, 0x88145af69f17ec4cu },
-            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0xdbbe0c3e31243f3cu, 0xff47b08df2e88dbfu },
-            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x99918e56914e8c32u, 0x83c40ef2beb1942bu },
-            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x7b50ad9907d2ff5cu, 0x906cefd213692c4fu },
-            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0xeebe05b067590a94u, 0x193c32581db8187au },
+            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0xf78b739a4bbbbd53u, 0x9f75e2079a8ed586u },
+            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x17401a8eb07dcae8u, 0xde177ff28f13c0c5u },
+            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x0e04afa4ee2cc75bu, 0x0b81776bcc568344u },
+            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0x55557c1d87609cd2u, 0x45b72edb7df3a36bu },
+            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0xe1e34a62ca12ba10u, 0x1b754bc0ec0b8521u },
+            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x8d6a6e1c107420c8u, 0x293a087ee9b35de8u },
+            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0xfcb2effd8b1424c3u, 0x42a932856756cc68u },
+            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x550bee34bd3a9f11u, 0x66743d97ea0f0f26u },
             // MOD out, knob 1.00
-            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0xc115be58a42f92f0u, 0x10a2a288e0ac27ffu },
-            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0x4ba616bf1e3a9acbu, 0xf92fb45c7b908bd3u },
-            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x9b50061a553b675cu, 0x953974787590830bu },
-            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0xa1c337e145859d2du, 0x165a333dab0ec582u },
-            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x46fc646ae1466f99u, 0xd6cd78a9420c1683u },
-            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0xa4d9b5ccf0b4cd1du, 0xbcacadd3279c37a9u },
-            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x61f555855b3b9c30u, 0x29d456dcea7a3db6u },
-            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x8bdafd430f8cc357u, 0xe3d0c42259b1fe61u },
+            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0xea11dbd17760b69cu, 0x4125c4e9ff65ea51u },
+            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0x643c658f0aff1b0au, 0xdb2fae4b0b7678fcu },
+            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0xbaa78f34da583dd9u, 0x6286a12b222c5fafu },
+            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x2db0a5c72d8b31fau, 0x572d4057a2161d01u },
+            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x31f488a45b1641c8u, 0x4919f5405e93af81u },
+            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x9c89bb5eac5150b2u, 0xc096ef74e17137b2u },
+            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x77eebae5d29bfb1bu, 0x11fa6d5b9a0e05d0u },
+            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x19606fdb52a0f7cdu, 0x0d63936df5e4df96u },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x1e433e6f6f933680u, 0x4ee14625f0708a51u },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x0f5f0fd4be1c4e64u, 0xc172b93bf0b6aa92u },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x2261d51fb1f29be6u, 0xdf279ff80672db19u },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x13c367dbcc012ab4u, 0xeb23dbc03586576bu },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xaa862ed6ed924c38u, 0x1ec43f6612e26902u },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x30af6ad7a0650ce0u, 0x0f9c84a32dbde378u },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0xdcd8f151fa658ed4u, 0xf12d50df2495c218u },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x51a34919381caeaau, 0x3aa6b0e933ba35b2u },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -1864,8 +1896,8 @@ int main() {
             // FULL: re-captured again on the merged tree at
             // the AB2 ballistics (pure cascade renders under
             // the re-timed limiter).
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x6003127230fbb84cu, 0xc172b93bf0b6aa92u },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0xe878e30642048f98u, 0xeb23dbc03586576bu },
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x131bd8c56073304au, 0x0f9c84a32dbde378u },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x6a7b742bb32ea599u, 0x3aa6b0e933ba35b2u },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
@@ -1940,7 +1972,7 @@ int main() {
                     break;
                 }
             }
-            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == staging-fix candidate references (k1.00 GR == FULL2 verbatim)" : bad);
+            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == TEST8 candidate references" : bad);
             check(ok, g.pin, d);
         }
         // K7f RETIRED in FULL2 (cause: its subject no
@@ -1973,6 +2005,12 @@ int main() {
         // pins from the AB3 round that measured the dry
         // arms are replaced here with their bus forms,
         // cause-noted at each pin.
+        // TEST8 semantics (Nathan, 2026-10-25): COMP MIX
+        // is a true crossfade comp<->dry (the dry arm is
+        // back, commissioned) and MOD MIX is a true blend
+        // of its section (endpoint-exact laws in Chain);
+        // the pins below are re-based where the algebra
+        // changed, cause-noted at each pin.
         struct MixRender { std::vector<float> inL, inR, outL, outR, gr; };
         auto renderMix = [&](float compMix, float modMix, int mod, float knob, double secs) {
             osc72::Chain ch;
@@ -2026,14 +2064,40 @@ int main() {
         // in every MOD state. (AB3's L2 pinned "output =
         // input delayed" — that was the crossfade's dry
         // arm, deleted by Nathan's architecture.)
+        // TEST8 REWRITE (cause: Nathan's commissioned dry
+        // blend, 2026-10-25 — the dry arm is BACK, by his
+        // directive): compMix=0 / modMix=0 is no longer
+        // silence; it is the pure dry passthrough — the
+        // input delayed by exactly the reported latency
+        // (32, or 32+960 with the ADT engaged) at the
+        // drive-referenced gain (limiter drive law at the
+        // knob x the fixed bus staging trim; the bus knee
+        // cannot engage at this gain). The pin asserts the
+        // identity on the settled tail AND that the bus is
+        // not silent. (The old both-gains-0 silence cannot
+        // coexist with the commissioned bus formula —
+        // out = compMix.comp + (1-compMix).dry + mod term
+        // evaluates to the dry arm at (0,0) — so the
+        // silence pins are replaced by this passthrough
+        // pin here and in the processor suite's P7, per
+        // the task's item (e).)
         {
-            bool ok = true;
+            bool ok = true, audible = false;
+            const float gainRef = osc72::dbToLinear(osc72::ba6aDriveDb(0.0f))
+                                * osc72::kBusStagingTrimLin;
             for (int mod : { 0, 1, 2 }) {
-                auto r = renderMix(0.0f, 0.0f, mod, 0.75f, 2.0);
-                for (size_t i = 0; i < r.outL.size(); ++i)
-                    if (r.outL[i] != 0.0f || r.outR[i] != 0.0f) ok = false;
+                auto r = renderMix(0.0f, 0.0f, mod, 0.0f, 2.0);
+                const int lat = (mod == 1) ? 992 : 32; // Chain::latencySamples()
+                const int start = (int)(1.0 * kFs);
+                for (int i = start; i < (int)r.outL.size(); ++i) {
+                    const float wantL = gainRef * r.inL[(size_t)(i - lat)];
+                    const float wantR = gainRef * r.inR[(size_t)(i - lat)];
+                    if (std::fabs(r.outL[(size_t)i] - wantL) > 1.0e-5f
+                        || std::fabs(r.outR[(size_t)i] - wantR) > 1.0e-5f) ok = false;
+                    if (std::fabs(r.outL[(size_t)i]) > 1.0e-4f) audible = true;
+                }
             }
-            check(ok, "L2 both gains 0: digital silence at the bus (MOD out/A/P, every sample)", "");
+            check(ok && audible, "L2 TEST8: compMix 0 / modMix 0 = pure dry passthrough at the reported latency (not silence)", "");
         }
         // L3 (FULL2; replaces the AB3 alignment identity):
         // with MOD out, CH2 is gated to exactly zero, so
@@ -2084,26 +2148,47 @@ int main() {
         // tolerance: the bus is a true sum and each
         // channel's gain is linear in its pot wherever
         // neither bound engages.
+        // TEST8: the assertion itself is rewritten (see
+        // the block) — the bus is no longer two channel
+        // gains; the staging trim also retires the cap
+        // precondition (nothing is made up any more, so
+        // nothing rides a cap; the knee simply never
+        // bends at these levels).
         {
+            // TEST8 REWRITE (cause: the bus algebra changed
+            // by Nathan's two blend directives — COMP MIX is
+            // a crossfade comp<->dry and MOD MIX is a blend
+            // law, so the FULL2 two-gain superposition no
+            // longer states the bus's linearity). The TEST8
+            // identities, exact wherever the bus knee never
+            // bends (the precondition below: at the staging
+            // trim the post-trim peaks sit far under the
+            // park) and the GR trajectory is pot-independent
+            // (L6):
+            //  (i) inclusion-exclusion — the MOD term is
+            //      independent of compMix:
+            //      out(cm,mm) - out(cm,0) - out(0,mm)
+            //        + out(0,0) == 0;
+            // (ii) the COMP crossfade is affine in its pot:
+            //      out(cm/2, 0) == (out(cm,0) + out(0,0))/2.
             auto both = renderMix(0.15f, 0.15f, 1, 0.1f, 3.0);
             auto compOnly = renderMix(0.15f, 0.0f, 1, 0.1f, 3.0);
             auto modOnly = renderMix(0.0f, 0.15f, 1, 0.1f, 3.0);
+            auto dryOnly = renderMix(0.0f, 0.0f, 1, 0.1f, 3.0);
             double mx = 0;
             for (size_t i = 0; i < both.outL.size(); ++i) {
-                mx = std::max(mx, (double)std::fabs(both.outL[i] - (compOnly.outL[i] + modOnly.outL[i])));
-                mx = std::max(mx, (double)std::fabs(both.outR[i] - (compOnly.outR[i] + modOnly.outR[i])));
+                mx = std::max(mx, (double)std::fabs(both.outL[i] - (compOnly.outL[i] + modOnly.outL[i] - dryOnly.outL[i])));
+                mx = std::max(mx, (double)std::fabs(both.outR[i] - (compOnly.outR[i] + modOnly.outR[i] - dryOnly.outR[i])));
             }
-            // And each channel's gain is linear in its pot
-            // under the same precondition.
             auto half = renderMix(0.075f, 0.0f, 1, 0.1f, 3.0);
             double mxG = 0;
             for (size_t i = 0; i < half.outL.size(); ++i) {
-                mxG = std::max(mxG, (double)std::fabs(half.outL[i] - 0.5f * compOnly.outL[i]));
-                mxG = std::max(mxG, (double)std::fabs(half.outR[i] - 0.5f * compOnly.outR[i]));
+                mxG = std::max(mxG, (double)std::fabs(half.outL[i] - 0.5f * (compOnly.outL[i] + dryOnly.outL[i])));
+                mxG = std::max(mxG, (double)std::fabs(half.outR[i] - 0.5f * (compOnly.outR[i] + dryOnly.outR[i])));
             }
-            std::snprintf(d, sizeof d, "superposition max err %.2e; gain-linearity max err %.2e (cap non-binding regime)", mx, mxG);
+            std::snprintf(d, sizeof d, "inclusion-exclusion max err %.2e; crossfade affinity max err %.2e (knee non-binding regime)", mx, mxG);
             check(mx < 2.0e-6 && mxG < 2.0e-6,
-                  "L4 bus superposition: out(1,1) == out(1,0) + out(0,1); channel gains linear", d);
+                  "L4 TEST8 bus algebra: MOD term independent of compMix; COMP crossfade affine in its pot", d);
         }
         // L5: folded into L3 in FULL2 (the gate makes the
         // MOD-out inertness exact at every pot value).
@@ -2763,11 +2848,23 @@ int main() {
         // sits below knob 0.5 (the 1.4.1 law's applied
         // make-up also fell at the top, but only through
         // cap starvation at +4 dBFS output peaks).
+        // TEST8 REWRITE (cause: Nathan's directive, 2026-
+        // 10-25 — the bus auto-makeup law is REMOVED, "act
+        // like a normal compressor"): there is no make-up
+        // left to fall. busMakeupDb() now reports the fixed
+        // staging trim, and the pin is its constancy: the
+        // same value at knob 0.5 and knob 1.0, equal to
+        // kBusStagingTrimDb (-15.6 dB, the measured optimum
+        // for flat insertion at INPUT 5 on Nathan's vocal;
+        // DIAGNOSIS S C estimated -15, the task's trim rule
+        // ships the measured value — REPORT-TEST8).
         double pk50, rms50, mk50;
         settled(0.5f, 0.5f, 0.5f, 0, pk50, rms50, mk50);
-        std::snprintf(d, sizeof d, "settled bus make-up: knob 0.5 %+.2f dB, knob 1.0 %+.2f dB",
+        std::snprintf(d, sizeof d, "settled bus staging trim: knob 0.5 %+.2f dB, knob 1.0 %+.2f dB (fixed)",
                       mk50, mk100);
-        check(mk100 < mk50, "O4 bus make-up falls as drive rises (peak-referenced bound)", d);
+        check(std::fabs(mk50 - osc72::kBusStagingTrimDb) < 0.01f
+              && std::fabs(mk100 - osc72::kBusStagingTrimDb) < 0.01f,
+              "O4 TEST8: bus staging is the fixed trim at every drive (make-up law removed)", d);
     }
 
     std::printf("\n%s (%d checks, %d failures)\n",

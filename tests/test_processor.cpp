@@ -408,6 +408,11 @@ int main() {
     }
 
     // ── P7. THE TWO MIX POTS (FULL2: bus channel gains) ────
+    // TEST8 (Nathan, 2026-10-25): COMP MIX is a true
+    // crossfade comp<->dry and MOD MIX a true blend of its
+    // section; P7c/P7d/P10c are rewritten as dry-passthrough
+    // pins (the task's item (e)), P7e/P7f keep their
+    // assertions under the new algebra (notes at each pin).
     {
         // One processor over typical material, full histories.
         // compMix/modMix < 0 = leave the param untouched
@@ -505,31 +510,47 @@ int main() {
             check(exact, warble ? "P7b defaults == explicit 1.0/0.0 bit-for-bit (MOD in)"
                                 : "P7b defaults == explicit 1.0/0.0 bit-for-bit (MOD out)", b);
         }
-        // P7c (FULL2 form; the AB3 form pinned "output =
-        // input delayed" via the crossfade's dry arm —
-        // there is no dry arm now): both pots at 0, MOD
-        // out: the bus sums two zero-gain channels = exact
-        // digital silence once the pot slews have settled.
+        // P7c/P7d TEST8 REWRITE (cause: Nathan's
+        // commissioned dry blend, 2026-10-25 — task item
+        // (e): the FULL2 silence pins are replaced by
+        // dry-passthrough pins). At compMix=0/modMix=0 the
+        // bus is the pure dry arm: the input delayed by
+        // exactly the reported latency at the drive-
+        // referenced gain (limiter drive law at the knob x
+        // the fixed bus staging trim). P7c is the absolute
+        // anchor (MOD out, +32, knob 0.1 — a knee-clear
+        // regime); P7d proves the MOD-in A state is the
+        // same passthrough shifted by the ADT's 960 (bit-
+        // exact against P7c's render on the settled
+        // overlap). Both also assert the bus is NOT silent
+        // — the silence these pins used to certify is the
+        // behaviour Nathan's directive retired.
         {
-            auto d = runPots(0.0f, 0.0f, false, false, 1.5);
-            bool exact = true;
-            for (int i = settle; i < (int)d.outL.size(); ++i)
-                if (d.outL[(size_t)i] != 0.0f || d.outR[(size_t)i] != 0.0f)
+            auto c = runPots(0.0f, 0.0f, false, false, 1.5, 1.0f, 0.1f);
+            const float g = osc72::dbToLinear(osc72::ba6aDriveDb(0.1f))
+                          * osc72::kBusStagingTrimLin;
+            double maxErr = 0; bool audible = false;
+            for (int i = settle; i < (int)c.outL.size(); ++i) {
+                maxErr = std::max(maxErr, (double)std::fabs(c.outL[(size_t)i] - g * c.inL[(size_t)(i - 32)]));
+                maxErr = std::max(maxErr, (double)std::fabs(c.outR[(size_t)i] - g * c.inR[(size_t)(i - 32)]));
+                if (std::fabs(c.outL[(size_t)i]) > 1.0e-3f) audible = true;
+            }
+            std::snprintf(b, sizeof b, "max |out - gain*in[t-32]| = %.2e, audible %d (gain %.5f)", maxErr, (int)audible, (double)g);
+            check(maxErr < 2.0e-5 && audible,
+                  "P7c TEST8: both pots 0 (MOD out) = dry passthrough at +32, drive-referenced gain", b);
+
+            auto d = runPots(0.0f, 0.0f, true, false, 1.5, 1.0f, 0.1f);
+            bool exact = true; bool audibleD = false;
+            for (int i = settle + 960; i < (int)d.outL.size(); ++i) {
+                if (d.outL[(size_t)i] != c.outL[(size_t)(i - 960)]
+                    || d.outR[(size_t)i] != c.outR[(size_t)(i - 960)])
                     exact = false;
-            std::snprintf(b, sizeof b, "settled compMix=0/modMix=0 output == 0.0f exactly: %d", (int)exact);
-            check(exact, "P7c both pots 0: digital silence at the bus (MOD out)", b);
-        }
-        // P7d (FULL2 form): both pots at 0, MOD in (A):
-        // silence — the gate cannot resurrect a zero-gain
-        // channel either.
-        {
-            auto d = runPots(0.0f, 0.0f, true, false, 1.5);
-            bool exact = true;
-            for (int i = settle; i < (int)d.outL.size(); ++i)
-                if (d.outL[(size_t)i] != 0.0f || d.outR[(size_t)i] != 0.0f)
-                    exact = false;
-            std::snprintf(b, sizeof b, "settled compMix=0/modMix=0 (MOD in) == 0.0f exactly: %d", (int)exact);
-            check(exact, "P7d both pots 0: digital silence at the bus (MOD in)", b);
+                if (std::fabs(d.outL[(size_t)i]) > 1.0e-3f) audibleD = true;
+            }
+            std::snprintf(b, sizeof b, "MOD-in A render == MOD-out render shifted 960, bit-exact: %d, audible %d",
+                          (int)exact, (int)audibleD);
+            check(exact && audibleD,
+                  "P7d TEST8: both pots 0 (MOD in, A) = the same dry passthrough at +992", b);
         }
         // P7e (FULL2 form): the COMP channel's gain is
         // linear — at 0.5 the bus carries exactly half the
@@ -558,6 +579,14 @@ int main() {
         // The assertion is unchanged in substance and
         // tolerance: the pot's gain is exactly linear in
         // its setting.
+        // TEST8 NOTE (cause: the dry blend): the algebra
+        // survives the crossfade verbatim — the midpoint
+        // of a crossfade IS the mean of its endpoints
+        // (compMix=0 is the dry arm now, not silence), so
+        // this pin now certifies the commissioned
+        // crossfade's affinity through the processor; the
+        // DSP suite's L4 pins the same identity at chain
+        // level.
         {
             auto d = runPots(0.0f, 1.0f, false, false, 2.0, 1.0f, 0.1f);
             auto w = runPots(0.20f, 1.0f, false, false, 2.0, 1.0f, 0.1f);
@@ -604,6 +633,15 @@ int main() {
         // transient into the cap and the residue read
         // 3.60e-02. The regime is now set explicitly
         // (limit 0, attackFast 1); the bound is unchanged.
+        // TEST8 NOTE (cause: the MOD blend directive): at
+        // modMix=0.5 the phaser law delivers exactly half
+        // the classic channel (its internal dry/wet
+        // crossfade completes at noon; above and at noon
+        // the pot is the channel gain), so the mean form
+        // is now the law itself rather than a gain
+        // superposition; the only residue is the bus
+        // knee's, which the fixed staging trim makes
+        // smaller, not larger. Bound unchanged.
         {
             auto d = runPots(1.0f, 0.0f, true, true, 2.0, 1.0f, 0.5f, 0.0f, 1.0f);
             auto w = runPots(1.0f, 1.0f, true, true, 2.0, 1.0f, 0.5f, 0.0f, 1.0f);
@@ -723,22 +761,32 @@ int main() {
         // gain's peak is half the full channel's — a
         // misaligned or stepped gain would split the peak
         // or break the ratio.
+        // TEST8 REWRITE (cause: the commissioned dry
+        // blend): compMix=0 is the DRY ARM — its impulse
+        // peaks exactly at +32 at the drive-referenced
+        // height (0.5 x drive law at knob 0 x the staging
+        // trim = 0.0467), and the half setting's peak is
+        // the crossfade mean of the two arms' peaks (both
+        // arms peak at +32, coincident — the delay match
+        // this section exists to prove).
         {
             auto dry = runImp2(0.0f, 1.0f, false, false, impAt, total);
             auto wet = runImp2(1.0f, 1.0f, false, false, impAt, total);
             auto half = runImp2(0.5f, 1.0f, false, false, impAt, total);
-            int atWet = 0, atHalf = 0;
+            int atWet = 0, atHalf = 0, atDry = 0;
             const float pkWet = peakAt(wet, impAt + 32, 400, atWet);
             const float pkHalf = peakAt(half, impAt + 32, 400, atHalf);
-            float dryMax = 0;
-            for (float v : dry) dryMax = std::max(dryMax, std::fabs(v));
-            std::snprintf(b, sizeof b, "comp channel: cm0 max %.1e (want 0), peaks wet@%+d half@%+d (want +32)",
-                          (double)dryMax, atWet - impAt, atHalf - impAt);
-            check(dryMax == 0.0f && atWet == impAt + 32 && atHalf == impAt + 32,
-                  "P9a comp channel impulse peak exactly at +32; compMix=0 silent (MOD out, FULL2)", b);
-            std::snprintf(b, sizeof b, "half peak %.4f vs half the full peak %.4f", pkHalf, 0.5f * pkWet);
-            check(std::fabs(pkHalf - 0.5f * pkWet) < 0.03f * pkWet,
-                  "P9b comp channel gain is linear at the impulse peak (no split)", b);
+            const float pkDry = peakAt(dry, impAt + 32, 400, atDry);
+            const float wantDry = 0.5f * osc72::dbToLinear(osc72::ba6aDriveDb(0.0f))
+                                * osc72::kBusStagingTrimLin;
+            std::snprintf(b, sizeof b, "dry arm peak %.4f @%+d (want %.4f @+32), peaks wet@%+d half@%+d (want +32)",
+                          (double)pkDry, atDry - impAt, (double)wantDry, atWet - impAt, atHalf - impAt);
+            check(std::fabs(pkDry - wantDry) < 1.0e-3f && atDry == impAt + 32
+                  && atWet == impAt + 32 && atHalf == impAt + 32,
+                  "P9a TEST8: dry arm impulse peaks exactly at +32 at the referenced height; comp/half coincident", b);
+            std::snprintf(b, sizeof b, "half peak %.4f vs crossfade mean of arms %.4f", pkHalf, 0.5f * (pkWet + pkDry));
+            check(std::fabs(pkHalf - 0.5f * (pkWet + pkDry)) < 0.03f * pkWet,
+                  "P9b TEST8: compMix midpoint peak is the arms' mean (crossfade, no split)", b);
         }
         // P9c/P9d (FULL2 reading): the channels at the
         // bus (MOD in A, compMix=1): the comp channel
@@ -775,6 +823,14 @@ int main() {
         // FULL2 readings on this tree: +32 peak 0.167,
         // +992 peak 0.230 — inside the standing bounds,
         // which are kept.
+        // TEST8 READINGS + BOUND MOVE (cause: the staging
+        // trim replaces the make-up law — at knob 0 the
+        // bus sits ~15 dB below the make-up era, so every
+        // absolute level in this section rescales): +32
+        // peak 0.029, +992 peak 0.040, positions exact.
+        // The lower bounds move to the rescaled readings
+        // with ~2x headroom; the upper bounds (the no-step
+        // guard) are unchanged.
         {
             Osc72Processor p;
             p.prepareToPlay(kFs, 512);
@@ -802,9 +858,9 @@ int main() {
             const float pk992 = peakAt(out, midImp + 992, 96, at992);
             std::snprintf(b, sizeof b, "mid-edge impulse: +32 peak %.3f @%+d, +992 peak %.3f @%+d",
                           pk32, at32 - midImp, pk992, at992 - midImp);
-            check(pk32 > 0.05f && pk32 < 0.30f && pk992 > 0.02f && pk992 < 0.30f
+            check(pk32 > 0.015f && pk32 < 0.30f && pk992 > 0.02f && pk992 < 0.30f
                   && at32 == midImp + 32 && at992 == midImp + 992,
-                  "P9e engagement edge: comp channel crossfades its offset, gate ramps (no step)", b);
+                  "P9e engagement edge: comp channel crossfades its offset, gate ramps (no step; TEST8 levels)", b);
         }
     }
 
@@ -857,39 +913,53 @@ int main() {
         // in + P — the bus is silent, exactly, like every
         // both-gains-zero state (P7c/P7d in the A flavour
         // and MOD out).
+        // TEST8 REWRITE (cause: the commissioned dry
+        // blend — the AB3 form is the truth again): both
+        // pots at 0 with MOD in + P return the dry arm,
+        // exactly as MOD out does (the P flavour adds no
+        // bus offset), so the two renders are bit-identical
+        // and neither is silent. P7c anchors the pair to
+        // the input absolutely.
         {
-            Osc72Processor p;
-            p.prepareToPlay(kFs, 512);
-            p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.5f);
-            p.apvts.getParameter("warble")->setValueNotifyingHost(1.0f);
-            p.apvts.getParameter("modPhaser")->setValueNotifyingHost(1.0f);
-            p.apvts.getParameter("compMix")->setValueNotifyingHost(0.0f);
-            p.apvts.getParameter("modMix")->setValueNotifyingHost(0.0f);
-            Material mat{ 2 };
-            const int block = 512;
-            const int total = ((int)(1.5 * kFs) / block) * block;
-            std::vector<float> inL((size_t)total), inR((size_t)total),
-                               outL((size_t)total), outR((size_t)total);
-            juce::MidiBuffer midi;
-            for (int base = 0; base + block <= total; base += block) {
-                juce::AudioBuffer<float> buf(2, block);
-                for (int j = 0; j < block; ++j) {
-                    float L, R; mat.sample(base + j, L, R);
-                    inL[(size_t)(base + j)] = L; inR[(size_t)(base + j)] = R;
-                    buf.setSample(0, j, L); buf.setSample(1, j, R);
+            auto renderPots0 = [&](bool modInP, std::vector<float>& oL, std::vector<float>& oR) {
+                Osc72Processor p;
+                p.prepareToPlay(kFs, 512);
+                p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.5f);
+                p.apvts.getParameter("warble")->setValueNotifyingHost(modInP ? 1.0f : 0.0f);
+                p.apvts.getParameter("modPhaser")->setValueNotifyingHost(1.0f);
+                p.apvts.getParameter("compMix")->setValueNotifyingHost(0.0f);
+                p.apvts.getParameter("modMix")->setValueNotifyingHost(0.0f);
+                Material mat{ 2 };
+                const int block = 512;
+                const int total = ((int)(1.5 * kFs) / block) * block;
+                oL.assign((size_t)total, 0); oR.assign((size_t)total, 0);
+                juce::MidiBuffer midi;
+                for (int base = 0; base + block <= total; base += block) {
+                    juce::AudioBuffer<float> buf(2, block);
+                    for (int j = 0; j < block; ++j) {
+                        float L, R; mat.sample(base + j, L, R);
+                        buf.setSample(0, j, L); buf.setSample(1, j, R);
+                    }
+                    p.processBlock(buf, midi);
+                    for (int j = 0; j < block; ++j) {
+                        oL[(size_t)(base + j)] = buf.getSample(0, j);
+                        oR[(size_t)(base + j)] = buf.getSample(1, j);
+                    }
                 }
-                p.processBlock(buf, midi);
-                for (int j = 0; j < block; ++j) {
-                    outL[(size_t)(base + j)] = buf.getSample(0, j);
-                    outR[(size_t)(base + j)] = buf.getSample(1, j);
-                }
-            }
-            bool exact = true;
-            for (int i = (int)(0.5 * kFs); i < total; ++i)
-                if (outL[(size_t)i] != 0.0f || outR[(size_t)i] != 0.0f)
+                return total;
+            };
+            std::vector<float> wetL, wetR, dryL, dryR;
+            const int total = renderPots0(true, wetL, wetR);
+            renderPots0(false, dryL, dryR);
+            bool exact = true, audible = false;
+            for (int i = (int)(0.5 * kFs); i < total; ++i) {
+                if (wetL[(size_t)i] != dryL[(size_t)i] || wetR[(size_t)i] != dryR[(size_t)i])
                     exact = false;
-            std::snprintf(b, sizeof b, "settled pots=0 (MOD in, P) == 0.0f exactly: %d", (int)exact);
-            check(exact, "P10c both pots 0: digital silence at the bus (MOD in, P flavour)", b);
+                if (std::fabs(wetL[(size_t)i]) > 1.0e-3f) audible = true;
+            }
+            std::snprintf(b, sizeof b, "settled pots=0 (MOD in, P) == MOD-out passthrough bit-exact: %d, audible %d",
+                          (int)exact, (int)audible);
+            check(exact && audible, "P10c TEST8: both pots 0 (MOD in, P) = dry passthrough, bit-identical to MOD out", b);
         }
         // P10d: impulse alignment with MOD in + P (P9
         // methodology at the 32-sample latency): the bus
@@ -1058,7 +1128,12 @@ int main() {
                 // @+992 — inside the standing bounds (kept).
                 // (AB3 read 0.015 @+31 / 0.027 @+992 with its
                 // dry side at 0.5 weight.)
-                check(pk32 > 0.005f && pk992 > 0.01f && pk32 < 0.15f && pk992 < 0.15f
+                // TEST8 readings (cause as P9e — the staging
+                // trim rescales every bus level): 0.007 @+32 /
+                // 0.007 @+992, positions exact; lower bounds
+                // moved to the rescaled readings with
+                // headroom, no-step uppers kept.
+                check(pk32 > 0.003f && pk992 > 0.003f && pk32 < 0.15f && pk992 < 0.15f
                       && std::abs(at32 - (midImp + 32)) <= 2 && at992 == midImp + 992, name, bb);
             } else {
                 // P->A geometry (FULL2): the comp channel's
@@ -1069,7 +1144,11 @@ int main() {
                 // this tree: 0.179 @+32 / 0.241 @+992 —
                 // inside the standing bounds (kept). (AB3
                 // read 0.063 @+31 / 0.161 @+992.)
-                check(pk32 > 0.03f && pk32 < 0.20f && pk992 > 0.05f && pk992 < 0.30f
+                // TEST8 readings (cause as P9e): 0.031 @+32 /
+                // 0.042 @+992, positions exact; lower bounds
+                // moved to the rescaled readings with
+                // headroom, no-step uppers kept.
+                check(pk32 > 0.015f && pk32 < 0.20f && pk992 > 0.02f && pk992 < 0.30f
                       && std::abs(at32 - (midImp + 32)) <= 2 && at992 == midImp + 992, name, bb);
             }
         };
@@ -1233,7 +1312,7 @@ int main() {
             return -1.0;
         };
         double r = grRiseT90();
-        std::snprintf(b, sizeof b, "SLOW attack GR rise t90: dual-sense %.1f ms vs pin 10.7 ms (TEST7 park, end-to-end)", r);
+        std::snprintf(b, sizeof b, "SLOW attack GR rise t90: dual-sense %.1f ms vs pin 9.3 ms (TEST8 park, end-to-end)", r);
         // Measured end-to-end on this tree: 13.3 ms —
         // the module figure at the same park is
         // 12.85 ms (bal); the readout adds its block
@@ -1244,8 +1323,17 @@ int main() {
         // park lands ~15 dB deeper at the same protocol
         // knob; the end-to-end SLOW rise reads 10.7 ms
         // (module C2 seat reads 9.46 ms at its park).
-        check(std::fabs(r - 10.7) <= (64.0 / kFs * 1000.0),
-              "P11b proc: SLOW attack rise at the TEST7 park, end-to-end (readout)", b);
+        // TEST8 RE-PIN (cause: the S D reference
+        // compensation): this protocol's seat is LIMIT +
+        // SLOW attack, net reference x1.41 x 0.35 =
+        // x0.4935, so the settled depth at the same park
+        // falls and the rise to 90% of it reads 9.3 ms
+        // end-to-end. The ballistics constants are
+        // untouched (the DSP suite's C-section pins them
+        // at their seats); only the operating point moved,
+        // by Nathan's directive.
+        check(std::fabs(r - 9.3) <= (64.0 / kFs * 1000.0),
+              "P11b proc: SLOW attack rise at the TEST8 park, end-to-end (readout)", b);
 
         // P11c: end-to-end release — the GR readout's 50%
         // recovery time after a loud passage (DUAL seat),
