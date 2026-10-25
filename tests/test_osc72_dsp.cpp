@@ -390,9 +390,16 @@ int main() {
         // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24):
         // at the bench knob the tones read 0.0/0.0/2.9 dB and the
         // pre-makeup rises are 10.0 then 7.7 dB per +10 dB.
-        check(m20.meanGr == 0.0f && m10.meanGr == 0.0f && m0.meanGr < 3.5f
-              && riseLo > 9.0f && riseLo < 11.0f && riseHi > 7.0f && riseHi < 11.0f,
-              "B2a bench-knob floor (TEST7): tones 0/0/2.9 GR, pre-makeup rises 10.0/7.7 per +10 dB", d);
+        // TEST10 RE-PIN (cause: Nathan's onset-parity
+        // calibration, 2026-10-25 — the LIMIT SLOW seat
+        // factor 0.35 -> 0.88 raises the demand this bench
+        // voicing (LIMIT, SLOW release seat) presents: the
+        // tones read 0.0/0.0/3.7 dB and the rises are 10.0
+        // then 7.0 dB per +10 dB. The floor substance is
+        // unchanged (sub-threshold tones still draw nothing).
+        check(m20.meanGr == 0.0f && m10.meanGr == 0.0f && m0.meanGr < 4.2f
+              && riseLo > 9.0f && riseLo < 11.0f && riseHi > 6.5f && riseHi < 11.0f,
+              "B2a bench-knob floor (TEST10): tones 0/0/3.7 GR, pre-makeup rises 10.0/7.0 per +10 dB", d);
         {
             // Settled (12 s) static reads at knob 0.75 —
             // the dual-sense demand needs the long window
@@ -439,9 +446,17 @@ int main() {
         // the file-anchored onsets remain the calibration's
         // ground truth (REPORT-TEST8). Bands = measured
         // +/- ~30/20% as before.
-        check(h20.meanGr > 0.20f && h20.meanGr < 0.40f
-              && h10.meanGr > 5.6f && h10.meanGr < 8.6f,
-              "B2c knob 5 home (TEST8): -20/-10 dBFS tones draw 0.3/7.1 dB (seat-compensated reference)", d);
+        // TEST10 RE-PIN (cause as B2a: the LIMIT SLOW seat
+        // factor's parity rebalance — at knob 5 the settled
+        // tones now draw 2.6 / 8.7 dB. Sustained tones engage
+        // the slow law fully by design (the tone/programme
+        // distinction carried since TEST6); the calibration's
+        // ground truth remains the file onsets, 5.41 / 5.25 /
+        // 5.26 / 5.04, REPORT-TEST10. Bands = measured
+        // +/- ~30/20% as before.)
+        check(h20.meanGr > 1.8f && h20.meanGr < 3.4f
+              && h10.meanGr > 7.0f && h10.meanGr < 10.4f,
+              "B2c knob 5 home (TEST10): -20/-10 dBFS tones draw 2.6/8.7 dB (parity-calibrated reference)", d);
     }
     {
         // B3: GR monotone in the knob at a fixed hot input,
@@ -462,8 +477,15 @@ int main() {
         // +3.2 dB where the unsoftened law added >5. The
         // clause keeps its substance (still monotone,
         // still materially growing at the top) at +2.5.
-        check(k25.meanGr == 0.0f && k50.meanGr >= k25.meanGr
-              && k75.meanGr > 10.0f && k100.meanGr > k75.meanGr + 2.5f,
+        // TEST10 RE-PIN (cause: the parity calibration +
+        // the softening's top step — measured GR vs knob
+        // 0.2/8.7/19.6/22.0: the sub-home reading is no
+        // longer exactly 0 under the raised LIMIT SLOW
+        // seat (0.2 dB residue), and the k75->k100 step is
+        // +2.4 dB. The substance is kept: monotone, and
+        // still materially growing at the top (+2.0 clause).
+        check(k25.meanGr < 0.5f && k50.meanGr >= k25.meanGr
+              && k75.meanGr > 10.0f && k100.meanGr > k75.meanGr + 2.0f,
               "B3 GR monotone in drive above the contract home (dual-sense)", d);
     }
 
@@ -522,8 +544,15 @@ int main() {
             // control networks; at this deep park the applied depth settles lower
             // (20.9/15.0 dB) and its 90% approach rides the demand migration
             // longer. Refs = measured on this tree; bands unchanged in form.)
-            check(comp ? (t90 > 3.26 && t90 < 4.41) : (t90 > 4.06 && t90 < 5.49),
-                  comp ? "C1-COMP attack FAST: t90 3.26-4.41 ms (TEST9, ref 3.833)"
+            // TEST10 RE-PIN, COMP only (cause: Nathan's
+            // onset-parity calibration, 2026-10-25 — the COMP
+            // demand re-voice (sense 2.2 -> 4.20, slope 0.75
+            // -> 0.85) settles this deep park sooner; the
+            // attack CONSTANTS are untouched and LIMIT passes
+            // its TEST9 band unmoved at 4.81 ms. Band = ref
+            // +/-15% as before.)
+            check(comp ? (t90 > 2.57 && t90 < 3.47) : (t90 > 4.06 && t90 < 5.49),
+                  comp ? "C1-COMP attack FAST: t90 2.57-3.47 ms (TEST10, ref 3.021)"
                        : "C1 attack FAST: t90 4.06-5.49 ms (TEST9, ref 4.771)", d);
         }
     }
@@ -579,8 +608,10 @@ int main() {
         // ref +/-15%.
         // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24): reads 15.31 ms.
         // TEST9 RE-PIN (cause as C1): reads 20.04 ms.
-        check(tSC > 17.0 && tSC < 23.0,
-              "C2c attack SLOW (COMP): full-step t90 17.0-23.0 ms (TEST9, ref 20.04)", d);
+        // TEST10 RE-PIN (cause as C1-COMP: the parity
+        // demand re-voice at the COMP park): reads 12.42 ms.
+        check(tSC > 10.6 && tSC < 14.3,
+              "C2c attack SLOW (COMP): full-step t90 10.6-14.3 ms (TEST10, ref 12.42)", d);
         auto trSmall = grStep(false, false, 0.75f, 0.360f, 12.0, false);
         double tSmall = t90of(trSmall);
         std::snprintf(d, sizeof d, "small-step (amp .36 = full x 0.24) t90 %.2f ms, settled GR %.1f dB",
@@ -633,8 +664,15 @@ int main() {
         // Scale = 30.2); reads 90% 0.9986 s / 50% 0.3176 s
         // in LIMIT (COMP 1.0092 / 0.3282 — inside its band
         // too); bands = refs +/-15%.
-        check(t90 > 0.849 && t90 < 1.148, "C3 release SINGLE: 90% recovery 0.849-1.148 s (AB2 target 1.0, ref 0.9986)", d);
-        check(t50 > 0.270 && t50 < 0.365, "C3b release SINGLE: 50% recovery 0.270-0.365 s (AB2, ref 0.3176)", d);
+        // TEST10 RE-PIN (cause: Nathan's release re-voice
+        // commission, 2026-10-25 — the SINGLE seat is
+        // re-timed to the 1176 class BY DIRECTIVE, superseding
+        // the AB2 1.0 s target: kBa6aRelSingleScale 30.2 ->
+        // 7.8 plus the seat-gated control-loop discharge.
+        // Measured: 50% 0.091 s, 90% 0.267 s; bands = refs
+        // +/-15% as before.)
+        check(t90 > 0.227 && t90 < 0.307, "C3 release SINGLE: 90% recovery 0.227-0.307 s (TEST10 1176-class re-voice, ref 0.267)", d);
+        check(t50 > 0.077 && t50 < 0.105, "C3b release SINGLE: 50% recovery 0.077-0.105 s (TEST10, ref 0.091)", d);
     }
     {
         // C4: release SLOW = DUAL — the opto two-stage shape
@@ -664,7 +702,13 @@ int main() {
         // ~20.5) the DUAL tail holds 37% at 0.3 s; the
         // 90% tail stays in its AB2 band (C4b). Lower
         // edge 0.40 -> 0.33.)
-        check(at03 > 0.33f * g0 && at03 < 0.56f * g0, "C4a DUAL tail holds 33-56% of GR at 0.3 s (dual-sense park)", d);
+        // TEST10 RE-PIN (cause: Nathan's release re-voice
+        // commission, 2026-10-25 — the DUAL fast pole
+        // 0.022 -> 0.2326 s removes the early crossover, so
+        // the tail now holds MORE at 0.3 s: 66% measured.
+        // The pin's substance inverts with the fix: the seat
+        // must hold decisively at 0.3 s (band = ref +/-15%).)
+        check(at03 > 0.56f * g0 && at03 < 0.76f * g0, "C4a DUAL tail holds 56-76% of GR at 0.3 s (TEST10, crossover removed)", d);
         // AB2 pin move (cause as C1): the DUAL seat is
         // re-timed to Nathan's 3.0 s fresh target
         // (kBa6aRelDualScale = 1.29, T4 memory scaled with
@@ -690,7 +734,12 @@ int main() {
         // (GR0 20.9) the 50% crossing reads 0.134 s; the
         // 90% tail (C4b) and the 0.3 s hold (C4a) pass
         // unmoved. Band = ref +/-15% as before.
-        check(t50 > 0.114 && t50 < 0.154, "C4c DUAL 50% recovery 114-154 ms in LIMIT (TEST9, ref 0.134)", d);
+        // TEST10 RE-PIN (cause as C4a): the LIMIT 50%
+        // crossing now reads 0.491 s — the seat's initial
+        // let-go is genuinely slower than FAST's at every
+        // instant (the no-crossover invariant, REPORT-
+        // TEST10). Band = ref +/-15% as before.
+        check(t50 > 0.417 && t50 < 0.565, "C4c DUAL 50% recovery 417-565 ms in LIMIT (TEST10, ref 0.491)", d);
         auto trC = grRelease(false, 6.5, true);
         float g0C = trC[100];
         double t50C = -1, t90C = -1;
@@ -714,8 +763,11 @@ int main() {
         // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24): COMP DUAL 90% reads 3.36 s.
         // TEST9 RE-PIN (cause as C4c): COMP reads 50%
         // 0.122 s / 90% 3.10 s from the softened park.
-        check(t50C > 0.104 && t50C < 0.140 && t90C > 2.6 && t90C < 3.6,
-              "C4d DUAL in COMP: 50% 104-140 ms, 90% 2.6-3.6 s (TEST9, refs 0.122/3.10)", d);
+        // TEST10 RE-PIN (cause as C4a): COMP reads 50%
+        // 0.464 s / 90% 3.39 s. Bands = refs +/-15% /
+        // +/-17.5% as before.
+        check(t50C > 0.394 && t50C < 0.534 && t90C > 2.80 && t90C < 3.98,
+              "C4d DUAL in COMP: 50% 394-534 ms, 90% 2.80-3.98 s (TEST10, refs 0.464/3.39)", d);
     }
     {
         // C5: T4 MEMORY — same level, same depth, different
@@ -1700,7 +1752,7 @@ int main() {
             // AB2 refs: LIMIT 3.000 (the brief's target,
             // +/-10% band); COMP 4.438 (flagged, +/-15%).
             double a = t90of(grStep(true, false, 0.75f, comp ? 1.071f : 1.499f, 12.0, comp));
-            double aRef = comp ? 3.833 : 4.771; // TEST9 re-pin (deep-GR softening directive, 2026-10-25; REPORT-TEST9)
+            double aRef = comp ? 3.021 : 4.771; // TEST10 re-pin, COMP only (parity demand re-voice, 2026-10-25; REPORT-TEST10)
             std::snprintf(d, sizeof d, "%s t90 %.3f ms vs AB2 ref %.3f ms", mn, a, aRef);
             check(nearRef(a, aRef, comp ? 0.15 : 0.10),
                   comp ? "K1-COMP AB2 attack FAST t90 == AB2 ref (flagged vs target)"
@@ -1709,7 +1761,7 @@ int main() {
             // AB2 refs: LIMIT 14.958 (target 15.0, +/-10%);
             // COMP 21.021 (flagged, +/-15%).
             double s = t90of(grStep(false, false, 0.75f, comp ? 1.071f : 1.499f, 12.0, comp));
-            double sRef = comp ? 20.04 : 20.29; // TEST9 re-pin (deep-GR softening directive, 2026-10-25; REPORT-TEST9)
+            double sRef = comp ? 12.42 : 20.29; // TEST10 re-pin, COMP only (parity demand re-voice, 2026-10-25; REPORT-TEST10)
             std::snprintf(d, sizeof d, "%s t90 %.2f ms vs AB2 ref %.2f ms", mn, s, sRef);
             // DUAL-SENSE RE-PIN (Phase 3b): LIMIT band
             // +/-10% -> +/-17.5% (the contract's C-band
@@ -1726,7 +1778,7 @@ int main() {
             // engine's; the dual-sense engine's matched-
             // park readings (LIMIT 10.69 / COMP 19.04 ms)
             // become the regression refs.
-            double mRef = comp ? 14.38 : 10.02; // TEST9 re-pin (deep-GR softening directive, 2026-10-25; REPORT-TEST9)
+            double mRef = comp ? 7.92 : 10.02; // TEST10 re-pin, COMP only (parity demand re-voice, 2026-10-25; REPORT-TEST10)
             std::snprintf(d, sizeof d, "%s t90 %.2f ms vs AB2 ref %.2f ms", mn, m, mRef);
             check(nearRef(m, mRef, 0.15),
                   comp ? "K3-COMP AB2 attack SLOW small-step t90 == AB2 ref"
@@ -1737,8 +1789,8 @@ int main() {
             // COMP 90% lands inside its target band too.
             double f50, f90;
             relTimes(true, comp, f50, f90);
-            double f50Ref = comp ? 0.3282 : 0.3547; // TEST7 re-pin, LIMIT only (directive cause)
-            double f90Ref = comp ? 1.0092 : 1.0357; // TEST7 re-pin, LIMIT only (directive cause)
+            double f50Ref = comp ? 0.0893 : 0.0915; // TEST10 re-pin (release re-voice commission, 2026-10-25; REPORT-TEST10)
+            double f90Ref = comp ? 0.2651 : 0.2672; // TEST10 re-pin (release re-voice commission, 2026-10-25; REPORT-TEST10)
             std::snprintf(d, sizeof d, "%s 50%% %.4f (ref %.4f), 90%% %.4f (ref %.4f)",
                           mn, f50, f50Ref, f90, f90Ref);
             check(nearRef(f50, f50Ref, comp ? 0.15 : 0.10) && nearRef(f90, f90Ref, comp ? 0.15 : 0.10),
@@ -1753,8 +1805,8 @@ int main() {
             // target band 2.55-3.45 s).
             double d50, d90;
             relTimes(false, comp, d50, d90);
-            double d50Ref = comp ? 0.1135 : 0.1239; // TEST7 re-pin (directive cause, REPORT-TEST7)
-            double d90Ref = comp ? 3.360 : 4.018; // TEST7 re-pin (directive cause, REPORT-TEST7)
+            double d50Ref = comp ? 0.4643 : 0.4908; // TEST10 re-pin, 50% only (release re-voice commission, 2026-10-25; REPORT-TEST10)
+            double d90Ref = comp ? 3.360 : 4.018; // TEST7 re-pin (directive cause, REPORT-TEST7) — TEST10 reads 3.395/3.977, inside the T4 band unmoved
             std::snprintf(d, sizeof d, "%s 50%% %.4f (ref %.4f), 90%% %.3f (ref %.3f)",
                           mn, d50, d50Ref, d90, d90Ref);
             // DUAL-SENSE RE-PIN (Phase 3b, cause as
@@ -1885,6 +1937,15 @@ int main() {
         // from this tree's own files agree on all 30
         // configs (audio + GR). The table below is that
         // verified capture.
+        // TEST10 RE-CAPTURE (2026-10-25, cause: Nathan's
+        // release re-voice + onset-parity commissions):
+        // every reference moves (release seats re-timed,
+        // COMP demand re-voiced, LIMIT factors rebalanced,
+        // staging trim -15.6 -> -14.2 dB). Captured exactly
+        // as the TEST8 repair prescribed: two independent
+        // probe builds from this tree's own files agree on
+        // all 30 configs (audio + GR). The table below is
+        // that verified capture.
         // REPAIR (2026-10-25, tests only): the first TEST8
         // capture of this table was taken from a corrupted
         // harvest (a probe binary built against a mid-edit
@@ -1911,37 +1972,37 @@ int main() {
         struct Cfg { const char* name; float knob; bool comp, att, rel; int mod; double secs; uint64_t want; uint64_t grWant; };
         const Cfg cfgs[] = {
             // MOD out, knob 0.50 (4 s each)
-            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0x475950357d276731u, 0xdaea99a655b48fd6u },
-            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0x80d038416abfe1fbu, 0x6bfd37da71dc90ebu },
-            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x47e0f941ec6b5f47u, 0x593e5117fbb6d19fu },
-            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0x41329289b9a64d99u, 0x8db8a256a5cebbfau },
-            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0xadd7901d71746744u, 0xa4ca789effe5d173u },
-            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x59b1f7588fe94750u, 0xc7670b0379b24e2cu },
-            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0x068b9a3f3b060443u, 0x2763b0a7141e0c02u },
-            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x90aedc9a6c946071u, 0x825e3235458ff771u },
+            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0x83c182695ac876d9u, 0x272dbaa7d18dcc46u },
+            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0xc652144bebb7e604u, 0xc09f5b68a923e888u },
+            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0xc430602020a7ff3eu, 0x0e88269cb631fbe7u },
+            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0x9cdc85ef0cba7ed2u, 0x95d0b4b1f98a7d84u },
+            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0x5a02a349366ff335u, 0x61fdda24d01d092eu },
+            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x11783e570dc4577eu, 0x1856dd04257927f3u },
+            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0x3d68a18e9755d920u, 0x643f4005a138a102u },
+            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x72dc4c9ebc599ab1u, 0x9e58fc4f0d583bb9u },
             // MOD out, knob 0.75
-            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x43af0e6c5a15c970u, 0xd2064c8624225e30u },
-            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x8e6589c7201ca926u, 0x253fa479380fb28du },
-            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0xfe2c33d72d743cf3u, 0xd64174390fce3ad9u },
-            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0xaf0bc28149c11374u, 0xaabf66862e91ab65u },
-            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0x9004cc13f98d52ceu, 0x9e693f46240c6ff6u },
-            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0xcde5deabc49ae4cdu, 0x91ecef4a3f8e021bu },
-            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x6305663fc9c607e3u, 0x67b10b7bfec0a4adu },
-            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0xe6d44660e8d9d5cdu, 0x0e439c93bf2abd1eu },
+            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x43dca2a919703130u, 0xb13e309c76c9a7d0u },
+            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x4a2ff609317f3968u, 0xb17532f48afd03d5u },
+            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x9240cf564754d9ddu, 0x55f63a4fd33c23eau },
+            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0x89ebda4b766267b5u, 0x7eee2ee93ac49692u },
+            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0xf2d1368a7ff473aau, 0xe91aaa3698ca19e6u },
+            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x7f16de22ffeff03bu, 0xd806a2d0491136f0u },
+            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0xce439f0d3d95ce9cu, 0x96c4252ea78a543du },
+            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x0c54c5b9d8b49193u, 0xeff124090b75d69au },
             // MOD out, knob 1.00
-            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x1db903a5d13ee9dbu, 0xd320164eeadc234du },
-            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0xaa4793e2392dccccu, 0x29fc84590793cdc8u },
-            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0xecf94c0b9348fce5u, 0xa52b62d9882fa91bu },
-            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0xee69e4ef80e63ed4u, 0x98d05e1245e32045u },
-            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0xcc9df592aac952dbu, 0x6f833dde63a8493cu },
-            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x1bdb2ccaa38a540cu, 0xfabd461ce1806f06u },
-            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x17ab6c50f9ef8d69u, 0xeb842793b555844du },
-            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x94bd375125d1c9d3u, 0x3700fa3b03eaea49u },
+            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x21eeca34cb932e53u, 0xae582a66befb8b87u },
+            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0x4762dc4c889b8a45u, 0x9ad441cffb3f8780u },
+            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0xca3239fa0b1b81bau, 0x8fe435dbfbee8c01u },
+            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0xb481caf9ce1ad490u, 0x250e94902b4aab3cu },
+            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x1113a8d305095264u, 0xbc5e1145f5533b3bu },
+            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0xa315e4a59e2b9839u, 0xd6082843cc321012u },
+            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0xb0d94b0f5b752540u, 0xa7145a62bec6c4e7u },
+            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x5b4e4975d8380e6au, 0x47d43b9b06fe0524u },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xa08a833c96a908dau, 0xd4c84c14780a1317u },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x5e85842ed933d2d2u, 0x76518a86dda2dcdcu },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0xbac74baa92b5059bu, 0x16e9fd7c859e8c3eu },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x62283bb1cec53c69u, 0x546a22faa1f56397u },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x53e43462bbbd5d16u, 0xae04dd8a28ac3c6fu },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x0685f3ad58e4184cu, 0x4d4b7882abc07b1cu },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0xc0635d1b1784901bu, 0xbf42271daf96154eu },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0xd3684cdbbae97240u, 0x5dcc75e8afb70ea5u },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -1953,8 +2014,8 @@ int main() {
             // FULL: re-captured again on the merged tree at
             // the AB2 ballistics (pure cascade renders under
             // the re-timed limiter).
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x5a052aa1f051b3fbu, 0x76518a86dda2dcdcu },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0xbc913f3b0a77b962u, 0x546a22faa1f56397u },
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0xdc412573af09b496u, 0x4d4b7882abc07b1cu },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x07f9b32fa905b295u, 0x5dcc75e8afb70ea5u },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
@@ -2029,7 +2090,7 @@ int main() {
                     break;
                 }
             }
-            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == TEST9 candidate references" : bad);
+            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == TEST10 candidate references" : bad);
             check(ok, g.pin, d);
         }
         // K7f RETIRED in FULL2 (cause: its subject no
