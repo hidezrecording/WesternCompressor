@@ -207,6 +207,32 @@ private:
 // proportionally (single seam, nothing else changed).
 // Full evidence: REPORT-TEST7.md.
 inline constexpr float kBa6aThreshVolts = 3.5f;
+// TEST8 (Nathan, 2026-10-25): per-mode / per-seat REFERENCE
+// compensation, costed and verified by renders in
+// DIAGNOSIS-test7-insertion-gain.md §D on the same file.
+// The 3.5 V calibration centred the FAST seats near 5 but
+// left the seat spread (COMP 5.51/6.24, LIMIT 4.65/5.45):
+// the SLOW seats lag because their envelopes equilibrate
+// lower, and LIMIT FAST sat low. These factors multiply
+// the ONE reference seam in Ba6aLimiter::processCore
+// (threshV), in the probes' exact association
+// (mode factor x seat factor):
+//   COMP  mode x0.19: COMP onsets saturate under reference
+//     trim (law-toe limited, §D) — 0.19 and 0.25 measure
+//     identically at onset (5.35 FAST); the verified
+//     combined set ships 0.19.
+//   LIMIT mode x1.41 (+3.0 dB): LIMIT FAST 4.65 -> 4.97.
+//   LIMIT SLOW seat x0.35 (-9.1 dB, attack-SLOW seat only,
+//     on top of the mode factor): LIMIT SLOW 5.71 -> 4.98.
+//     The COMP SLOW seat factor is 1.0 — it buys nothing
+//     (COMP SLOW floors at 6.13 against its 304 V slow-law
+//     toe; full centring is a law re-voice, not a trim).
+// Expected file onsets: 5.35 / 6.13 / 4.97 / 4.98.
+// The SLOW-attack demand shaping (ba6aDetSlowTau) reads
+// the UNFACTORED reference, exactly as in the §D probes.
+inline constexpr float kBa6aRefCompModeFactor      = 0.19f;
+inline constexpr float kBa6aRefLimitModeFactor     = 1.41f;
+inline constexpr float kBa6aRefLimitSlowSeatFactor = 0.35f;
 inline constexpr float kBa6aGrCapDb     = 46.0f;
 // Drive law (design §3.1): the box runs hot by design (its
 // ~54 dB of gain normalised so nominal programme lives near
@@ -619,6 +645,35 @@ inline constexpr float kBusRideChargeTauSec = 0.004f;    // riding peak tracker:
 inline constexpr float kBusRideDecayTauSec  = 3.0f;      // riding peak tracker: decay (quasi-static)
 inline constexpr float kBusMakeupFloorDb    = -30.0f;    // make-up may attenuate to hold the park
 inline constexpr float kStagingAnchorDb     = 0.0f;      // staging anchor trim (measured; see candidate report)
+// ─────────────────────────────────────────────────────────────────────
+// TEST8 (Nathan, 2026-10-25): the bus AUTO MAKE-UP LAW IS
+// REMOVED — "act like a normal compressor" (level recovery
+// is the OUTPUT pots' job, as on the hardware). The
+// diagnosis (DIAGNOSIS-test7-insertion-gain.md §C) proved
+// the GR traces and the calibrated onsets are untouched
+// by the removal (the detector is inside the module,
+// pre-make-up), but on this engine the law's net action
+// at working settings was ATTENUATION (-5.7 dB at INPUT
+// 5) against a raw drive staging that runs ~+15 dB hot
+// at knob 5 — so the law is replaced by a FIXED post-bus
+// staging trim, placed where the law sat (after the bus
+// sum, BEFORE the soft-ceiling knee, so the ceiling
+// still guards the top): §C's pre-compensation estimate
+// was -15 dB; the MEASURED optimum on Nathan's vocal
+// through the finished TEST8 (seat compensation in,
+// knee disengaged at the trimmed level) is -15.60 dB
+// for the default seat (COMP SLOW insertion 0.00 dB;
+// COMP FAST -0.33 dB), so -15.6 is the shipped value
+// (REPORT-TEST8). The soft knee itself stays — a
+// ceiling, not make-up. Chain::busMakeupDb() now reports
+// this fixed trim (the bus's net gain in dB), so the
+// telemetry name survives with honest contents.
+// (The module-internal make-up computation in
+// Ba6aLimiter is untouched: in module mode it is never
+// applied, and the direct-limiter surface keeps it.)
+// ─────────────────────────────────────────────────────────────────────
+inline constexpr float kBusStagingTrimDb  = -15.6f;      // TEST8 fixed post-bus staging trim (measured)
+inline constexpr float kBusStagingTrimLin = 0.16595869f; // 10^(-15.6/20)
 
 class Ba6aLimiter {
 public:
@@ -869,6 +924,18 @@ public:
     float deckDelayMs(int deck) const { return deck == 2 ? lastDelay2Ms_ : lastDelay1Ms_; }
     float srcDelayMs() const { return kAdtBaseMs; }
     float fadeGain() const { return fadeGain_; }
+    // TEST8: the last process() call's wet components,
+    // PRE-fade (the exact addends of wetL/wetR): the SRC
+    // (the unmodulated delayed source) and the deck term
+    // (kAdtDeckGain x the cross-panned deck). The Chain's
+    // MOD MIX law decomposes the machine's output into
+    // unmodulated/modulated parts from these. Valid after
+    // any call that computed the wet sum (not while the
+    // machine is parked off — the Chain's gate covers it).
+    float lastWetSrcL() const { return lastWetSrcL_; }
+    float lastWetSrcR() const { return lastWetSrcR_; }
+    float lastWetDeckL() const { return lastWetDeckL_; }
+    float lastWetDeckR() const { return lastWetDeckR_; }
 
 private:
     enum class State { off, fadingIn, on, fadingOut };
@@ -901,6 +968,9 @@ private:
     uint32_t rngState_ = 0x1f123bb5u;
     // Per-deck tape bandwidth states (mono deck signals).
     float hp1_ = 0.0f, lp1_ = 0.0f, hp2_ = 0.0f, lp2_ = 0.0f;
+    // TEST8: last wet-sum components (see the getters).
+    float lastWetSrcL_ = 0.0f, lastWetSrcR_ = 0.0f;
+    float lastWetDeckL_ = 0.0f, lastWetDeckR_ = 0.0f;
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -959,6 +1029,15 @@ public:
     int latencySamples() const { return 0; }
 
     void process(float inL, float inR, float& outL, float& outR);
+
+    // TEST8: BOTH arms from ONE pass (the state advances
+    // exactly once, as with process()/processEffect()):
+    // the classic arm (as process()) and the effect arm
+    // (as processEffect()). The Chain's MOD MIX law needs
+    // the machine's dry input, its classic output and its
+    // bare cascade in the same sample.
+    void processBoth(float inL, float inR, float& outL, float& outR,
+                     float& effL, float& effR);
 
     // AB3 (gui-v60 round): the EFFECT-ONLY arm — the bare
     // allpass cascade, with the same engage fade applied
@@ -1070,6 +1149,40 @@ private:
 // replaced by a linked soft knee (asymptote 0.981).
 // See the bus constants block (kBusParkCeilLin) for the
 // full note.
+// TEST8 (Nathan, 2026-10-25) — three bus changes on top
+// of the FULL2 architecture:
+//  (1) NO AUTO MAKE-UP: the bus law above is GONE (see
+//      kBusStagingTrimDb). A fixed staging trim
+//      (-15.6 dB, measured) sits where the law sat,
+//      before the soft knee.
+//  (2) COMP MIX IS A TRUE BLEND (Nathan's commission):
+//      the bus gains a DRY ARM — the chain's input,
+//      delayed to the comp arm's exact latency (the
+//      limiter's 32-sample oversampling delay + the
+//      comp channel's bus offset, crossfades included)
+//      and gained by the limiter's own drive law, so at
+//      GR ~ 0 the pot crossfades between two level-
+//      matched copies of the same signal (colour vs
+//      clean) instead of fading the section out:
+//        bus = compMix.comp + (1-compMix).dry + MOD arm.
+//      COMP MIX 0 = pure dry passthrough (at the comp
+//      path's latency — the reported latency is
+//      unchanged); COMP MIX 100 = the comp path exactly
+//      as before. Sessions recalling COMP MIX < 100 now
+//      contain dry signal at that share BY DESIGN.
+//  (3) MOD MIX IS A TRUE BLEND OF ITS SECTION (Nathan:
+//      "the modulation mix needs to follow the same
+//      behavior as the compressor mix"): each flavour's
+//      channel contribution is formed by a per-flavour
+//      law (see Chain::process) whose internal blend
+//      completes at the pot's noon and whose top half is
+//      the channel gain — MOD MIX 0 contributes exactly
+//      nothing (the bus is bit-exact the MOD-out bus),
+//      MOD MIX 100 is bit-exact TEST7's bus (the ADT's
+//      additive doubling and the pedal's classic output
+//      untouched), and between the endpoints the
+//      modulated proportion rises as a blend rather
+//      than the whole channel fading as one gain.
 // ─────────────────────────────────────────────────────────────────────
 
 class Chain {
@@ -1109,10 +1222,12 @@ public:
     bool modPhaser() const { return modPhaser_; }
 
     // ── The two strip pots (AB3 repurposing; FULL2
-    // semantics, Nathan): COMP MIX (the ex-SIDECHAIN pot)
-    // is the COMP channel's gain on the output bus and
-    // MOD MIX (the ex-MIX pot) the MOD channel's gain —
-    // GAINS, not crossfades (see the class note above).
+    // semantics, Nathan; TEST8 blend semantics): COMP MIX
+    // (the ex-SIDECHAIN pot) crossfades the COMP channel
+    // against the bus's dry arm, and MOD MIX (the ex-MIX
+    // pot) drives the per-flavour blend law of the MOD
+    // channel — see the class note above (TEST8 items
+    // (2) and (3)).
     // Both targets slew per sample on the retired whole-
     // chain mix's law (one-pole 0.002, snap 2e-5) and snap
     // to their targets in reset(). With MOD out the MOD
@@ -1128,10 +1243,13 @@ public:
     void setModMix(float m) { modMixTarget_ = clampf(m, 0.0f, 1.0f); }
     float modMix() const { return modMixTarget_; }
 
-    // FULL2 introspection (tests): the bus make-up the
-    // law is currently applying, and the insert feed —
-    // the module output sample the inserts were last fed
-    // (the send tap itself, pre-insert).
+    // FULL2 introspection (tests): the bus's net staging
+    // gain in dB — through TEST7 this was the make-up
+    // law's live value; TEST8 removed the law, so it now
+    // reports the fixed staging trim (kBusStagingTrimDb)
+    // — and the insert feed — the module output sample
+    // the inserts were last fed (the send tap itself,
+    // pre-insert).
     float busMakeupDb() const { return busMakeupDb_; }
     float insertFeedL() const { return lastFeedL_; }
     float insertFeedR() const { return lastFeedR_; }
@@ -1170,6 +1288,16 @@ private:
     {
         return ring[(size_t)((compWrite_ - delay) & compMask_)];
     }
+    // TEST8: the dry arm's ring — written in lockstep
+    // with the comp ring (same write index, same mask),
+    // read at the limiter's oversampling delay PLUS the
+    // comp channel's current bus offset, so a dry sample
+    // and the comp sample it blends against are the same
+    // input sample.
+    float readDryRing(const std::vector<float>& ring, int delay) const
+    {
+        return ring[(size_t)((compWrite_ - delay) & compMask_)];
+    }
 
     double fs_ = 48000.0;
     Ba6aLimiter limiter_;
@@ -1202,16 +1330,16 @@ private:
     // engagement span.
     int modDelayA_ = 0, modDelayB_ = 0;
     float modTapFade_ = 1.0f;   // 1 = settled on modDelayB_
-    // The bus make-up law's state (FULL2): the shipped
-    // law's trackers, running at host rate on the bus —
-    // avg-GR (charge/decay taus) and the slewed make-up
-    // itself. See process(). STAGING-FIX CANDIDATE: the
-    // 0.6 s peak tracker (busPrePeak_) is replaced by the
-    // riding peak tracker (charge ~4 ms / decay ~3 s) —
-    // the slow staging reference the peak-referenced cap
-    // reads. See the bus constants in the header.
-    float busAvgGrDb_ = 0.0f;
-    float busRidePeak_ = 0.0f;
+    // TEST8: the dry arm's rings — the chain input,
+    // written every sample beside the comp ring (see
+    // readDryRing). Sized with the comp rings in
+    // prepare(): the deepest read is the oversampling
+    // delay + the ADT offset, inside the same sizing.
+    std::vector<float> dryRingL_, dryRingR_;
+    // The bus staging state: through TEST7 this held the
+    // make-up law's trackers and slewed gain; TEST8
+    // removed the law — the only survivor is the
+    // telemetry readout, now the fixed staging trim.
     float busMakeupDb_ = 0.0f;
     // Insert-feed introspection (the send tap).
     float lastFeedL_ = 0.0f, lastFeedR_ = 0.0f;

@@ -297,7 +297,14 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
             peakV > detSlowV_ ? kBa6aSlowSenseUpTauSec : dnTau, fs_);
     }
 
-    const float threshV = kBa6aThreshVolts * dbToLinear(threshTrimDb_);
+    // TEST8: the per-mode / per-seat reference compensation
+    // (kBa6aRef* constants; DIAGNOSIS §D's verified combined
+    // set, in the probes' exact association). The seat is
+    // the ATTACK seat, as probed.
+    const float threshV = kBa6aThreshVolts * dbToLinear(threshTrimDb_)
+        * ((compMode_ ? kBa6aRefCompModeFactor : kBa6aRefLimitModeFactor)
+           * (attackFast_ ? 1.0f
+                          : (compMode_ ? 1.0f : kBa6aRefLimitSlowSeatFactor)));
     const float targetFast = ba6aVariMuDb(detEnv_, lawSlope_, lawToe_,
                                       threshV * lawSense_,
                                       lawGrowth_, lawGrowthKnee_);
@@ -593,6 +600,12 @@ void AdtChain::process(float inL, float inR, float& outL, float& outR)
     // deck 1 hard RIGHT, deck 2 hard LEFT, matched gains.
     const float wetL = srcL + kAdtDeckGain * deck2;
     const float wetR = srcR + kAdtDeckGain * deck1;
+    // TEST8: store the wet sum's exact addends for the
+    // Chain's MOD MIX law (unmodulated SRC / modulated
+    // deck term, pre-fade).
+    lastWetSrcL_ = srcL;            lastWetSrcR_ = srcR;
+    lastWetDeckL_ = kAdtDeckGain * deck2;
+    lastWetDeckR_ = kAdtDeckGain * deck1;
 
     const float step = 1.0f / (kAdtFadeSec * (float)fs_);
     if (state_ == State::fadingIn) {
@@ -726,6 +739,12 @@ void Phaser90::processEffect(float inL, float inR, float& outL, float& outR)
     processImpl(inL, inR, classicL, classicR, outL, outR);
 }
 
+void Phaser90::processBoth(float inL, float inR, float& outL, float& outR,
+                           float& effL, float& effR)
+{
+    processImpl(inL, inR, outL, outR, effL, effR);
+}
+
 // ═════════════════════════════════════════════════════════════
 // Chain
 // ═════════════════════════════════════════════════════════════
@@ -734,8 +753,11 @@ void Chain::prepare(double sampleRate)
 {
     const double rate = sampleRate > 0.0 ? sampleRate : 48000.0;
     // FULL2: the chain's limiter is the MODULE — its own
-    // make-up application is disabled from here on; the
-    // bus below applies the law to the summed channels.
+    // make-up application is disabled from here on.
+    // (Through TEST7 the bus applied the make-up law to
+    // the summed channels; TEST8 removed the law — the
+    // bus now applies only the fixed staging trim and
+    // the soft-ceiling knee.)
     limiter_.setApplyMakeup(false);
     // v1.4.1: SAME-RATE RE-PREPARE PRESERVATION. A host can
     // re-call prepareToPlay on a live instance without
@@ -762,6 +784,12 @@ void Chain::prepare(double sampleRate)
     while (sz < need) sz <<= 1;
     compRingL_.assign((size_t)sz, 0.0f);
     compRingR_.assign((size_t)sz, 0.0f);
+    // TEST8: the dry arm's rings, same sizing (the deepest
+    // dry read — oversampling delay + ADT offset — is
+    // shallower than the sizing's headroom by construction:
+    // 32 + 20 ms < 25 ms + 64).
+    dryRingL_.assign((size_t)sz, 0.0f);
+    dryRingR_.assign((size_t)sz, 0.0f);
     compMask_ = sz - 1;
     reset();
     preparedFs_ = fs_;
@@ -774,12 +802,11 @@ void Chain::reset()
     adt_.reset();
     phaser_.reset();
     modBlend_ = modPhaser_ ? 1.0f : 0.0f;
-    // FULL2: both pot slews snap to their targets, the
-    // engagement gate snaps to the held MOD target and
-    // the bus make-up starts cold — a fresh instance is
-    // at its panel state from the first sample, no load
-    // glide (the retired whole-chain mix's reset
-    // discipline). The inserts' own state machines park
+    // FULL2: both pot slews snap to their targets and
+    // the engagement gate snaps to the held MOD target —
+    // a fresh instance is at its panel state from the
+    // first sample, no load glide (the retired whole-
+    // chain mix's reset discipline). The inserts' own state machines park
     // through their reset() consistently with their
     // surviving targets (v1.4.1: off when the target is
     // out, re-armed into the fade-in when it is in) — in
@@ -791,12 +818,14 @@ void Chain::reset()
     modGate_ = adt_.enabled() ? 1.0f : 0.0f;
     std::fill(compRingL_.begin(), compRingL_.end(), 0.0f);
     std::fill(compRingR_.begin(), compRingR_.end(), 0.0f);
+    std::fill(dryRingL_.begin(), dryRingL_.end(), 0.0f);
+    std::fill(dryRingR_.begin(), dryRingR_.end(), 0.0f);
     compWrite_ = 0;
     modDelayA_ = modDelayB_ = modExtraTarget();
     modTapFade_ = 1.0f;
-    busAvgGrDb_ = 0.0f;
-    busRidePeak_ = 0.0f;
-    busMakeupDb_ = 0.0f;
+    // TEST8: no make-up law to start cold — the bus's net
+    // staging gain is the fixed trim from the first sample.
+    busMakeupDb_ = kBusStagingTrimDb;
     lastFeedL_ = lastFeedR_ = 0.0f;
 }
 
@@ -813,6 +842,21 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     lastFeedL_ = modL;   // the send tap: what the inserts
     lastFeedR_ = modR;   // are fed, at every pot position
 
+    // TEST8: the two pot slews run FIRST (the retired
+    // whole-chain mix's law, as in AB3: one-pole 0.002,
+    // snap 2e-5) — every consumer below (the MOD blend
+    // laws, the COMP crossfade, the dry arm's complement)
+    // reads the same per-sample values. Through TEST7 the
+    // slews sat at the bus sum and the pots were bare
+    // gains; with static pots (every pinned render) the
+    // values are identical either way.
+    compMixCur_ += (compMixTarget_ - compMixCur_) * 0.002f;
+    if (std::fabs(compMixTarget_ - compMixCur_) < 2.0e-5f)
+        compMixCur_ = compMixTarget_;
+    modMixCur_ += (modMixTarget_ - modMixCur_) * 0.002f;
+    if (std::fabs(modMixTarget_ - modMixCur_) < 2.0e-5f)
+        modMixCur_ = modMixTarget_;
+
     // ── The MOD send: both machines run continuously on
     // the module output (POST-COMPRESSOR, unconditionally);
     // the flavour blend selects between their own outputs
@@ -822,9 +866,9 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // bit-exact once settled, but the bus gate below keeps
     // the channel silent regardless: the channel is the
     // insert's output, gated by its engagement. ──
-    float aL, aR, pL, pR;
+    float aL, aR, pL, pR, eL, eR;
     adt_.process(modL, modR, aL, aR);
-    phaser_.process(modL, modR, pL, pR);
+    phaser_.processBoth(modL, modR, pL, pR, eL, eR);
     const float target = modPhaser_ ? 1.0f : 0.0f;
     if (modBlend_ != target) {
         const float step = 1.0f / (kAdtFadeSec * (float)fs_);
@@ -832,17 +876,67 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
             ? std::min(target, modBlend_ + step)
             : std::max(target, modBlend_ - step);
     }
+    // ── TEST8: the MOD MIX blend laws (Nathan: the
+    // modulation mix follows the compressor mix's
+    // behaviour — a true blend of its section, not a
+    // level fade). Each flavour's channel contribution
+    // is formed from its machine's own components BEFORE
+    // the flavour blend:
+    //   ADT: the output decomposes exactly into the
+    //     unmodulated SRC (the source at the base delay)
+    //     and the modulated deck term. The law rides the
+    //     SRC at the pot's own gain and brings the decks
+    //     in as a blend whose share completes at noon:
+    //       chanA = m . (U + min(2m,1) . V)
+    //     (U/V = the faded output's SRC/deck parts).
+    //   PHASER: a true dry/wet crossfade INTERNAL to the
+    //     insert, between its input and its bare cascade,
+    //     whose ratio travels dry -> classic 50/50 over
+    //     the pot's bottom half, under the pot's gain:
+    //       chanP = m . ((1-r) . in + r . cascade),
+    //       r = min(m, 0.5)
+    //     Noon therefore carries the pedal's classic
+    //     50/50 voice (at half channel gain, as TEST7's
+    //     noon did); above noon the ratio dwells at the
+    //     classic and the pot is the channel's gain.
+    // The extremes are HARD-SELECTED (the codebase's own
+    // discipline): at m = 1 each channel is its machine's
+    // output bit-for-bit — TEST7's bus exactly, the ADT's
+    // additive doubling and the classic pedal output
+    // untouched — and at m = 0 the contribution is
+    // exactly zero, so the bus is bit-exact the MOD-out
+    // bus. ──
+    float chanAL, chanAR, chanPL, chanPR;
+    {
+        const float m = modMixCur_;
+        if (m >= 1.0f) {
+            chanAL = aL; chanAR = aR;
+            chanPL = pL; chanPR = pR;
+        } else if (m <= 0.0f) {
+            chanAL = chanAR = chanPL = chanPR = 0.0f;
+        } else {
+            const float gA = adt_.fadeGain();
+            const float uL = modL + (adt_.lastWetSrcL() - modL) * gA;
+            const float uR = modR + (adt_.lastWetSrcR() - modR) * gA;
+            const float deckShare = std::min(2.0f * m, 1.0f);
+            chanAL = m * (uL + deckShare * (adt_.lastWetDeckL() * gA));
+            chanAR = m * (uR + deckShare * (adt_.lastWetDeckR() * gA));
+            const float rP = std::min(m, 0.5f);
+            chanPL = m * ((1.0f - rP) * modL + rP * eL);
+            chanPR = m * ((1.0f - rP) * modR + rP * eR);
+        }
+    }
     // Hard-select at the extremes: a settled flavour is its
     // own output, bit-for-bit (the subtractive blend is the
     // transition law, as in the inserts themselves).
     float wetL, wetR;
     if (modBlend_ <= 0.0f) {
-        wetL = aL; wetR = aR;
+        wetL = chanAL; wetR = chanAR;
     } else if (modBlend_ >= 1.0f) {
-        wetL = pL; wetR = pR;
+        wetL = chanPL; wetR = chanPR;
     } else {
-        wetL = aL + (pL - aL) * modBlend_;
-        wetR = aR + (pR - aR) * modBlend_;
+        wetL = chanAL + (chanPL - chanAL) * modBlend_;
+        wetR = chanAR + (chanPR - chanAR) * modBlend_;
     }
     // The engagement gate: linear over the inserts' own
     // 30 ms span, exactly 0 settled-out, exactly 1
@@ -867,12 +961,20 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // unchanged). ──
     compRingL_[(size_t)compWrite_] = modL;
     compRingR_[(size_t)compWrite_] = modR;
+    // TEST8: the dry arm's rings are written in lockstep —
+    // the chain's raw input, every sample.
+    dryRingL_[(size_t)compWrite_] = inL;
+    dryRingR_[(size_t)compWrite_] = inR;
     const int extra = modExtraTarget();
     if (extra != modDelayB_) {
         modDelayA_ = modDelayB_;
         modDelayB_ = extra;
         modTapFade_ = 0.0f;
     }
+    // The offset crossfade's phase for THIS sample, saved
+    // before the comp reads advance it: the dry arm below
+    // reads through the identical A/B law.
+    const float tapFade = modTapFade_;
     float compL, compR;
     if (modTapFade_ >= 1.0f && modDelayB_ == 0) {
         compL = modL; compR = modR;   // settled, no offset
@@ -889,77 +991,85 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
             modTapFade_ = std::min(1.0f, modTapFade_ + 1.0f / (kAdtFadeSec * (float)fs_));
         }
     }
+    // ── TEST8: the DRY ARM. The chain input, read at the
+    // comp arm's TOTAL latency — the limiter's
+    // oversampling delay (32 host samples at any rate)
+    // plus the comp channel's bus offset, through the
+    // same A/B offset crossfade — so the dry sample and
+    // the comp sample it blends against are the SAME
+    // input sample, and gained by the limiter's own
+    // drive law (limiter_.driveDb(), the knob's current
+    // smoothed position): at GR ~ 0 the crossfade below
+    // trades two level-matched copies of one signal
+    // (the module's colour for the clean input), and
+    // under GR it is true parallel compression referred
+    // to the driven signal. The reported latency does
+    // not change: the dry arm's delay IS the comp path's
+    // latency, in every MOD state. ──
+    float dryArmL, dryArmR;
+    {
+        const int osD = limiter_.osDelaySamples();
+        float dL, dR;
+        if (tapFade >= 1.0f && modDelayB_ == 0) {
+            dL = readDryRing(dryRingL_, osD);
+            dR = readDryRing(dryRingR_, osD);
+        } else {
+            const float bL = readDryRing(dryRingL_, osD + modDelayB_);
+            const float bR = readDryRing(dryRingR_, osD + modDelayB_);
+            if (tapFade >= 1.0f) {
+                dL = bL; dR = bR;
+            } else {
+                const float aL = readDryRing(dryRingL_, osD + modDelayA_);
+                const float aR = readDryRing(dryRingR_, osD + modDelayA_);
+                dL = aL + (bL - aL) * tapFade;
+                dR = aR + (bR - aR) * tapFade;
+            }
+        }
+        const float dryGainLin = dbToLinear(limiter_.driveDb());
+        dryArmL = dryGainLin * dL;
+        dryArmR = dryGainLin * dR;
+    }
     compWrite_ = (compWrite_ + 1) & compMask_;
 
-    // ── The bus sum: two channel GAINS in parallel (the
-    // pots' slews are the retired whole-chain mix's law,
-    // as in AB3). No dry arm anywhere. ──
-    compMixCur_ += (compMixTarget_ - compMixCur_) * 0.002f;
-    if (std::fabs(compMixTarget_ - compMixCur_) < 2.0e-5f)
-        compMixCur_ = compMixTarget_;
-    modMixCur_ += (modMixTarget_ - modMixCur_) * 0.002f;
-    if (std::fabs(modMixTarget_ - modMixCur_) < 2.0e-5f)
-        modMixCur_ = modMixTarget_;
-    const float busL = compMixCur_ * compL + modGate_ * modMixCur_ * wetL;
-    const float busR = compMixCur_ * compR + modGate_ * modMixCur_ * wetR;
+    // ── The bus sum (TEST8): the COMP channel crossfaded
+    // against the dry arm by the COMP MIX pot (comple-
+    // mentary weights on the same slewed value), plus
+    // the MOD channel — its blend law already applied
+    // above — under its engagement gate. ──
+    const float busL = compMixCur_ * compL
+                     + (1.0f - compMixCur_) * dryArmL
+                     + modGate_ * wetL;
+    const float busR = compMixCur_ * compR
+                     + (1.0f - compMixCur_) * dryArmR
+                     + modGate_ * wetR;
 
-    // ── Auto make-up AT THE BUS (FULL2): the shipped law
-    // (design §3.2), computed from the module's GR exactly
-    // as the limiter computes it internally — 0.92 x avgGR
-    // + 7 x knob^2 — and the peak it reads is the BUS's
-    // own pre-make-up peak (the summed feeds), with the
-    // trackers at host rate. STAGING-FIX CANDIDATE: the
-    // bound is re-voiced — the cap is peak-referenced to
-    // the park ceiling via the riding tracker below (plus
-    // the constant staging anchor in the demand), and the
-    // instant ceiling is replaced by the soft knee at the
-    // end of this function. See the bus constants in the
-    // header for the full note. ──
-    const float grNow = limiter_.gainReductionDb();
-    const float avgTau = grNow > busAvgGrDb_ ? kBa6aMakeupAvgChargeTauSec
-                                             : kBa6aMakeupAvgDecayTauSec;
-    busAvgGrDb_ += (grNow - busAvgGrDb_) * tauCoef(avgTau, fs_);
-    const float peakNow = std::max(std::fabs(busL), std::fabs(busR));
-    // STAGING-FIX CANDIDATE: the riding peak tracker (fast
-    // charge / ~3 s decay — a quasi-static STAGING
-    // reference, not a dynamics element) replaces the
-    // shipped 0.6 s peak tracker as the cap's reference.
-    if (peakNow > busRidePeak_)
-        busRidePeak_ += (peakNow - busRidePeak_) * tauCoef(kBusRideChargeTauSec, fs_);
-    else
-        busRidePeak_ += (peakNow - busRidePeak_) * tauCoef(kBusRideDecayTauSec, fs_);
-    const float knobS = limiter_.knob();
-    const float desired = kBa6aMakeupFactor * busAvgGrDb_
-                        + kBa6aMakeupCrankDb * knobS * knobS
-                        + kStagingAnchorDb;
-    // STAGING-FIX CANDIDATE: the cap is PEAK-REFERENCED to
-    // the park ceiling (kBusParkCeilLin), not to the 1.600
-    // absolute bound — past the working point it falls 1 dB
-    // per dB of arriving peak, so peaks park and density
-    // does the climbing. The floor is negative (the law
-    // may attenuate to hold the park at extreme drive).
-    const float rideCapDb = linearToDb(kBusParkCeilLin
-                                       / std::max(busRidePeak_, 0.05f));
-    const float makeupTarget = clampf(std::min(desired, rideCapDb),
-                                      kBusMakeupFloorDb, kBa6aMakeupCapDb);
-    // Make-up slew: falls instantly (the ceiling discipline
-    // is never late), rises over ~50 ms (no gain-step
-    // zipper) — the module law's own slew discipline.
-    if (makeupTarget < busMakeupDb_)
-        busMakeupDb_ = makeupTarget;
-    else
-        busMakeupDb_ += (makeupTarget - busMakeupDb_) * tauCoef(0.05f, fs_);
-    // Soft ceiling (STAGING-FIX CANDIDATE): the shipped
-    // per-sample instant clamp at 1.600 is replaced by a
-    // LINKED soft knee whose onset is the park ceiling.
-    // Below it the pair's gain is exactly 1; above it the
-    // pair's peak bends along a tanh toward the knee
-    // asymptote (park + span = 0.981), one gain for both
-    // channels taken from the pair's peak — overshoot
-    // arrives as progressive squash, never a flat top,
-    // and the 1.600 absolute bound is never reached.
-    const float mkLin = dbToLinear(busMakeupDb_);
-    float oL = busL * mkLin, oR = busR * mkLin;
+    // ── TEST8: NO AUTO MAKE-UP AT THE BUS (Nathan:
+    // "act like a normal compressor"). The FULL2 bus law
+    // (0.92 x avgGR + 7 x knob^2, peak-referenced park
+    // cap, riding tracker) is REMOVED — the diagnosis
+    // proved the detector never read it (the 3.5 V
+    // calibration and every GR trace survive untouched)
+    // and that its net action on this engine was
+    // attenuation against a hot raw staging. In its
+    // place, where the law sat: the FIXED post-bus
+    // staging trim (kBusStagingTrimDb, -15.6 dB
+    // measured), which lands insertion at INPUT 5 flat
+    // on Nathan's vocal. Level recovery is the OUTPUT
+    // pots' job.
+    // The telemetry readout reports the trim. ──
+    busMakeupDb_ = kBusStagingTrimDb;
+    // Soft ceiling (STAGING-FIX CANDIDATE, kept): the
+    // shipped per-sample instant clamp at 1.600 is
+    // replaced by a LINKED soft knee whose onset is the
+    // park ceiling. Below it the pair's gain is exactly
+    // 1; above it the pair's peak bends along a tanh
+    // toward the knee asymptote (park + span = 0.981),
+    // one gain for both channels taken from the pair's
+    // peak — overshoot arrives as progressive squash,
+    // never a flat top, and the 1.600 absolute bound is
+    // never reached. A ceiling, not make-up: it only
+    // ever bends peaks DOWN toward the park.
+    float oL = busL * kBusStagingTrimLin, oR = busR * kBusStagingTrimLin;
     const float pairPk = std::max(std::fabs(oL), std::fabs(oR));
     if (pairPk > kBusParkCeilLin) {
         const float soft = kBusParkCeilLin
