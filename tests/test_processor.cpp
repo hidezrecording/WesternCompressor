@@ -1417,7 +1417,7 @@ int main() {
         };
         float pk = 0;
         double f = grFallT50(pk);
-        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: dual-sense %.3f s vs pin 0.135 s, peak %.1f dB (pin 20.9)",
+        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: dual-sense %.3f s vs pin 0.492 s, peak %.1f dB (pin 21.1)",
                       f, pk);
         // DUAL-SENSE RE-PIN (Phase 3b): measured
         // end-to-end at the settled park: 0.097 s from
@@ -1446,8 +1446,16 @@ int main() {
         // depth reads 0.135 s end-to-end (module C4d
         // re-pinned for the same cause). Tolerances
         // unchanged.
-        check(std::fabs(f - 0.135) <= 4.0 * (64.0 / kFs) && std::fabs(pk - 20.9f) < 1.0f,
-              "P11c proc: DUAL release 50% recovery at the TEST9 park (dual-sense class)", b);
+        // TEST10 RE-PIN (cause: Nathan's release re-voice
+        // commission, 2026-10-25): the DUAL fast pole
+        // 0.022 -> 0.2326 s removes the early crossover —
+        // the 50% recovery now reads 0.492 s end-to-end
+        // from a 21.1 dB settled depth (the module bench
+        // reads 0.491 s at the same park, C4c/K5; the
+        // depth's 0.2 dB move is the parity rebalance).
+        // Tolerances unchanged.
+        check(std::fabs(f - 0.492) <= 4.0 * (64.0 / kFs) && std::fabs(pk - 21.1f) < 1.0f,
+              "P11c proc: DUAL release 50% recovery at the TEST10 park (dual-sense class)", b);
 
         // P11d: the reported latency is untouched by the
         // bake (MOD in A: 992; MOD out: 32).
