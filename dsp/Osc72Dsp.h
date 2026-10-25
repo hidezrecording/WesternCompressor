@@ -234,6 +234,38 @@ inline constexpr float kBa6aRefCompModeFactor      = 0.19f;
 inline constexpr float kBa6aRefLimitModeFactor     = 1.41f;
 inline constexpr float kBa6aRefLimitSlowSeatFactor = 0.35f;
 inline constexpr float kBa6aGrCapDb     = 46.0f;
+// TEST9 (Nathan, 2026-10-25): DEEP-GR SOFTENING. His ear on
+// TEST8: past ~5 dB of gain reduction both modes become
+// really audible as they dig in — "an even slower increase
+// in the ratio as we dig in; what's happening at -5 dB
+// shouldn't start happening until more like 10 dB of gain
+// reduction." The demanded->applied depth map below is
+// applied ONCE, to the blended demand in
+// Ba6aLimiter::processCore, so it serves both ratio modes
+// and both detector senses, and the GR meter keeps reading
+// the TRUE applied GR (the map is upstream of the control
+// networks whose state is the readout).
+//   f(x) = x                                        x <= 5
+//   f(x) = 5 + p.u + (1-p).A.log1p(u/A),  u = x - 5   x > 5
+// Identity with unit slope at the 5 dB knee (C1 join, no
+// kink); the derivative then falls smoothly — exactly 0.5
+// at 10 dB APPLIED by construction (u/A = 10/3 there, and
+// A = 5 / (p.10/3 + (1-p).ln(13/3)) = 2.3587 for p = 0.35)
+// — and decreases gently toward the p = 0.35 floor instead
+// of collapsing, so deep authority survives: the 46 dB law
+// cap maps to ~23.8 dB applied. Nothing at or below 5 dB
+// demand moves, so onsets and the whole working region are
+// the TEST8 calibration untouched.
+inline constexpr float kBa6aDeepKneeDb     = 5.0f;    // identity at/below this depth
+inline constexpr float kBa6aDeepLinShare   = 0.35f;   // derivative floor at depth
+inline constexpr float kBa6aDeepLogScaleDb = 2.3587f; // A above: f'(10 dB applied) = 0.5
+inline float ba6aDeepSoften(float demandedDb) {
+    if (demandedDb <= kBa6aDeepKneeDb) return demandedDb;
+    const float u = demandedDb - kBa6aDeepKneeDb;
+    return kBa6aDeepKneeDb + kBa6aDeepLinShare * u
+         + (1.0f - kBa6aDeepLinShare) * kBa6aDeepLogScaleDb
+               * std::log1p(u / kBa6aDeepLogScaleDb);
+}
 // Drive law (design §3.1): the box runs hot by design (its
 // ~54 dB of gain normalised so nominal programme lives near
 // the limiting verge, as a programme limiter at a transmitter

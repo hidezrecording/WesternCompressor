@@ -326,7 +326,14 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
         susW_ += (wT - susW_) * tauCoef(wT < susW_ ? kBa6aSusDnTauSec
                                                   : kBa6aSusUpTauSec, fs_);
     }
-    const float target = targetFast + susW_ * (targetSlow - targetFast);
+    const float targetDemand = targetFast + susW_ * (targetSlow - targetFast);
+    // TEST9: deep-GR softening (ba6aDeepSoften; header
+    // note) — the demanded depth is stretched above 5 dB
+    // before the control networks see it. Identity at and
+    // below 5 dB, so onsets and shallow ballistics are the
+    // TEST8 calibration exactly; the networks' state (and
+    // therefore the meter) is the applied GR.
+    const float target = ba6aDeepSoften(targetDemand);
 
     // ── Control state: BOTH recovery networks run every
     // sample; the toggle selects which one drives the stage,
