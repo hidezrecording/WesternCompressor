@@ -269,9 +269,14 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
     // AB2: the rising charge takes its seat's scale (FAST
     // or the SLOW shaped tau); the decay keeps its own
     // held scale (release-side infrastructure).
+    // TEST10: with the FAST release seat selected, the
+    // decay takes an additional x0.08 — the seat-gated
+    // control-loop discharge of the release re-voice
+    // (see the TEST10 note at the release constants in
+    // the header). The SLOW seat's detector is untouched.
     const float detScale = detRising ? (attackFast_ ? kBa6aAttFastScale
                                                     : kBa6aAttSlowScale)
-                                     : kBa6aDetDecayScale;
+                                     : kBa6aDetDecayScale * (releaseFast_ ? 0.08f : 1.0f);
     detEnv_ += (peak - detEnv_) * tauCoef(detTau * detScale, fs_);
 
     // DUAL-SENSE (Phase 3b): the sustained sense -- a slow
@@ -287,12 +292,16 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
         // sustained memory discharges quickly so the slow
         // demand exits with the signal instead of tailing
         // the release networks.
-        const float phDecay = tauCoef(0.030f, fs_);
+        // TEST10: the FAST release seat accelerates the
+        // dump (hold 6 ms, discharge 12 ms) as part of
+        // its control-loop discharge; the SLOW seat keeps
+        // the stock 30 ms / 60 ms figures.
+        const float phDecay = tauCoef(releaseFast_ ? 0.006f : 0.030f, fs_);
         peakHoldV_ = peakV > peakHoldV_ ? peakV
                        : peakHoldV_ + (0.0f - peakHoldV_) * phDecay;
         const float dnTau = (peakV <= detSlowV_
                              && peakHoldV_ < 0.35f * detSlowV_)
-                                ? 0.06f : kBa6aSlowSenseDnTauSec;
+                                ? (releaseFast_ ? 0.012f : 0.06f) : kBa6aSlowSenseDnTauSec;
         detSlowV_ += (peakV - detSlowV_) * tauCoef(
             peakV > detSlowV_ ? kBa6aSlowSenseUpTauSec : dnTau, fs_);
     }

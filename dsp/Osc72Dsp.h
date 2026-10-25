@@ -230,9 +230,35 @@ inline constexpr float kBa6aThreshVolts = 3.5f;
 // Expected file onsets: 5.35 / 6.13 / 4.97 / 4.98.
 // The SLOW-attack demand shaping (ba6aDetSlowTau) reads
 // the UNFACTORED reference, exactly as in the §D probes.
+// TEST10 (Nathan, 2026-10-25): ONSET PARITY rebalance on
+// top of the release re-voice (see the ballistics note at
+// the release constants). The re-voice moved the file
+// onsets to 6.13 / 5.99 / 5.70 / 4.82 (the FAST seats'
+// faster discharge bleeds programme GR between phrases);
+// Nathan's parity requirement — "the compression should
+// be happening in the same place when switching between
+// those" — is ±0.3 knob across all four seats. LIMIT
+// rebalances on this seam: mode x1.41 -> x0.82 (LIMIT
+// FAST 5.70 -> 5.26), SLOW seat x0.35 -> x0.88 (LIMIT
+// SLOW -> 5.04). COMP does NOT answer this seam (its
+// onsets saturate under reference trim, §D) — COMP parity
+// is carried by the detector tap / law slope re-voice at
+// kBa6aCompSense / kBa6aCompSlope below (COMP FAST
+// 6.13 -> 5.41, COMP SLOW 5.99 -> 5.25; sustained statics
+// move <= 0.05 dB because the blend rules tones by the
+// slow law). Final measured onsets: 5.41 / 5.25 / 5.26 /
+// 5.04 — spread 0.37, centre 5.24. Full evidence:
+// REPORT-TEST10.md. The authorised COMP slow-law toe
+// change was TRIED first (304.15 -> 170) and measured
+// INERT on the file (onsets identical to 0.01 knob)
+// while costing +1.6 dB of sustained statics — on the
+// vocal the slow sense reads single-digit volts, where
+// the toe law's output is ~0.01-0.1 dB regardless of the
+// toe; the §D "toe floor" was a tone-domain reading.
+// The toe is therefore UNCHANGED (304.15).
 inline constexpr float kBa6aRefCompModeFactor      = 0.19f;
-inline constexpr float kBa6aRefLimitModeFactor     = 1.41f;
-inline constexpr float kBa6aRefLimitSlowSeatFactor = 0.35f;
+inline constexpr float kBa6aRefLimitModeFactor     = 0.82f;
+inline constexpr float kBa6aRefLimitSlowSeatFactor = 0.88f;
 inline constexpr float kBa6aGrCapDb     = 46.0f;
 // TEST9 (Nathan, 2026-10-25): DEEP-GR SOFTENING. His ear on
 // TEST8: past ~5 dB of gain reduction both modes become
@@ -389,9 +415,9 @@ inline float ba6aVariMuDb2(float envSensed, float slope, float toeV,
 // with the switch OUT (false) now loads as LIMIT-active
 // instead of bypassed, and IN (true) loads as COMP.
 // DEFAULT = LIMIT.
-inline constexpr float kBa6aCompSlope  = 0.75f;  // dB per shaped volt
+inline constexpr float kBa6aCompSlope  = 0.85f;  // dB per shaped volt (TEST10 parity: 0.75 -> 0.85, see the TEST10 note at the reference factors)
 inline constexpr float kBa6aCompToe    = 90.0f;  // 6H6 toe corner, volts
-inline constexpr float kBa6aCompSense  = 2.2f;   // detector tap ratio
+inline constexpr float kBa6aCompSense  = 4.20f;   // detector tap ratio (TEST10 parity: 2.2 -> 4.20 in two measured steps, see the TEST10 note at the reference factors)
 inline constexpr float kBa6aCompGrowth = 0.30f;  // remote-cutoff slope growth
 inline constexpr float kBa6aCompGrowthKnee = 8.0f;
 inline constexpr float kBa6aLimitSlope = 4.2f;
@@ -552,7 +578,46 @@ inline float ba6aDetSlowTau(float peakSensedComp, float envSensedComp) {
 inline constexpr float kBa6aAttFastTauSec  = 0.000252f; // control attack pole, FAST (v45: 90 µs x2.8, v46)
 inline constexpr float kBa6aAttSlowTauSec  = 0.005963f;  // control attack pole, SLOW (v45: 1.8 ms x2.65, v46) x1.25 (v53)
 inline constexpr float kBa6aRelSingleTauSec = 0.014f;  // FAST release (1176 seat)
-inline constexpr float kBa6aRelDualFastTauSec = 0.022f;
+// TEST10 RELEASE RE-VOICE (Nathan, 2026-10-25 — his
+// TEST9 verdict: the DUAL seat's early crossover is
+// unacceptable, "the fast release should always feel
+// faster than the slow release — initially or overall",
+// and FAST should be "a fast release like in an 1176
+// without all that extra tail"). Three linked changes:
+//  (1) SINGLE (FAST) network pole: kBa6aRelSingleScale
+//      30.2 -> 7.8 (effective tau ~0.109 s). Measured
+//      step-release: 50% recovery 0.081-0.092 s, 90%
+//      0.256-0.267 s, ~1% remaining at 0.5 s — the
+//      1176-class decisive recovery, no tail. The pole
+//      alone could not reach the 50% target: the demand
+//      itself exits slowly (the fast law sits at the
+//      46 dB cap until detEnv falls through it, ~75 ms
+//      at the stock 60 ms detector decay, and the
+//      sustained sense exits over ~0.1 s), so the FAST
+//      seat also takes a seat-gated control-loop
+//      discharge in processCore (detector decay x0.08,
+//      gap-dump hold 6 ms / discharge 12 ms when
+//      releaseFast_) — as in the reference hardware,
+//      where the release control sits in the detector's
+//      own discharge path. SLOW-seat renders are
+//      bit-identical in the detector.
+//  (2) DUAL (SLOW) fast pole: 0.022 -> 0.2326 s base
+//      (effective ~0.30 s at the 1.29 scale) — the early
+//      crossover is removed at its source. HARD
+//      INVARIANT, verified pointwise on step-release
+//      traces in both modes, both attack seats, 10 s and
+//      0.5 s holds: remaining-GR(SLOW,t) >= remaining-
+//      GR(FAST,t) at every sample (min absolute margin
+//      +0.03 dB; SLOW 50% recovery 0.42-0.49 s, 90%
+//      2.4-3.6 s — the long tail is kept).
+//  (3) T4 memory stretch 1.6 -> 1.9, compensating the
+//      slower DUAL fast pole's lift of the brief-hold
+//      recovery: T4 contrast measures 1.45 / 1.33
+//      (LIMIT / COMP) vs TEST9's 1.49 / 1.34 — the
+//      hold-lengthens-recovery character preserved.
+// Attack seats are untouched and re-measured identical.
+// Full evidence: REPORT-TEST10.md.
+inline constexpr float kBa6aRelDualFastTauSec = 0.2326f;
 inline constexpr float kBa6aRelDualSlowTauSec = 0.900f; // unstressed tail pole
 inline constexpr float kBa6aRelDualFastShare  = 0.60f;
 // T4 memory: a stress state integrates the GR actually being
@@ -563,7 +628,7 @@ inline constexpr float kBa6aRelDualFastShare  = 0.60f;
 // manuals' printed 0.5–5 s complete-release envelope.
 inline constexpr float kBa6aMemChargeTauSec = 1.2f;
 inline constexpr float kBa6aMemDecayTauSec  = 8.0f;
-inline constexpr float kBa6aMemStretch      = 1.6f;
+inline constexpr float kBa6aMemStretch      = 1.9f;
 inline constexpr float kBa6aMemRefDb        = 25.0f;   // GR depth counted as full stress
 // PER-SEAT BALLISTICS SCALES (AB2 test build, 2026-10-19 —
 // NOT a release; Nathan's ear-trial timings). History: v62
@@ -608,7 +673,7 @@ inline constexpr float kBa6aMemRefDb        = 25.0f;   // GR depth counted as fu
 // MOD section and meter are untouched by this build.
 inline constexpr float kBa6aAttFastScale   = 10.5f;  // AB2 calibrated: bench FAST t90 3.000 ms LIMIT (COMP 4.438 — mode offset, see report)
 inline constexpr float kBa6aAttSlowScale   = 1.996f; // AB2 calibrated: bench SLOW full-step t90 14.958 ms LIMIT (COMP 21.021); small step 24.000 / 24.542
-inline constexpr float kBa6aRelSingleScale = 30.2f;  // AB2 calibrated: bench SINGLE 90% recovery 0.9986 s LIMIT / 1.0092 s COMP; 50% 0.3176 / 0.3282
+inline constexpr float kBa6aRelSingleScale = 7.8f;  // TEST10 re-voice (see the release note above): bench SINGLE 50% 0.081-0.092 s / 90% 0.256-0.267 s (was AB2: 90% 0.9986 s, 50% 0.3176)
 inline constexpr float kBa6aRelDualScale   = 1.29f;  // AB2 calibrated: bench DUAL 90% recovery 3.144 s LIMIT / 2.625 s COMP; 50% 0.1136 / 0.1043; T4 holds 2.998 s vs 4.220 s (contrast 1.41)
 inline constexpr float kBa6aDetDecayScale  = 2.0f;  // held at the 1.3.1 effective value
 // Auto make-up (v1.0.3 law carried per Nathan; design §3.2).
@@ -703,9 +768,15 @@ inline constexpr float kStagingAnchorDb     = 0.0f;      // staging anchor trim 
 // (The module-internal make-up computation in
 // Ba6aLimiter is untouched: in module mode it is never
 // applied, and the direct-limiter surface keeps it.)
+// TEST10 rider: the trim is re-measured at -14.2 dB. The
+// TEST10 parity calibration raised the default seat's
+// programme GR at knob 5 (COMP SLOW onset 6.13 -> 5.25),
+// which cost -1.37 dB of insertion level at defaults;
+// +1.4 dB of trim restores it (measured insertion
+// +0.027 dB at defaults, REPORT-TEST10).
 // ─────────────────────────────────────────────────────────────────────
-inline constexpr float kBusStagingTrimDb  = -15.6f;      // TEST8 fixed post-bus staging trim (measured)
-inline constexpr float kBusStagingTrimLin = 0.16595869f; // 10^(-15.6/20)
+inline constexpr float kBusStagingTrimDb  = -14.2f;      // TEST10 re-trim (measured; see header note)
+inline constexpr float kBusStagingTrimLin = 0.19498446f; // 10^(-14.2/20)
 
 class Ba6aLimiter {
 public:
