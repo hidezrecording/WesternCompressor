@@ -1312,7 +1312,7 @@ int main() {
             return -1.0;
         };
         double r = grRiseT90();
-        std::snprintf(b, sizeof b, "SLOW attack GR rise t90: dual-sense %.1f ms vs pin 9.3 ms (TEST8 park, end-to-end)", r);
+        std::snprintf(b, sizeof b, "SLOW attack GR rise t90: dual-sense %.1f ms vs pin 21.3 ms (TEST9 park, end-to-end)", r);
         // Measured end-to-end on this tree: 13.3 ms —
         // the module figure at the same park is
         // 12.85 ms (bal); the readout adds its block
@@ -1332,8 +1332,18 @@ int main() {
         // untouched (the DSP suite's C-section pins them
         // at their seats); only the operating point moved,
         // by Nathan's directive.
-        check(std::fabs(r - 9.3) <= (64.0 / kFs * 1000.0),
-              "P11b proc: SLOW attack rise at the TEST8 park, end-to-end (readout)", b);
+        // TEST9 RE-PIN (cause: Nathan's deep-GR softening
+        // directive, 2026-10-25): at this park the settled
+        // depth is deep in the softened region; the applied
+        // depth must wait for more demand migration through
+        // the feedback/dual-sense design, so the rise to
+        // 90% of the (lower) settled depth reads 21.3 ms
+        // end-to-end (module C2 seat reads 20.29 ms at its
+        // park — re-pinned there for the same cause). The
+        // ballistics constants are untouched; only the
+        // depth map moved, by Nathan's directive.
+        check(std::fabs(r - 21.3) <= (64.0 / kFs * 1000.0),
+              "P11b proc: SLOW attack rise at the TEST9 park, end-to-end (readout)", b);
 
         // P11c: end-to-end release — the GR readout's 50%
         // recovery time after a loud passage (DUAL seat),
@@ -1407,7 +1417,7 @@ int main() {
         };
         float pk = 0;
         double f = grFallT50(pk);
-        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: dual-sense %.3f s vs pin 0.124 s, peak %.1f dB (pin 24.9)",
+        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: dual-sense %.3f s vs pin 0.135 s, peak %.1f dB (pin 20.9)",
                       f, pk);
         // DUAL-SENSE RE-PIN (Phase 3b): measured
         // end-to-end at the settled park: 0.097 s from
@@ -1428,8 +1438,16 @@ int main() {
         // TEST7 RE-PIN (cause as P11b): at the deeper
         // TEST7 park the settled depth is 24.9 dB and the
         // 50% recovery reads 0.124 s end-to-end.
-        check(std::fabs(f - 0.124) <= 4.0 * (64.0 / kFs) && std::fabs(pk - 24.9f) < 1.0f,
-              "P11c proc: DUAL release 50% recovery at the TEST7 park (dual-sense class)", b);
+        // TEST9 RE-PIN (cause: Nathan's deep-GR softening
+        // directive, 2026-10-25): the settled depth at this
+        // park is deep-demand, so the softening map lowers
+        // it 24.9 -> 20.9 dB (that lowering IS the
+        // commission), and the 50% recovery from the lower
+        // depth reads 0.135 s end-to-end (module C4d
+        // re-pinned for the same cause). Tolerances
+        // unchanged.
+        check(std::fabs(f - 0.135) <= 4.0 * (64.0 / kFs) && std::fabs(pk - 20.9f) < 1.0f,
+              "P11c proc: DUAL release 50% recovery at the TEST9 park (dual-sense class)", b);
 
         // P11d: the reported latency is untouched by the
         // bake (MOD in A: 992; MOD out: 32).
