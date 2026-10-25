@@ -1842,6 +1842,20 @@ int main() {
         // so the new dry arm (weight 0 there) and the MOD
         // blend laws (modMix=1 hard select) contribute
         // nothing to these references beyond the bus trim.
+        // REPAIR (2026-10-25, tests only): the first TEST8
+        // capture of this table was taken from a corrupted
+        // harvest (a probe binary built against a mid-edit
+        // scratch DSP copy) and its GR column — and the
+        // audio column past each group's first config —
+        // did not reproduce on the pinned tree. The table
+        // above is the verified capture: two independent
+        // probe builds from the pinned tree's own files
+        // agree on all 30 configs (audio + GR), and the
+        // suite passes against it on a fresh build. The
+        // engine was never in question — every bench gate
+        // in REPORT-TEST8 measures the DSP directly — but
+        // the first "97/97" reading was taken from a stale
+        // binary and is corrected by this repair commit.
         auto fnvF = [](uint64_t h, float f) {
             uint32_t u;
             std::memcpy(&u, &f, 4);
@@ -1854,37 +1868,37 @@ int main() {
         struct Cfg { const char* name; float knob; bool comp, att, rel; int mod; double secs; uint64_t want; uint64_t grWant; };
         const Cfg cfgs[] = {
             // MOD out, knob 0.50 (4 s each)
-            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0xb064a414ce0235fau, 0x71993669fe187a90u },
-            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0xc8ca9448233a5e81u, 0x72528a70e33b4a40u },
-            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x20bf2b5e8aef2fdcu, 0xc9f7b061baa36b14u },
-            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0x763936c1d416414eu, 0xfcbcc17f19eb9edeu },
-            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0x493a5c1839867c8au, 0x3711dea69c643a89u },
-            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x268c127ed084a7b2u, 0x6b31c05fff2e0b03u },
-            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0x670d68bfe99249d0u, 0x0771afcf504aae54u },
-            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x888a782b9314bfffu, 0xc9a1ff73a3cbd728u },
+            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0xb064a414ce0235fau, 0xa56d40e3b932d179u },
+            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0x41a5b14f7c780b99u, 0xf141d5e03c8f7f6cu },
+            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x566601721c73d224u, 0x2092932881ef9c28u },
+            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0x5899ea5d99f1df27u, 0xf105e46020633eceu },
+            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0xc127daa984a5ec65u, 0x02340af36841de27u },
+            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0xbcd8e317b1585494u, 0x593af9fc9c60fc28u },
+            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0x517144b07968f0a6u, 0x58486d61a5bff53du },
+            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x5ffb987d5c0aa429u, 0x94a73a2c722e9331u },
             // MOD out, knob 0.75
-            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0xf78b739a4bbbbd53u, 0x9f75e2079a8ed586u },
-            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x17401a8eb07dcae8u, 0xde177ff28f13c0c5u },
-            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x0e04afa4ee2cc75bu, 0x0b81776bcc568344u },
-            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0x55557c1d87609cd2u, 0x45b72edb7df3a36bu },
-            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0xe1e34a62ca12ba10u, 0x1b754bc0ec0b8521u },
-            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x8d6a6e1c107420c8u, 0x293a087ee9b35de8u },
-            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0xfcb2effd8b1424c3u, 0x42a932856756cc68u },
-            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x550bee34bd3a9f11u, 0x66743d97ea0f0f26u },
+            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0xf78b739a4bbbbd53u, 0xc61f850baeddcb11u },
+            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0xc5675f5d342e256fu, 0x6ecffb63fd9b9838u },
+            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0xf5d95268b5ebb0b1u, 0x7659557de033c160u },
+            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0x087ef957ea5e062eu, 0xb34593b82a61ebb3u },
+            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0xddbc33d82b9b17ffu, 0x7344e8503d8c2943u },
+            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0xcb10a564c66978b8u, 0x441c9a8cd70e01a3u },
+            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x8cc4083ac454752fu, 0xe8ce7d07d14d8489u },
+            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x781612ad098a392cu, 0xd04356bf59511575u },
             // MOD out, knob 1.00
-            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0xea11dbd17760b69cu, 0x4125c4e9ff65ea51u },
-            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0x643c658f0aff1b0au, 0xdb2fae4b0b7678fcu },
-            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0xbaa78f34da583dd9u, 0x6286a12b222c5fafu },
-            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x2db0a5c72d8b31fau, 0x572d4057a2161d01u },
-            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x31f488a45b1641c8u, 0x4919f5405e93af81u },
-            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x9c89bb5eac5150b2u, 0xc096ef74e17137b2u },
-            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x77eebae5d29bfb1bu, 0x11fa6d5b9a0e05d0u },
-            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x19606fdb52a0f7cdu, 0x0d63936df5e4df96u },
+            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0xea11dbd17760b69cu, 0x548daedd7c67af58u },
+            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0xfc863c232f1fabbau, 0x32deee567ccd7dbcu },
+            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x13e77791a4ae290du, 0x97cedbb782035ff8u },
+            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0xbc5a18c8cc9b0e91u, 0xb0408fc32e38996cu },
+            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x962d06935160ea87u, 0x2c82e69841f5bc44u },
+            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0xc7359ef7331936efu, 0x7e44d59ee561f263u },
+            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0xfdf2addfb89ad9ffu, 0x59aa5f1e9a254886u },
+            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0xd61373a9930e1d49u, 0x3de9fe8ec4950ce6u },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xaa862ed6ed924c38u, 0x1ec43f6612e26902u },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x30af6ad7a0650ce0u, 0x0f9c84a32dbde378u },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0xdcd8f151fa658ed4u, 0xf12d50df2495c218u },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x51a34919381caeaau, 0x3aa6b0e933ba35b2u },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xaa862ed6ed924c38u, 0x5504163165704e2eu },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x46245348fd051abcu, 0x143efa5276e852d3u },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x74966c3d2597761du, 0xffbccc26788f0086u },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x127df1a14572cfb9u, 0x967f8d032ad382f7u },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -1896,8 +1910,8 @@ int main() {
             // FULL: re-captured again on the merged tree at
             // the AB2 ballistics (pure cascade renders under
             // the re-timed limiter).
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x131bd8c56073304au, 0x0f9c84a32dbde378u },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x6a7b742bb32ea599u, 0x3aa6b0e933ba35b2u },
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x131bd8c56073304au, 0x143efa5276e852d3u },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x7579c5ee9d9bebfeu, 0x967f8d032ad382f7u },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
