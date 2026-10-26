@@ -2033,46 +2033,46 @@ int main() {
             return h;
         };
         struct Cfg { const char* name; float knob; bool comp, att, rel; int mod; double secs; uint64_t want; uint64_t grWant; };
-        // TEST12 RE-CAPTURE (cause: the Part D redo — the
-        // corrected knee map on the slow laws, threshold
-        // back to 3.50 V, staging trim re-measured to
-        // -14.10 dB — moves every programme render's GR
-        // trace and audio. Two independent probe builds
-        // from this tree agree on all 30 configs, audio +
-        // GR. REPORT-TEST12.)
+        // TEST13 RE-CAPTURE (cause: Part A — the sustai-
+        // nedness blend's fast reference is now a seat-
+        // independent raw-tap peak follower, moving every
+        // programme GR trace; Part D — the serial MOD bus
+        // moves the MOD-in renders' audio. Two independent
+        // probe builds from this tree agree on all 30
+        // configs, audio + GR. REPORT-TEST13.)
         const Cfg cfgs[] = {
             // MOD out, knob 0.50 (4 s each)
-            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0xef59028e0e8b218fu, 0x2404f1e17d8b2647u },
-            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0x4237fdf284e711bau, 0xc7d0bd580e6e0613u },
-            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x9a4286799c74c0f5u, 0xf4b6f9601224f421u },
-            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0x14b6f04d58126826u, 0x37bdc37569633953u },
-            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0x805fe4e72a6f9730u, 0x398eed13292bd570u },
-            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0xe84c3211282289d1u, 0xbb20905323ae16c1u },
-            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0xf87d5ee27d77e2dbu, 0x2a6e14d5444193c6u },
-            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x5f60cf1bac81e017u, 0x4a30546364b0a047u },
+            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0xf3ac025b7fb91717u, 0xffc9a1ff946a96e4u },
+            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0x7a17323c22e5062eu, 0x359f90ea0f9430ecu },
+            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x7da40d681fc97894u, 0x88fb51dc6cad4a1du },
+            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0xf89b03e5f7cb3615u, 0x5734ba0b835d401du },
+            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0x4c905a6a52ee860eu, 0xb7ada8a8bfe563b4u },
+            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x96b3e09c354c70feu, 0xe5556f69774606beu },
+            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0xce2204c55a2945b3u, 0x53601874c488fe79u },
+            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x341537231e13694bu, 0x23a8a04cc2c3ae57u },
             // MOD out, knob 0.75
-            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x782f51fb390b8489u, 0xd5c4608c07deb6d3u },
-            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x7beb37fda42ac880u, 0xce8d06b8671d7d1au },
-            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x6753c945027e2c3cu, 0x84a5963716fc01a2u },
-            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0xe02050f9509cfae2u, 0xe0fe239be6f3752cu },
-            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0xd9b938b49abb566bu, 0x2a6a9bbacdaaed98u },
-            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x94bbc5314311984eu, 0x2b7a7e6f0ff1b2cbu },
-            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x19a356b25c6662d0u, 0xf1bf61e9a8b0b318u },
-            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0xbb1ac3d8d5db9190u, 0x347d8c0a18c8432fu },
+            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x4212976bceee2141u, 0x26691491a9c73301u },
+            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x2a7f4adefcc7f0c6u, 0xece859bf29887201u },
+            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x9378099f25dd4bc0u, 0x41d356499e5f3fdbu },
+            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0xab6e5efa7013e57du, 0x1af8792ec94955fau },
+            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0xdb4595dacba5329bu, 0xc87496bc709024d9u },
+            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x62cb77d53cedaf7fu, 0xe819b68df6754b96u },
+            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x24253d0855bdea37u, 0x81de972d7d18db39u },
+            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x5917661e8755f0cau, 0x9f6d7f98575158dcu },
             // MOD out, knob 1.00
-            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x3df06655ba6c0992u, 0x1fdf6b9bb1dd9438u },
-            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0xcfbe2bafe6693cb3u, 0x5088c58caadfef32u },
-            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0xf2572f8ac2979519u, 0x6cda74d292336c51u },
-            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0xc967992bc3ef05f3u, 0x3d0509a5df189105u },
-            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x089694b317a3ce96u, 0xd605cb13ede9210du },
-            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x7cf41cb076833308u, 0x22fccf846b6e2d67u },
-            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x71427f538a662b29u, 0x7bbdd75268e5f750u },
-            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x04208383a84320eeu, 0xb0e84d16947fd4abu },
+            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x2c47b7b870ac5859u, 0x4d794651b20e6a06u },
+            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0xade5ac4f1c2edd6fu, 0xe49a8e8f1ae18740u },
+            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x273aad5873029f60u, 0x7809fc746934627au },
+            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x4ddcf403e26f57b9u, 0x8a56e1b035e423bau },
+            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x4ba6f667fd1af97bu, 0x277514941e46a49du },
+            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x506d0c81f51e11c3u, 0xcca31d29de45b576u },
+            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x3ce13bef04c908d4u, 0x2f7bc7fca0b935a0u },
+            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x80771394f7791effu, 0x67368920c41cae81u },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x8534afbb627adb22u, 0x14559dec669b699bu },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x45633b3cd187a720u, 0x78a25cc8d424cd1du },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0xfefeb22c7acf9406u, 0x5fef5c1ed82cc9e4u },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0xe766f002f049600au, 0x9ff9223973a0f40eu },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xc8b140626f279fbfu, 0xbf7ca788efe07289u },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x2e21d7381ccdd212u, 0xd766a84d12f2c449u },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0xd64f92ce0171245bu, 0x474b8ef70734e91bu },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x8fc1882b8c75b318u, 0xe097aaaa2a2215aau },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -2084,8 +2084,8 @@ int main() {
             // FULL: re-captured again on the merged tree at
             // the AB2 ballistics (pure cascade renders under
             // the re-timed limiter).
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x4ef3c33b6cb47b0fu, 0x78a25cc8d424cd1du },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x9c5376e696617a2cu, 0x9ff9223973a0f40eu },
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x0d2538f5b506fd2fu, 0xd766a84d12f2c449u },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x220b610995d74640u, 0xe097aaaa2a2215aau },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
@@ -2160,7 +2160,7 @@ int main() {
                     break;
                 }
             }
-            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == TEST10 candidate references" : bad);
+            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == TEST13 candidate references (two-probe harvest)" : bad);
             check(ok, g.pin, d);
         }
         // K7f RETIRED in FULL2 (cause: its subject no
@@ -2270,7 +2270,16 @@ int main() {
         // pin here and in the processor suite's P7, per
         // the task's item (e).)
         {
-            bool ok = true, audible = false;
+            // TEST13 RE-SITE (cause: Part B — knob 0's drive
+            // is now -80 dB by Nathan's directive, so the
+            // passthrough at knob 0 is the passthrough AT
+            // SILENCE: the identity is asserted there with
+            // an explicit floor clause, and the audibility
+            // clause moves to the same identity at knob
+            // 0.36, whose drive (-3.8 dB) keeps the bus
+            // clear of the ceiling park, as the original
+            // knob-0 site's -5 dB did.)
+            bool ok = true, audible = false, silent = true;
             const float gainRef = osc72::dbToLinear(osc72::ba6aDriveDb(0.0f))
                                 * osc72::kBusStagingTrimLin;
             for (int mod : { 0, 1, 2 }) {
@@ -2282,10 +2291,24 @@ int main() {
                     const float wantR = gainRef * r.inR[(size_t)(i - lat)];
                     if (std::fabs(r.outL[(size_t)i] - wantL) > 1.0e-5f
                         || std::fabs(r.outR[(size_t)i] - wantR) > 1.0e-5f) ok = false;
+                    if (std::fabs(r.outL[(size_t)i]) > 1.0e-3f) silent = false;
+                }
+            }
+            const float gainRef5 = osc72::dbToLinear(osc72::ba6aDriveDb(0.36f))
+                                 * osc72::kBusStagingTrimLin;
+            for (int mod : { 0, 1, 2 }) {
+                auto r = renderMix(0.0f, 0.0f, mod, 0.36f, 2.0);
+                const int lat = (mod == 1) ? 992 : 32;
+                const int start = (int)(1.0 * kFs);
+                for (int i = start; i < (int)r.outL.size(); ++i) {
+                    const float wantL = gainRef5 * r.inL[(size_t)(i - lat)];
+                    const float wantR = gainRef5 * r.inR[(size_t)(i - lat)];
+                    if (std::fabs(r.outL[(size_t)i] - wantL) > 1.0e-5f
+                        || std::fabs(r.outR[(size_t)i] - wantR) > 1.0e-5f) ok = false;
                     if (std::fabs(r.outL[(size_t)i]) > 1.0e-4f) audible = true;
                 }
             }
-            check(ok && audible, "L2 TEST8: compMix 0 / modMix 0 = pure dry passthrough at the reported latency (not silence)", "");
+            check(ok && audible && silent, "L2 TEST8+13: compMix 0 / modMix 0 = pure dry passthrough at the reported latency (silent at knob 0 per Part B, audible at working drive)", "");
         }
         // L3 (FULL2; replaces the AB3 alignment identity):
         // with MOD out, CH2 is gated to exactly zero, so
@@ -2343,40 +2366,43 @@ int main() {
         // nothing rides a cap; the knee simply never
         // bends at these levels).
         {
-            // TEST8 REWRITE (cause: the bus algebra changed
-            // by Nathan's two blend directives — COMP MIX is
-            // a crossfade comp<->dry and MOD MIX is a blend
-            // law, so the FULL2 two-gain superposition no
-            // longer states the bus's linearity). The TEST8
-            // identities, exact wherever the bus knee never
-            // bends (the precondition below: at the staging
-            // trim the post-trim peaks sit far under the
-            // park) and the GR trajectory is pot-independent
-            // (L6):
-            //  (i) inclusion-exclusion — the MOD term is
-            //      independent of compMix:
-            //      out(cm,mm) - out(cm,0) - out(0,mm)
-            //        + out(0,0) == 0;
-            // (ii) the COMP crossfade is affine in its pot:
+            // TEST13 REWRITE (cause: Nathan's Part D serial
+            // blend directive, 2026-10-26 — the bus is no
+            // longer a sum of independent terms: the inserts
+            // are fed the comp blend, so the wet depends on
+            // compMix and the TEST8 inclusion-exclusion (i)
+            // is structurally false). The serial bus's exact
+            // identities, wherever the bus knee never bends
+            // and the GR trajectory is pot-independent (L6):
+            //  (i) MOD MIX affinity at fixed compMix — the
+            //      crossfade trades the through blend for
+            //      its modulated version linearly:
+            //      out(cm, mm/2) == (out(cm,0) + out(cm,1))/2;
+            // (ii) the COMP crossfade is affine in its pot
+            //      (the TEST8 identity, at modMix=0):
             //      out(cm/2, 0) == (out(cm,0) + out(0,0))/2.
-            auto both = renderMix(0.15f, 0.15f, 1, 0.1f, 3.0);
-            auto compOnly = renderMix(0.15f, 0.0f, 1, 0.1f, 3.0);
-            auto modOnly = renderMix(0.0f, 0.15f, 1, 0.1f, 3.0);
-            auto dryOnly = renderMix(0.0f, 0.0f, 1, 0.1f, 3.0);
+            // Re-sited from knob 0.1 to 0.36 (cause: Part
+            // B's taper — 0.36 restores the original site's
+            // ~-3.8 dB drive, so the knee-non-binding
+            // precondition and signal levels are as pinned).
+            auto wetFull = renderMix(0.15f, 1.0f, 1, 0.36f, 3.0);
+            auto compOnly = renderMix(0.15f, 0.0f, 1, 0.36f, 3.0);
+            auto wetHalf = renderMix(0.15f, 0.5f, 1, 0.36f, 3.0);
+            auto dryOnly = renderMix(0.0f, 0.0f, 1, 0.36f, 3.0);
             double mx = 0;
-            for (size_t i = 0; i < both.outL.size(); ++i) {
-                mx = std::max(mx, (double)std::fabs(both.outL[i] - (compOnly.outL[i] + modOnly.outL[i] - dryOnly.outL[i])));
-                mx = std::max(mx, (double)std::fabs(both.outR[i] - (compOnly.outR[i] + modOnly.outR[i] - dryOnly.outR[i])));
+            for (size_t i = 0; i < wetHalf.outL.size(); ++i) {
+                mx = std::max(mx, (double)std::fabs(wetHalf.outL[i] - 0.5f * (compOnly.outL[i] + wetFull.outL[i])));
+                mx = std::max(mx, (double)std::fabs(wetHalf.outR[i] - 0.5f * (compOnly.outR[i] + wetFull.outR[i])));
             }
-            auto half = renderMix(0.075f, 0.0f, 1, 0.1f, 3.0);
+            auto half = renderMix(0.075f, 0.0f, 1, 0.36f, 3.0);
             double mxG = 0;
             for (size_t i = 0; i < half.outL.size(); ++i) {
                 mxG = std::max(mxG, (double)std::fabs(half.outL[i] - 0.5f * (compOnly.outL[i] + dryOnly.outL[i])));
                 mxG = std::max(mxG, (double)std::fabs(half.outR[i] - 0.5f * (compOnly.outR[i] + dryOnly.outR[i])));
             }
-            std::snprintf(d, sizeof d, "inclusion-exclusion max err %.2e; crossfade affinity max err %.2e (knee non-binding regime)", mx, mxG);
+            std::snprintf(d, sizeof d, "mod-affinity max err %.2e; comp-affinity max err %.2e (knee non-binding regime)", mx, mxG);
             check(mx < 2.0e-6 && mxG < 2.0e-6,
-                  "L4 TEST8 bus algebra: MOD term independent of compMix; COMP crossfade affine in its pot", d);
+                  "L4 TEST13 serial bus algebra: MOD crossfade affine in its pot; COMP crossfade affine in its pot", d);
         }
         // L5: folded into L3 in FULL2 (the gate makes the
         // MOD-out inertness exact at every pot value).
@@ -2481,18 +2507,23 @@ int main() {
         // MOVE with INPUT. In the FULL candidate the feed
         // at compMix=0 was the raw input — the diagnosis
         // proved candidate renders at INPUT 5 vs 10
-        // digit-identical (max |delta| = 0.000e+00). Here
-        // the tap is the module's own output: (a) it equals
-        // a module-mode limiter's output bit-for-bit in
-        // lockstep; (b) its level/crest travel across the
-        // knob is the module's (printed; asserted below);
-        // (c) the insert-channel renders differ at every
-        // knob step.
+        // digit-identical (max |delta| = 0.000e+00). Through
+        // TEST12 the tap was the module's own output.
+        // TEST13 REWRITE (cause: Nathan's Part D serial
+        // directive, 2026-10-26): the tap is now the COMP
+        // BLEND itself — (a) at compMix=1 it still equals a
+        // module-mode limiter's output bit-for-bit in
+        // lockstep; (b) at compMix=0 it equals the DRIVEN
+        // DRY bit-for-bit in lockstep (the input delayed by
+        // the limiter's oversampling delay at the drive
+        // gain); (c) its level travel across the knob at
+        // compMix=0 is the drive law's (printed; asserted
+        // below).
         {
             osc72::Chain ch;
             ch.prepare(kFs);
             ch.setKnob(0.5f);
-            ch.setCompMix(0.0f);
+            ch.setCompMix(1.0f);
             ch.setModMix(1.0f);
             ch.reset();
             ch.setModIn(true);
@@ -2509,7 +2540,30 @@ int main() {
                 float oL, oR; ch.process(l, r, oL, oR);
                 if (ch.insertFeedL() != mL || ch.insertFeedR() != mR) tapOk = false;
             }
-            check(tapOk, "M1a insert feed == the module's own output, bit-exact in lockstep", "");
+            check(tapOk, "M1a TEST13: insert feed at compMix=1 == the module's own output, bit-exact in lockstep", "");
+            {
+                osc72::Chain c0;
+                c0.prepare(kFs);
+                c0.setKnob(0.5f);
+                c0.setCompMix(0.0f);
+                c0.setModMix(1.0f);
+                c0.reset();
+                c0.setModIn(true);
+                const int osD = c0.limiter().osDelaySamples();
+                const float g = osc72::dbToLinear(osc72::ba6aDriveDb(0.5f));
+                ProgGen pg0;
+                std::vector<float> hL, hR;
+                bool dryOk = true;
+                for (int i = 0; i < (int)(2.0 * kFs); ++i) {
+                    float l, r; pg0.sample(i, l, r);
+                    hL.push_back(l); hR.push_back(r);
+                    float oL, oR; c0.process(l, r, oL, oR);
+                    const float wL = i >= osD ? g * hL[(size_t)(i - osD)] : 0.0f;
+                    const float wR = i >= osD ? g * hR[(size_t)(i - osD)] : 0.0f;
+                    if (c0.insertFeedL() != wL || c0.insertFeedR() != wR) dryOk = false;
+                }
+                check(dryOk, "M1a2 TEST13: insert feed at compMix=0 == the driven dry, bit-exact in lockstep", "");
+            }
 
             std::printf("      insert feed at compMix=0 (programme, settled half of 6 s):\n");
             double rmsK[5], crestK[5];
@@ -2540,10 +2594,15 @@ int main() {
             }
             std::snprintf(d, sizeof d, "feed RMS travel %+.2f dB (INPUT 0 -> 10), crest falls %.2f dB",
                           rmsK[4] - rmsK[0], crestK[0] - crestK[4]);
-            // TEST7 RE-PIN (cause: Nathan's file-anchored threshold directive, 2026-10-24): crest fall reads 3.91 dB.
-            check(rmsK[4] - rmsK[0] > 10.0 && crestK[0] - crestK[4] > 3.5
+            // TEST13 RE-PIN (cause: Part D serial feed — at
+            // compMix=0 the send is the driven dry, a gain-
+            // only path: its RMS travel is the drive law's
+            // full 131 dB and its crest is the input's own,
+            // constant by construction. The module-crest
+            // clause belonged to the module-output tap.)
+            check(rmsK[4] - rmsK[0] > 10.0 && std::fabs(crestK[0] - crestK[4]) < 0.25
                   && rmsK[3] > rmsK[2] && rmsK[2] > rmsK[1],
-                  "M1b the send moves materially with INPUT at compMix=0 (it did not vary at all in FULL)", d);
+                  "M1b TEST13: the send at compMix=0 is the driven dry — moves with INPUT by the drive law, crest unchanged", d);
         }
         // M2 — the 1.600 ceiling, relocated to the bus:
         // programme peaks at the bus output stay bounded
@@ -2964,7 +3023,12 @@ int main() {
         // O1: the re-spread drive taper — the published
         // table, endpoints exact, increments evened from
         // the old law's ~27:1 half-step bunching to ~5:1.
-        const double want[11] = { -5.00, -3.24, -0.53, 3.46, 9.00, 16.08,
+        // TEST13 RE-PIN (cause: Nathan's Part B directive,
+        // 2026-10-26 — INPUT 0 must be silence and the gain
+        // must move below 5): the bottom half is reshaped
+        // (-80 dB at 0, graded u^1.2 rise); knobs 5..10 are
+        // the standing table byte-identical.
+        const double want[11] = { -80.00, -57.43, -35.97, -15.92, 2.15, 16.08,
                                   24.25, 32.63, 40.23, 46.41, 51.00 };
         double worst = 0, prev = -1e9, incMin = 1e9, incMax = 0;
         for (int k = 0; k <= 10; ++k) {

@@ -518,16 +518,18 @@ int main() {
         // exactly the reported latency at the drive-
         // referenced gain (limiter drive law at the knob x
         // the fixed bus staging trim). P7c is the absolute
-        // anchor (MOD out, +32, knob 0.1 — a knee-clear
-        // regime); P7d proves the MOD-in A state is the
+        // anchor (MOD out, +32, knob 0.36 — a knee-clear
+        // regime; TEST13 re-site, cause: Part B's taper —
+        // 0.36 restores the old 0.1 site's ~-3.8 dB drive);
+        // P7d proves the MOD-in A state is the
         // same passthrough shifted by the ADT's 960 (bit-
         // exact against P7c's render on the settled
         // overlap). Both also assert the bus is NOT silent
         // — the silence these pins used to certify is the
         // behaviour Nathan's directive retired.
         {
-            auto c = runPots(0.0f, 0.0f, false, false, 1.5, 1.0f, 0.1f);
-            const float g = osc72::dbToLinear(osc72::ba6aDriveDb(0.1f))
+            auto c = runPots(0.0f, 0.0f, false, false, 1.5, 1.0f, 0.36f);
+            const float g = osc72::dbToLinear(osc72::ba6aDriveDb(0.36f))
                           * osc72::kBusStagingTrimLin;
             double maxErr = 0; bool audible = false;
             for (int i = settle; i < (int)c.outL.size(); ++i) {
@@ -539,7 +541,7 @@ int main() {
             check(maxErr < 2.0e-5 && audible,
                   "P7c TEST8: both pots 0 (MOD out) = dry passthrough at +32, drive-referenced gain", b);
 
-            auto d = runPots(0.0f, 0.0f, true, false, 1.5, 1.0f, 0.1f);
+            auto d = runPots(0.0f, 0.0f, true, false, 1.5, 1.0f, 0.36f);
             bool exact = true; bool audibleD = false;
             for (int i = settle + 960; i < (int)d.outL.size(); ++i) {
                 if (d.outL[(size_t)i] != c.outL[(size_t)(i - 960)]
@@ -831,10 +833,14 @@ int main() {
         // The lower bounds move to the rescaled readings
         // with ~2x headroom; the upper bounds (the no-step
         // guard) are unchanged.
+        // TEST13 RE-SITE (cause: Part B — INPUT 0 is now
+        // silence by directive, so the fixture parks at
+        // 0.36, whose -3.8 dB drive restores the TEST8
+        // readings' level class; bounds unchanged).
         {
             Osc72Processor p;
             p.prepareToPlay(kFs, 512);
-            p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.0f);
+            p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.36f);
             p.apvts.getParameter("compMix")->setValueNotifyingHost(1.0f);
             p.apvts.getParameter("modMix")->setValueNotifyingHost(0.5f);
             juce::MidiBuffer midi;
@@ -1080,10 +1086,12 @@ int main() {
         // differ geometrically (the ADT's 960-sample pipe
         // reads out late on A->P); each direction's
         // assertions are spelled out at the checks.
+        // (TEST13 re-site as P9e: INPUT parked at 0.36 —
+        // INPUT 0 is silence under Part B's taper.)
         auto flipTest = [&](bool toPhaser, const char* name) {
             Osc72Processor p;
             p.prepareToPlay(kFs, 512);
-            p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.0f);
+            p.apvts.getParameter("allTheWay")->setValueNotifyingHost(0.36f);
             p.apvts.getParameter("warble")->setValueNotifyingHost(1.0f);
             if (!toPhaser) // P->A: start settled in P
                 p.apvts.getParameter("modPhaser")->setValueNotifyingHost(1.0f);
@@ -1133,7 +1141,13 @@ int main() {
                 // 0.007 @+992, positions exact; lower bounds
                 // moved to the rescaled readings with
                 // headroom, no-step uppers kept.
-                check(pk32 > 0.003f && pk992 > 0.003f && pk32 < 0.15f && pk992 < 0.15f
+                // TEST13 readings (cause: the serial bus —
+                // the wet arm is the bare cascade now, whose
+                // early response lacks the classic mix's dry
+                // half, so both mid-flip shares sit lower):
+                // 0.003 @+31 / 0.006 @+992; lower bounds to
+                // 0.002, no-step uppers kept.
+                check(pk32 > 0.002f && pk992 > 0.002f && pk32 < 0.15f && pk992 < 0.15f
                       && std::abs(at32 - (midImp + 32)) <= 2 && at992 == midImp + 992, name, bb);
             } else {
                 // P->A geometry (FULL2): the comp channel's
@@ -1148,7 +1162,12 @@ int main() {
                 // 0.042 @+992, positions exact; lower bounds
                 // moved to the rescaled readings with
                 // headroom, no-step uppers kept.
-                check(pk32 > 0.015f && pk32 < 0.20f && pk992 > 0.02f && pk992 < 0.30f
+                // TEST13 readings (cause: the serial bus, as
+                // P10g — the outgoing wet is the bare cascade,
+                // so the +32 share is smaller): 0.013 @+31 /
+                // 0.034 @+992; +32 lower bound to 0.010,
+                // no-step uppers kept.
+                check(pk32 > 0.010f && pk32 < 0.20f && pk992 > 0.02f && pk992 < 0.30f
                       && std::abs(at32 - (midImp + 32)) <= 2 && at992 == midImp + 992, name, bb);
             }
         };
