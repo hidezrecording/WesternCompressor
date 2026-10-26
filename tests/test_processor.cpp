@@ -1417,7 +1417,7 @@ int main() {
         };
         float pk = 0;
         double f = grFallT50(pk);
-        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: dual-sense %.3f s vs pin 0.492 s, peak %.1f dB (pin 21.1)",
+        std::snprintf(b, sizeof b, "DUAL release 50%% recovery: dual-sense %.3f s vs pin 0.509 s, peak %.1f dB (pin 21.4)",
                       f, pk);
         // DUAL-SENSE RE-PIN (Phase 3b): measured
         // end-to-end at the settled park: 0.097 s from
@@ -1454,8 +1454,18 @@ int main() {
         // reads 0.491 s at the same park, C4c/K5; the
         // depth's 0.2 dB move is the parity rebalance).
         // Tolerances unchanged.
-        check(std::fabs(f - 0.492) <= 4.0 * (64.0 / kFs) && std::fabs(pk - 21.1f) < 1.0f,
-              "P11c proc: DUAL release 50% recovery at the TEST10 park (dual-sense class)", b);
+        // TEST12 RE-PIN (cause: the Part D redo, 2026-10-26
+        // — the corrected knee map + 3.50 V threshold move
+        // this park's settled depth 21.1 -> 21.4 dB, and the
+        // 50% recovery from the deeper, slow-law-carried
+        // state reads 0.509 s end-to-end; the module bench
+        // reads the same 0.509 s from 21.37 dB at this
+        // park. The release law and poles are untouched —
+        // the no-crossover invariant re-verified on the
+        // module bench, all configurations. Tolerances
+        // unchanged.)
+        check(std::fabs(f - 0.509) <= 4.0 * (64.0 / kFs) && std::fabs(pk - 21.4f) < 1.0f,
+              "P11c proc: DUAL release 50% recovery at the TEST12 park (dual-sense class)", b);
 
         // P11d: the reported latency is untouched by the
         // bake (MOD in A: 992; MOD out: 32).

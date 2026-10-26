@@ -397,9 +397,21 @@ int main() {
         // tones read 0.0/0.0/3.7 dB and the rises are 10.0
         // then 7.0 dB per +10 dB. The floor substance is
         // unchanged (sub-threshold tones still draw nothing).
-        check(m20.meanGr == 0.0f && m10.meanGr == 0.0f && m0.meanGr < 4.2f
+        // TEST12 RE-PIN (cause: the Part D redo — the
+        // corrected knee's gentle foot begins earlier BY
+        // DESIGN: at full precision the tones read
+        // 0.034/0.321/3.589 dB (printed 0.0/0.3/3.6) and
+        // the rises are 9.7 then 7.3 dB per +10 dB. The
+        // -20 draw is a 0.03 dB kiss, not a bias floor:
+        // the extended statics bench reads the LIMIT foot
+        // draw falling smoothly toward zero with level
+        // (0.078 dB at -58 dBFS), i.e. level-dependent,
+        // not constant. The == 0 clauses accordingly
+        // become residue bounds < 0.1 / < 0.5 — still two
+        // orders below a floor's signature.
+        check(m20.meanGr < 0.1f && m10.meanGr < 0.5f && m0.meanGr < 4.2f
               && riseLo > 9.0f && riseLo < 11.0f && riseHi > 6.5f && riseHi < 11.0f,
-              "B2a bench-knob floor (TEST10): tones 0/0/3.7 GR, pre-makeup rises 10.0/7.0 per +10 dB", d);
+              "B2a bench-knob floor (TEST12): tones 0/0.3/3.6 GR, pre-makeup rises 9.7/7.3 per +10 dB", d);
         {
             // Settled (12 s) static reads at knob 0.75 —
             // the dual-sense demand needs the long window
@@ -462,9 +474,18 @@ int main() {
         // 4.99); the knob-5 tone depths settle at 1.4 / 7.6
         // dB (measured on this tree). Bands = measured
         // +/- ~30/20% as before.)
-        check(h20.meanGr > 1.0f && h20.meanGr < 1.8f
-              && h10.meanGr > 6.1f && h10.meanGr < 9.1f,
-              "B2c knob 5 home (TEST11): -20/-10 dBFS tones draw 1.4/7.6 dB (knee-softened, file onsets held)", d);
+        // TEST12 RE-PIN (cause: the Part D redo — TEST11's
+        // shipped knee map was the documented map's inverse
+        // (an expander) and drew LESS at home; the corrected
+        // map restores the TEST10-class home depth: the
+        // knob-5 tones settle at 2.5 / 8.7 dB (measured on
+        // this tree; TEST10 read 2.6 / 8.7), and the FILE
+        // onsets sit at the TEST10 parity positions
+        // (5.35 / 5.18 / 5.30 / 5.05, REPORT-TEST12).
+        // Bands = measured +/- ~30/20% as before.)
+        check(h20.meanGr > 1.7f && h20.meanGr < 3.3f
+              && h10.meanGr > 7.0f && h10.meanGr < 10.4f,
+              "B2c knob 5 home (TEST12): -20/-10 dBFS tones draw 2.5/8.7 dB (corrected knee, file onsets at parity)", d);
     }
     {
         // B3: GR monotone in the knob at a fixed hot input,
@@ -492,7 +513,15 @@ int main() {
         // seat (0.2 dB residue), and the k75->k100 step is
         // +2.4 dB. The substance is kept: monotone, and
         // still materially growing at the top (+2.0 clause).
-        check(k25.meanGr < 0.5f && k50.meanGr >= k25.meanGr
+        // TEST12 RE-PIN (cause: the Part D redo — measured
+        // GR vs knob 0.5/8.7/19.8/22.2: the sub-home residue
+        // is 0.5 dB, the corrected knee's gentle foot on a
+        // hot tone at low knob (B2a's account); the < 0.5
+        // clause becomes < 1.0, still well clear of a bias
+        // floor's signature (~1.5 dB constant, the rejected
+        // TEST11 floor variants). Monotone and the top
+        // step (+2.4) are unchanged in substance.
+        check(k25.meanGr < 1.0f && k50.meanGr >= k25.meanGr
               && k75.meanGr > 10.0f && k100.meanGr > k75.meanGr + 2.0f,
               "B3 GR monotone in drive above the contract home (dual-sense)", d);
     }
@@ -2004,39 +2033,46 @@ int main() {
             return h;
         };
         struct Cfg { const char* name; float knob; bool comp, att, rel; int mod; double secs; uint64_t want; uint64_t grWant; };
+        // TEST12 RE-CAPTURE (cause: the Part D redo — the
+        // corrected knee map on the slow laws, threshold
+        // back to 3.50 V, staging trim re-measured to
+        // -14.10 dB — moves every programme render's GR
+        // trace and audio. Two independent probe builds
+        // from this tree agree on all 30 configs, audio +
+        // GR. REPORT-TEST12.)
         const Cfg cfgs[] = {
             // MOD out, knob 0.50 (4 s each)
-            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0x97afb9c304f95ff1u, 0xbaaaecee736548b8u },
-            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0xb099ab7448986d72u, 0x68be48de77e28b59u },
-            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x0c20f8a7948b9d40u, 0xf78a5c5552cc447fu },
-            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0xe4c13cc0bddc2107u, 0xd57ff32b60f77524u },
-            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0x4eaf276f0a0d48c5u, 0xd406315d0382fdd7u },
-            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0x7d1ca62169822082u, 0xc69d54029c4bc787u },
-            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0x019d79e05aab102au, 0xc3fa6c5ab0ccc7e2u },
-            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x2f1adc2c33a27a33u, 0xe0b4cb162d7f2a52u },
+            { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0xef59028e0e8b218fu, 0x2404f1e17d8b2647u },
+            { "out k0.50 LIMIT attF relS", 0.50f, false, true,  false, 0, 4.0, 0x4237fdf284e711bau, 0xc7d0bd580e6e0613u },
+            { "out k0.50 LIMIT attS relF", 0.50f, false, false, true,  0, 4.0, 0x9a4286799c74c0f5u, 0xf4b6f9601224f421u },
+            { "out k0.50 LIMIT attS relS", 0.50f, false, false, false, 0, 4.0, 0x14b6f04d58126826u, 0x37bdc37569633953u },
+            { "out k0.50 COMP  attF relF", 0.50f, true,  true,  true,  0, 4.0, 0x805fe4e72a6f9730u, 0x398eed13292bd570u },
+            { "out k0.50 COMP  attF relS", 0.50f, true,  true,  false, 0, 4.0, 0xe84c3211282289d1u, 0xbb20905323ae16c1u },
+            { "out k0.50 COMP  attS relF", 0.50f, true,  false, true,  0, 4.0, 0xf87d5ee27d77e2dbu, 0x2a6e14d5444193c6u },
+            { "out k0.50 COMP  attS relS", 0.50f, true,  false, false, 0, 4.0, 0x5f60cf1bac81e017u, 0x4a30546364b0a047u },
             // MOD out, knob 0.75
-            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x8419edb8134cf379u, 0xe3997d52e03447a8u },
-            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x6915536801c805d0u, 0xec11775cdee382e5u },
-            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x9f5ef5ad7f575b2bu, 0x9da0a3810459343du },
-            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0x7bcc06e55e15db98u, 0xd87abf78ff40a15fu },
-            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0x08c637002936cfa3u, 0x3de8ad71e1064b65u },
-            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x47680fb7d376760du, 0x1f462ce8f6909192u },
-            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0xefa4990a24c5ccecu, 0x1071fd79ee5b2962u },
-            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0x04a68df41ff418aeu, 0x44987413dfec4bdau },
+            { "out k0.75 LIMIT attF relF", 0.75f, false, true,  true,  0, 4.0, 0x782f51fb390b8489u, 0xd5c4608c07deb6d3u },
+            { "out k0.75 LIMIT attF relS", 0.75f, false, true,  false, 0, 4.0, 0x7beb37fda42ac880u, 0xce8d06b8671d7d1au },
+            { "out k0.75 LIMIT attS relF", 0.75f, false, false, true,  0, 4.0, 0x6753c945027e2c3cu, 0x84a5963716fc01a2u },
+            { "out k0.75 LIMIT attS relS", 0.75f, false, false, false, 0, 4.0, 0xe02050f9509cfae2u, 0xe0fe239be6f3752cu },
+            { "out k0.75 COMP  attF relF", 0.75f, true,  true,  true,  0, 4.0, 0xd9b938b49abb566bu, 0x2a6a9bbacdaaed98u },
+            { "out k0.75 COMP  attF relS", 0.75f, true,  true,  false, 0, 4.0, 0x94bbc5314311984eu, 0x2b7a7e6f0ff1b2cbu },
+            { "out k0.75 COMP  attS relF", 0.75f, true,  false, true,  0, 4.0, 0x19a356b25c6662d0u, 0xf1bf61e9a8b0b318u },
+            { "out k0.75 COMP  attS relS", 0.75f, true,  false, false, 0, 4.0, 0xbb1ac3d8d5db9190u, 0x347d8c0a18c8432fu },
             // MOD out, knob 1.00
-            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x5b7b7f3f8255014au, 0x8b43356a7b7f88fau },
-            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0xb5aedd1881275134u, 0x786e59ba7c90a655u },
-            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0x2739e75767021b8du, 0x6c56f474cfc2add5u },
-            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0x32e019df53156395u, 0xc55ae2197f5110e2u },
-            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x3dd45f81ea2dc5cau, 0x534a38ef6e052501u },
-            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x81393aad7cca3ad4u, 0x9b7ebad8b823cc52u },
-            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x28c578bc5d69b369u, 0x1f270901b347bd04u },
-            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x7f49bb9d100f74f6u, 0x135631b103d730ddu },
+            { "out k1.00 LIMIT attF relF", 1.00f, false, true,  true,  0, 4.0, 0x3df06655ba6c0992u, 0x1fdf6b9bb1dd9438u },
+            { "out k1.00 LIMIT attF relS", 1.00f, false, true,  false, 0, 4.0, 0xcfbe2bafe6693cb3u, 0x5088c58caadfef32u },
+            { "out k1.00 LIMIT attS relF", 1.00f, false, false, true,  0, 4.0, 0xf2572f8ac2979519u, 0x6cda74d292336c51u },
+            { "out k1.00 LIMIT attS relS", 1.00f, false, false, false, 0, 4.0, 0xc967992bc3ef05f3u, 0x3d0509a5df189105u },
+            { "out k1.00 COMP  attF relF", 1.00f, true,  true,  true,  0, 4.0, 0x089694b317a3ce96u, 0xd605cb13ede9210du },
+            { "out k1.00 COMP  attF relS", 1.00f, true,  true,  false, 0, 4.0, 0x7cf41cb076833308u, 0x22fccf846b6e2d67u },
+            { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x71427f538a662b29u, 0x7bbdd75268e5f750u },
+            { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x04208383a84320eeu, 0xb0e84d16947fd4abu },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x3398cf962c37da5bu, 0x7b3d7ca203545f3fu },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0xb37f33b2109dda53u, 0xc027bb5ad9068937u },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x885c768281538f3au, 0xfbf73cb7d642883cu },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x8c7bc7739b7a2f43u, 0x20a3823ac56e4163u },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0x8534afbb627adb22u, 0x14559dec669b699bu },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x45633b3cd187a720u, 0x78a25cc8d424cd1du },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0xfefeb22c7acf9406u, 0x5fef5c1ed82cc9e4u },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0xe766f002f049600au, 0x9ff9223973a0f40eu },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -2048,8 +2084,8 @@ int main() {
             // FULL: re-captured again on the merged tree at
             // the AB2 ballistics (pure cascade renders under
             // the re-timed limiter).
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0xc051b961398bdd9fu, 0xc027bb5ad9068937u },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x7e803f8970a3e6dcu, 0x20a3823ac56e4163u },
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x4ef3c33b6cb47b0fu, 0x78a25cc8d424cd1du },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x9c5376e696617a2cu, 0x9ff9223973a0f40eu },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
