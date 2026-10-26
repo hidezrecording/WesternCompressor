@@ -316,12 +316,18 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
                           : (compMode_ ? 1.0f : kBa6aRefLimitSlowSeatFactor)));
     const float targetFast = ba6aVariMuDb(detEnv_, lawSlope_, lawToe_,
                                       threshV * lawSense_,
-                                      lawGrowth_, lawGrowthKnee_);
+                                      lawGrowth_, lawGrowthKnee_,
+                                      compMode_ ? kBa6aCompKneeDb : kBa6aLimitKneeDb,
+                                      compMode_ ? kBa6aCompKneeCtrDb : kBa6aLimitKneeCtrDb,
+                                      compMode_ ? kBa6aCompKneeSlopeDb : kBa6aLimitKneeSlopeDb);
     const float targetSlow = ba6aVariMuDb2(detSlowV_ * lawSlowSense_,
                                       lawSlowSlope_, lawSlowToe_,
                                       threshV * lawSlowSense_ * lawSlowRef_,
                                       lawSlowGrowth_, lawSlowGrowthKnee_,
-                                      lawSlowGrowth2_, lawSlowGrowthKnee2_);
+                                      lawSlowGrowth2_, lawSlowGrowthKnee2_,
+                                      compMode_ ? kBa6aCompSlowKneeDb : kBa6aLimitSlowKneeDb,
+                                      compMode_ ? kBa6aCompSlowKneeCtrDb : kBa6aLimitSlowKneeCtrDb,
+                                      compMode_ ? kBa6aCompKneeSlopeDb : kBa6aLimitKneeSlopeDb);
     // Sustainedness blend: rho = slow/fast envelope ratio
     // (the sense cancels -- both read the same tap). w
     // ducks fast (a hit is programme, the fast law keeps
@@ -892,36 +898,36 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
             ? std::min(target, modBlend_ + step)
             : std::max(target, modBlend_ - step);
     }
-    // ── TEST8: the MOD MIX blend laws (Nathan: the
-    // modulation mix follows the compressor mix's
-    // behaviour — a true blend of its section, not a
-    // level fade). Each flavour's channel contribution
-    // is formed from its machine's own components BEFORE
-    // the flavour blend:
-    //   ADT: the output decomposes exactly into the
-    //     unmodulated SRC (the source at the base delay)
-    //     and the modulated deck term. The law rides the
-    //     SRC at the pot's own gain and brings the decks
-    //     in as a blend whose share completes at noon:
-    //       chanA = m . (U + min(2m,1) . V)
-    //     (U/V = the faded output's SRC/deck parts).
-    //   PHASER: a true dry/wet crossfade INTERNAL to the
-    //     insert, between its input and its bare cascade,
-    //     whose ratio travels dry -> classic 50/50 over
-    //     the pot's bottom half, under the pot's gain:
-    //       chanP = m . ((1-r) . in + r . cascade),
-    //       r = min(m, 0.5)
-    //     Noon therefore carries the pedal's classic
-    //     50/50 voice (at half channel gain, as TEST7's
-    //     noon did); above noon the ratio dwells at the
-    //     classic and the pot is the channel's gain.
-    // The extremes are HARD-SELECTED (the codebase's own
-    // discipline): at m = 1 each channel is its machine's
-    // output bit-for-bit — TEST7's bus exactly, the ADT's
-    // additive doubling and the classic pedal output
-    // untouched — and at m = 0 the contribution is
-    // exactly zero, so the bus is bit-exact the MOD-out
-    // bus. ──
+    // ── The MOD MIX blend laws (TEST8 frame; TEST11
+    // correction). TEST8 formed each flavour's channel
+    // contribution from its machine's own components with
+    // a share that completed at noon (ADT decks) and a
+    // ratio that travelled to the classic 50/50 over the
+    // pot's bottom half (phaser). Nathan's TEST11 report:
+    // both flavours "feel inaudible — the section has lost
+    // some level in relation to the other signals."
+    // Measured on his file (component taps at the bus):
+    // the total wet contribution was unchanged, but the
+    // CHARACTER components — the ADT deck term and the
+    // phaser's cascade excess — sat ~6 dB lower at
+    // MOD MIX 0.25 than in TEST7/the baseline, recovering
+    // by noon; the loss was exactly the laws' mid-travel
+    // staging (the deck share halved the deck term at
+    // 0.25; the travelling ratio halved the cascade
+    // excess and shallowed the notches). TEST11 restores
+    // TEST7's per-position relationships, formed from the
+    // same components:
+    //   ADT:    chanA = m . (U + V)   — the pot's gain on
+    //     the machine's full faded output (U/V = its
+    //     SRC/deck parts).
+    //   PHASER: chanP = m . (in + cascade)/2 — the
+    //     pedal's classic 50/50 at every position, under
+    //     the pot's gain.
+    // The TEST8 endpoints and no-mute discipline stand:
+    // the extremes are HARD-SELECTED — at m = 1 each
+    // channel is its machine's output bit-for-bit, and
+    // at m = 0 the contribution is exactly zero, so the
+    // bus is bit-exact the MOD-out bus. ──
     float chanAL, chanAR, chanPL, chanPR;
     {
         const float m = modMixCur_;
@@ -934,12 +940,10 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
             const float gA = adt_.fadeGain();
             const float uL = modL + (adt_.lastWetSrcL() - modL) * gA;
             const float uR = modR + (adt_.lastWetSrcR() - modR) * gA;
-            const float deckShare = std::min(2.0f * m, 1.0f);
-            chanAL = m * (uL + deckShare * (adt_.lastWetDeckL() * gA));
-            chanAR = m * (uR + deckShare * (adt_.lastWetDeckR() * gA));
-            const float rP = std::min(m, 0.5f);
-            chanPL = m * ((1.0f - rP) * modL + rP * eL);
-            chanPR = m * ((1.0f - rP) * modR + rP * eR);
+            chanAL = m * (uL + adt_.lastWetDeckL() * gA);
+            chanAR = m * (uR + adt_.lastWetDeckR() * gA);
+            chanPL = m * (0.5f * modL + 0.5f * eL);
+            chanPR = m * (0.5f * modR + 0.5f * eR);
         }
     }
     // Hard-select at the extremes: a settled flavour is its

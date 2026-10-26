@@ -206,7 +206,18 @@ private:
 // processor path; both senses' references scale
 // proportionally (single seam, nothing else changed).
 // Full evidence: REPORT-TEST7.md.
-inline constexpr float kBa6aThreshVolts = 3.5f;
+// TEST11 RE-CENTRE (Nathan's knee commission, 2026-10-25):
+// the TEST11 knee re-map (below) softens demand through
+// the onset region, which moved the file onsets later;
+// this reference returns them to the TEST10 parity
+// positions: 3.5 -> 1.75 V (-6.02 dB), with kBa6aCompSense
+// 4.20 -> 4.35 and kBa6aRefLimitModeFactor 0.82 -> 0.91
+// carrying the per-seat residuals, and the knee centres
+// shifted in step so the windows stay glued to the loop's
+// measured envelope span. Final file onsets 5.43 / 5.19 /
+// 5.20 / 4.99 vs TEST10's 5.41 / 5.25 / 5.26 / 5.04.
+// Measured: REPORT-TEST11.md.
+inline constexpr float kBa6aThreshVolts = 1.75f;
 // TEST8 (Nathan, 2026-10-25): per-mode / per-seat REFERENCE
 // compensation, costed and verified by renders in
 // DIAGNOSIS-test7-insertion-gain.md §D on the same file.
@@ -251,13 +262,13 @@ inline constexpr float kBa6aThreshVolts = 3.5f;
 // REPORT-TEST10.md. The authorised COMP slow-law toe
 // change was TRIED first (304.15 -> 170) and measured
 // INERT on the file (onsets identical to 0.01 knob)
-// while costing +1.6 dB of sustained statics — on the
+// while moving sustained statics by +1.0...+3.6 dB — on the
 // vocal the slow sense reads single-digit volts, where
 // the toe law's output is ~0.01-0.1 dB regardless of the
 // toe; the §D "toe floor" was a tone-domain reading.
 // The toe is therefore UNCHANGED (304.15).
 inline constexpr float kBa6aRefCompModeFactor      = 0.19f;
-inline constexpr float kBa6aRefLimitModeFactor     = 0.82f;
+inline constexpr float kBa6aRefLimitModeFactor     = 0.91f; // TEST11 re-centre (was 0.82): see kBa6aThreshVolts note
 inline constexpr float kBa6aRefLimitSlowSeatFactor = 0.88f;
 inline constexpr float kBa6aGrCapDb     = 46.0f;
 // TEST9 (Nathan, 2026-10-25): DEEP-GR SOFTENING. His ear on
@@ -369,8 +380,68 @@ inline float ba6aDriveDb(float knob01) {
 inline float ba6aSenseShape(float envV, float toeV) {
     return envV * envV / (envV + toeV);
 }
+// TEST11 (Nathan, 2026-10-25): KNEE SOFTENING, in the detector
+// dB domain. "It's not compressing very much and then suddenly it
+// clamps down -- make the slope of that knee more gentle in all
+// cases." Each law's sensed envelope is re-mapped in dB relative
+// to its own reference before the law runs:
+//   xr = x - (1-s0) * softplus((xc - x))   (softplus in dB units)
+// Below the knee centre xc the map's slope is s0: the
+// onset region's env axis is stretched ~1/s0, so GR rises
+// gradually through it; the slope firms smoothly back to 1.0
+// above xc (softness 2.5 dB), the deep law is EXACTLY the
+// TEST10 law, and as env -> 0 the map tends to s0*x + const, so
+// GR still reaches exactly zero (no bias floor). Centres are
+// per law, placed from the LOOP's measured envelope at the
+// settled GR ~4 dB point (not from the laws in isolation --
+// the settled statics are carried substantially by the
+// fast law leaking through the sustainedness blend at
+// susW ~0.94, so the fast laws' windows must sit on the
+// fast envelope's working span, ~15 dB above the naive
+// law-domain position; an earlier TEST11 cubic-window map
+// and a first softplus placement both measured inert on
+// the settled curve for exactly these reasons. See
+// REPORT-TEST11.) Measured result: statics knee width
+// (GR 0.5 -> 6 dB, input dB) x1.5-1.75 in all four
+// mode/seat combinations, slopes progressive.
+inline constexpr float kBa6aCompKneeSlopeDb  = 0.45f;  // in-knee env slope, COMP
+inline constexpr float kBa6aLimitKneeSlopeDb = 0.38f;  // in-knee env slope, LIMIT
+inline constexpr float kBa6aKneeSoftDb    = 2.5f;   // transition softness (dB)
+inline constexpr float kBa6aCompKneeDb      = 2.5f;
+inline constexpr float kBa6aCompKneeCtrDb   = 35.5f;
+inline constexpr float kBa6aLimitKneeDb     = 2.5f;
+inline constexpr float kBa6aLimitKneeCtrDb  = 18.0f;
+inline constexpr float kBa6aCompSlowKneeDb     = 2.5f;
+inline constexpr float kBa6aCompSlowKneeCtrDb  = 37.5f;
+inline constexpr float kBa6aLimitSlowKneeDb    = 2.5f;
+inline constexpr float kBa6aLimitSlowKneeCtrDb = 17.0f;
+inline float ba6aKneeEnvDb(float envSensed, float refSensed,
+                           float softDb, float ctrDb, float slopeDb) {
+    if (envSensed <= 0.0f || refSensed <= 0.0f || softDb <= 0.0f)
+        return envSensed;
+    // dB via log2/exp2 (float libm log10/pow cost ~4.5% of a
+    // core across the four law calls -- the G1 CPU pin):
+    // 20*log10(r) == 6.0206*log2(r); 10^(x/20) == 2^(x/6.0206).
+    const float x = 6.0205998f * std::log2(envSensed / refSensed);
+    const float z = (ctrDb - x) / softDb;
+    float xr;
+    if (z > 20.0f) {
+        xr = slopeDb * x + (1.0f - slopeDb) * ctrDb;
+    } else if (z < -20.0f) {
+        xr = x;
+    } else {
+        // softplus(z) in dB: S * ln(1 + e^z) = S * ln2 * log2(1 + 2^(z/ln2))
+        const float sp = softDb * 0.6931472f
+                       * std::log2(1.0f + std::exp2(z * 1.4426950f));
+        xr = x - (1.0f - slopeDb) * sp;
+    }
+    return refSensed * std::exp2(xr * 0.16609640f);
+}
 inline float ba6aVariMuDb(float envSensed, float slope, float toeV,
-                          float refSensed, float growth, float growthKnee) {
+                          float refSensed, float growth, float growthKnee,
+                          float kneeDb = 0.0f, float kneeCtrDb = 0.0f,
+                          float kneeSlopeDb = 1.0f) {
+    envSensed = ba6aKneeEnvDb(envSensed, refSensed, kneeDb, kneeCtrDb, kneeSlopeDb);
     const float over = ba6aSenseShape(envSensed, toeV)
                      - ba6aSenseShape(refSensed, toeV);
     if (over <= 0.0f) return 0.0f;
@@ -384,7 +455,10 @@ inline float ba6aVariMuDb(float envSensed, float slope, float toeV,
 // tends to slope + growth + growth2 (G4 discipline).
 inline float ba6aVariMuDb2(float envSensed, float slope, float toeV,
                            float refSensed, float growth, float growthKnee,
-                           float growth2, float growthKnee2) {
+                           float growth2, float growthKnee2,
+                           float kneeDb = 0.0f, float kneeCtrDb = 0.0f,
+                          float kneeSlopeDb = 1.0f) {
+    envSensed = ba6aKneeEnvDb(envSensed, refSensed, kneeDb, kneeCtrDb, kneeSlopeDb);
     const float over = ba6aSenseShape(envSensed, toeV)
                      - ba6aSenseShape(refSensed, toeV);
     if (over <= 0.0f) return 0.0f;
@@ -417,7 +491,7 @@ inline float ba6aVariMuDb2(float envSensed, float slope, float toeV,
 // DEFAULT = LIMIT.
 inline constexpr float kBa6aCompSlope  = 0.85f;  // dB per shaped volt (TEST10 parity: 0.75 -> 0.85, see the TEST10 note at the reference factors)
 inline constexpr float kBa6aCompToe    = 90.0f;  // 6H6 toe corner, volts
-inline constexpr float kBa6aCompSense  = 4.20f;   // detector tap ratio (TEST10 parity: 2.2 -> 4.20 in two measured steps, see the TEST10 note at the reference factors)
+inline constexpr float kBa6aCompSense  = 4.35f;   // detector tap ratio (TEST10 parity: 2.2 -> 4.20 in two measured steps, see the TEST10 note at the reference factors; TEST11 re-centre: 4.20 -> 4.35)
 inline constexpr float kBa6aCompGrowth = 0.30f;  // remote-cutoff slope growth
 inline constexpr float kBa6aCompGrowthKnee = 8.0f;
 inline constexpr float kBa6aLimitSlope = 4.2f;
@@ -575,7 +649,7 @@ inline float ba6aDetSlowTau(float peakSensedComp, float envSensedComp) {
         + (kBa6aDetSlowCreepTauSec - kBa6aDetSlowGrabTauSec) * approach;
     return base * (1.0f + kBa6aDetSlowDim * (1.0f - demand));
 }
-inline constexpr float kBa6aAttFastTauSec  = 0.000252f; // control attack pole, FAST (v45: 90 µs x2.8, v46)
+inline constexpr float kBa6aAttFastTauSec  = 0.000378f; // control attack pole, FAST (v45: 90 µs x2.8, v46; TEST11 x1.5 slower — Part C, see REPORT-TEST11)
 inline constexpr float kBa6aAttSlowTauSec  = 0.005963f;  // control attack pole, SLOW (v45: 1.8 ms x2.65, v46) x1.25 (v53)
 inline constexpr float kBa6aRelSingleTauSec = 0.014f;  // FAST release (1176 seat)
 // TEST10 RELEASE RE-VOICE (Nathan, 2026-10-25 — his
@@ -774,9 +848,13 @@ inline constexpr float kStagingAnchorDb     = 0.0f;      // staging anchor trim 
 // which cost -1.37 dB of insertion level at defaults;
 // +1.4 dB of trim restores it (measured insertion
 // +0.027 dB at defaults, REPORT-TEST10).
+// TEST11 rider: re-measured at -15.31 dB. The knee
+// softening draws less GR at defaults on the file
+// (insertion measured +1.111 dB before the re-trim);
+// -1.11 dB of trim restores flat (REPORT-TEST11).
 // ─────────────────────────────────────────────────────────────────────
-inline constexpr float kBusStagingTrimDb  = -14.2f;      // TEST10 re-trim (measured; see header note)
-inline constexpr float kBusStagingTrimLin = 0.19498446f; // 10^(-14.2/20)
+inline constexpr float kBusStagingTrimDb  = -15.31f;     // TEST11 re-trim (measured; see header note)
+inline constexpr float kBusStagingTrimLin = 0.17159317f; // 10^(-15.31/20)
 
 class Ba6aLimiter {
 public:

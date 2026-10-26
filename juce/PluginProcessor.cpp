@@ -193,15 +193,35 @@ Osc72Processor::createParameterLayout()
         [](const juce::String& t) { return juce::jlimit(0.0f, 1.0f, t.getFloatValue() / 100.0f); }));
     // L/R output level (Nathan, 2026-10-14, v12): the two small
     // O/P LEVEL knobs at the bottom of the rack panel, after the
-    // H2 Audio 002. Real per-channel trims, -12..+12 dB, unity
-    // (0 dB) at centre; applied as the final gain stage in
-    // processBlock, downstream of osc72::Chain.
+    // H2 Audio 002. Real per-channel trims, unity (0 dB) at
+    // centre; applied as the final gain stage in processBlock,
+    // downstream of osc72::Chain.
+    // TEST11 (Nathan, 2026-10-25): the downward range extends
+    // -12 -> -30 dB (at INPUT 10 the +12/-12 pots could not back
+    // the signal off enough). The mapping is PIECEWISE so the
+    // top half is the v12 law untouched (normalised 0.5..1 ==
+    // 0..+12 dB, 0 dB still at centre): stored boost settings
+    // recall identically, stored cuts recall deeper (the lower
+    // half now spans -30..0 dB: a stored -6 dB recalls as
+    // -15 dB, a stored -12 dB as -30 dB). Confined to these
+    // two parameters; full table in REPORT-TEST11.md.
     for (const char* id : { "outLevelL", "outLevelR" })
     {
+        juce::NormalisableRange<float> outRange(
+            -30.0f, 12.0f,
+            [](float, float, float n) {
+                return n <= 0.5f ? -30.0f + 60.0f * n : 24.0f * (n - 0.5f);
+            },
+            [](float, float, float v) {
+                return v <= 0.0f ? (v + 30.0f) / 60.0f : 0.5f + v / 24.0f;
+            },
+            [](float s, float e, float v) {
+                return juce::jlimit(s, e, std::round(v / 0.01f) * 0.01f);
+            });
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
             juce::ParameterID { id, 1 },
             id[8] == 'L' ? "Output Level L" : "Output Level R",
-            juce::NormalisableRange<float>(-12.0f, 12.0f, 0.01f), 0.0f,
+            outRange, 0.0f,
             juce::String(), juce::AudioProcessorParameter::genericParameter,
             [](float v, int) { return juce::String(v, 1) + " dB"; },
             [](const juce::String& t) { return t.getFloatValue(); }));

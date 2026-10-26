@@ -53,7 +53,7 @@
 // numerals, fixed index, Allen centres — all carried over) and
 // the LIMIT/MOD black levers move onto the panel, and two NEW
 // small black knobs at the bottom are real L/R O/P LEVEL trims
-// (parameters outLevelL/outLevelR, ±12 dB, unity at centre).
+// (parameters outLevelL/outLevelR, -30..+12 dB since TEST11, unity at centre).
 // The BITEY maker line is retired — the badge carries the brand.
 // v13 (Nathan, 2026-10-14, same H2 photo, read literally): v12
 // flattened the photo into one panel — but in the photo the

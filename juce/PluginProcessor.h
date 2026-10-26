@@ -12,8 +12,9 @@
 // (bool, default IN — the compressor bypass), the 'mod' toggle
 // (the "warble" parameter: bool, default OUT — a Lo-Fi Loop
 // Junky-style insert, post-limiter) and, since v12, 'outLevelL' /
-// 'outLevelR' (-12..+12 dB, default 0 dB) — final per-channel
-// output trims applied in processBlock after the chain. Since
+// 'outLevelR' (-12..+12 dB, default 0 dB; TEST11: downward
+// range extended to -30 dB, piecewise at 0 dB) — final
+// per-channel output trims applied in processBlock after the chain. Since
 // v19, a 'power' toggle (bool, default ON) sits on the strip:
 // power off bypasses the whole unit in processBlock (dry
 // passthrough through a click-free fade, latency reported 0)
