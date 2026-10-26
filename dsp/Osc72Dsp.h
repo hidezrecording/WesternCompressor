@@ -911,6 +911,55 @@ inline constexpr float kStagingAnchorDb     = 0.0f;      // staging anchor trim 
 inline constexpr float kBusStagingTrimDb  = -14.10f;     // TEST12 re-trim (measured; see header note)
 inline constexpr float kBusStagingTrimLin = 0.19724227f; // 10^(-14.10/20)
 
+// ── TEST14 bus-arm constants (Nathan's TEST13 session
+// report; REPORT-TEST14) ──
+// A. The dry arm's gain is referenced to a smoothed
+// follower of the limiter's APPLIED GR: dry gain =
+// drive - grRef. The follower is one asymmetric
+// one-pole on the per-sample GR readout — it charges
+// toward rising GR with the charge tau and falls back
+// with the release tau, so the dry sits where the
+// compressed signal sits on programme (slow average:
+// no per-sample gain motion, no blend pumping) instead
+// of running the raw drive law into the shared bus
+// ceiling unprotected (the TEST13 dry crossed the
+// fuzz gate at knob ~6.85 and ran up to +11 dB hotter
+// than the comp path; with the reference, crossings
+// are > 10 in all four configs and the COMP MIX 0 vs
+// 100 level difference is within ~0.6 dB at INPUT
+// 5/7/9 on the reference file — measured, not fitted:
+// no material-specific constant anywhere in the law).
+inline constexpr float kDryGrRefChargeTauSec  = 0.025f;
+inline constexpr float kDryGrRefReleaseTauSec = 0.250f;
+// B. MOD wet-leg restoration (serial bus kept). The
+// ADT wet is formed from the machine's SRC and deck
+// components with the deck share boosted: in the
+// serial topology the SRC coincides with the through
+// signal, so the machine's audible signature is the
+// deck term alone, which sat ~12 dB under the through
+// signal in TEST13 (TEST11's additive bus presented
+// the whole wet at through level). x1.75 restores the
+// deck signature to -4..-7 dB rel and the wet-solo
+// level to +0.3..+1.3 dB of the blend it replaces
+// (INPUT 5/7/9; the spread is the deck's correlation
+// with the SRC across drive, measured on the
+// reference file — REPORT-TEST14).
+inline constexpr float kAdtWetDeckBoost = 1.75f;
+// The Phase 90 wet leg is the pedal's CLASSIC output
+// (0.5 . (in + cascade)) — TEST13 took the bare
+// cascade, whose magnitude response is identically 1:
+// no notches exist in it at any mix (band energy
+// measured identical to the through signal in every
+// 0.5 s chunk), so the effect was absent, not quiet.
+// The classic's own RMS sits ~3 dB under its input on
+// programme (the notches remove energy); the wet leg
+// carries a fixed staging trim so the wet-solo level
+// lands within ~+-1 dB of the blend it replaces
+// (measured residuals -0.99..+0.75 dB across INPUT
+// 5/7/9, both comp settings, REPORT-TEST14).
+inline constexpr float kPhaserWetTrimDb  = 3.3f;
+inline constexpr float kPhaserWetTrimLin = 1.44544f; // 10^(3.3/20)
+
 class Ba6aLimiter {
 public:
     void prepare(double sampleRate);
@@ -1552,6 +1601,19 @@ private:
     {
         return ring[(size_t)((compWrite_ - delay) & compMask_)];
     }
+    // TEST14: the GR reference at an era `delay` calls
+    // back — read with the signal rings' own indexing
+    // convention (compWrite_ - delay), so the dry arm's
+    // gain is the follower value of the very call at
+    // which the dry sample it scales emerged from the
+    // limiter. (Verified: with this convention the
+    // MOD-in dry passthrough is the MOD-out passthrough
+    // shifted by the insert latency, bit-exact — the
+    // processor suite's P7d.)
+    float grRefEra(int delay) const
+    {
+        return grRefRing_[(size_t)((compWrite_ - delay) & compMask_)];
+    }
 
     double fs_ = 48000.0;
     Ba6aLimiter limiter_;
@@ -1597,6 +1659,15 @@ private:
     float busMakeupDb_ = 0.0f;
     // Insert-feed introspection (the send tap).
     float lastFeedL_ = 0.0f, lastFeedR_ = 0.0f;
+    // TEST14: smoothed applied-GR reference for the
+    // dry arm's gain (see kDryGrRefChargeTauSec), plus
+    // its history ring — written in lockstep with the
+    // comp/dry rings (same index, same mask) so the bus
+    // dry arm can read the reference at its own era:
+    // the follower value of the call at which the dry
+    // sample it scales emerged from the limiter.
+    float dryGrRefDb_ = 0.0f;
+    std::vector<float> grRefRing_;
 };
 
 } // namespace osc72

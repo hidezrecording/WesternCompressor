@@ -835,6 +835,9 @@ void Chain::prepare(double sampleRate)
     // 32 + 20 ms < 25 ms + 64).
     dryRingL_.assign((size_t)sz, 0.0f);
     dryRingR_.assign((size_t)sz, 0.0f);
+    // TEST14: the GR-reference history ring, same sizing
+    // and lockstep write index (see the follower below).
+    grRefRing_.assign((size_t)sz, 0.0f);
     compMask_ = sz - 1;
     reset();
     preparedFs_ = fs_;
@@ -865,6 +868,7 @@ void Chain::reset()
     std::fill(compRingR_.begin(), compRingR_.end(), 0.0f);
     std::fill(dryRingL_.begin(), dryRingL_.end(), 0.0f);
     std::fill(dryRingR_.begin(), dryRingR_.end(), 0.0f);
+    std::fill(grRefRing_.begin(), grRefRing_.end(), 0.0f);
     compWrite_ = 0;
     modDelayA_ = modDelayB_ = modExtraTarget();
     modTapFade_ = 1.0f;
@@ -872,6 +876,7 @@ void Chain::reset()
     // staging gain is the fixed trim from the first sample.
     busMakeupDb_ = kBusStagingTrimDb;
     lastFeedL_ = lastFeedR_ = 0.0f;
+    dryGrRefDb_ = 0.0f;   // TEST14: GR reference starts cold
 }
 
 void Chain::process(float inL, float inR, float& outL, float& outR)
@@ -921,7 +926,42 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     compRingR_[(size_t)compWrite_] = modR;
     dryRingL_[(size_t)compWrite_] = inL;
     dryRingR_[(size_t)compWrite_] = inR;
-    const float dryGainLin = dbToLinear(limiter_.driveDb());
+    // ── TEST14 Part A: the dry gain is referenced to
+    // the smoothed applied GR (Nathan's TEST13 report:
+    // at COMP MIX 0 the dry ran the raw drive law into
+    // the shared bus ceiling — peaks ~15 dB over the
+    // park at INPUT 7 — while the GR-protected comp
+    // path stayed clean: "the distortion should not
+    // be different on the zero comp mix versus the
+    // 100"). The follower reads the limiter's applied
+    // GR for THIS sample (gainReductionDb() is the
+    // value the gain stage just applied) and smooths
+    // it asymmetrically; dryGain = drive - grRef. The
+    // dry remains the driven uncompressed signal —
+    // INPUT still drives it, and at GR = 0 (quiet
+    // programme, low knob) the law is the standing
+    // TEST8/13 law exactly — but on programme it sits
+    // where the compressed signal sits. The follower
+    // is also written to a history ring in lockstep
+    // with the signal rings: the bus dry arm below
+    // reads the reference at the ERA of the sample it
+    // scales (the call at which that sample emerged
+    // from the limiter — the same era the comp sample
+    // it blends against was gained in), so a dry sample
+    // and its comp counterpart always sit at the same
+    // reference level, in every MOD state; the send
+    // tap here sits at the module's own timeline and
+    // reads the current value. ──
+    {
+        const float grNow = limiter_.gainReductionDb();
+        const float tau = grNow > dryGrRefDb_
+            ? kDryGrRefChargeTauSec : kDryGrRefReleaseTauSec;
+        dryGrRefDb_ += (grNow - dryGrRefDb_) * tauCoef(tau, fs_);
+        if (dryGrRefDb_ < 0.0f) dryGrRefDb_ = 0.0f;
+        grRefRing_[(size_t)compWrite_] = dryGrRefDb_;
+    }
+    const float driveDbNow = limiter_.driveDb();
+    const float dryGainLin = dbToLinear(driveDbNow - dryGrRefDb_);
     float feedL, feedR;
     {
         const int osD = limiter_.osDelaySamples();
@@ -935,22 +975,49 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
 
     // ── The MOD send: both machines run continuously on
     // the comp blend (the send tap above). The flavour
-    // blend selects between the two WET signals — TEST13:
-    // the ADT's full output (SRC centre + decks) and the
-    // Phase 90's bare cascade (its processEffect arm), so
-    // that the bus crossfade below can form the pedal's
-    // classic 50/50 (blend + cascade)/2 at MOD MIX noon
-    // from the through signal itself. (Through TEST12 the
-    // phaser channel was the classic output and the bus
-    // ADDED m . wet to the blend; the serial semantics
-    // supersede those blend laws — the TEST11 level
-    // restoration is subsumed: at every pot position the
-    // crossfade now trades the full-strength through
-    // signal against the full-strength wet, so no mid-
-    // travel staging loss exists by construction.) ──
+    // blend selects between the two WET signals.
+    // TEST13 took the ADT's full output and the Phase
+    // 90's BARE CASCADE, reasoning that the serial
+    // crossfade trades full-strength signals so no
+    // staging loss exists by construction. Nathan's
+    // TEST13 session disproved the conclusion for both
+    // flavours ("the phase is not even audible now…
+    // same with the ADT, very difficult to pick out
+    // even with the mix all the way up"), and the
+    // measurements say why (REPORT-TEST14):
+    //  - the bare cascade's magnitude response is
+    //    identically 1 — it carries no notches, only
+    //    phase rotation; its band energy measured
+    //    identical to the through signal in every
+    //    0.5 s chunk. The effect was ABSENT, not
+    //    quiet. The notches live in the interference
+    //    between the cascade and the dry path.
+    //  - the ADT's SRC coincides sample-for-sample
+    //    with the through signal in the serial bus,
+    //    so the whole on/off difference was the deck
+    //    term at ~-12 dB rel — against TEST11's
+    //    additive presentation of the full wet at
+    //    ~0 dB rel.
+    // TEST14 therefore forms the wet legs for the
+    // serial bus explicitly:
+    //  - ADT: SRC + kAdtWetDeckBoost x deck, from the
+    //    machine's exposed components (the machine's
+    //    own engage fade is dropped here; the Chain's
+    //    engagement gate below ramps the same 30 ms).
+    //  - Phase 90: the pedal's CLASSIC output
+    //    (0.5 . (in + cascade)) — the full pedal, as
+    //    through TEST12 — under the fixed wet-leg
+    //    staging trim kPhaserWetTrimLin.
+    // The serial endpoints are untouched: MOD MIX 0
+    // is bit-exact the blend; the flavour crossfade
+    // below is unchanged in form. ──
     float aL, aR, pL, pR, eL, eR;
     adt_.process(feedL, feedR, aL, aR);
+    aL = adt_.lastWetSrcL() + kAdtWetDeckBoost * adt_.lastWetDeckL();
+    aR = adt_.lastWetSrcR() + kAdtWetDeckBoost * adt_.lastWetDeckR();
     phaser_.processBoth(feedL, feedR, pL, pR, eL, eR);
+    eL = kPhaserWetTrimLin * pL;
+    eR = kPhaserWetTrimLin * pR;
     const float target = modPhaser_ ? 1.0f : 0.0f;
     if (modBlend_ != target) {
         const float step = 1.0f / (kAdtFadeSec * (float)fs_);
@@ -1036,26 +1103,32 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     float dryArmL, dryArmR;
     {
         const int osD = limiter_.osDelaySamples();
-        float dL, dR;
+        // TEST14: each tap's sample is gained by the
+        // GR reference of ITS era — grRefEra(delay) is
+        // the follower value of the call at which the
+        // sample read at that delay emerged from the
+        // limiter (at delay 0 that is dryGainLin itself,
+        // the value computed at the send tap above).
         if (tapFade >= 1.0f && modDelayB_ == 0) {
-            dL = readDryRing(dryRingL_, osD);
-            dR = readDryRing(dryRingR_, osD);
+            dryArmL = dryGainLin * readDryRing(dryRingL_, osD);
+            dryArmR = dryGainLin * readDryRing(dryRingR_, osD);
         } else {
+            const float gB = dbToLinear(driveDbNow
+                                        - grRefEra(modDelayB_));
             const float bL = readDryRing(dryRingL_, osD + modDelayB_);
             const float bR = readDryRing(dryRingR_, osD + modDelayB_);
             if (tapFade >= 1.0f) {
-                dL = bL; dR = bR;
+                dryArmL = gB * bL;
+                dryArmR = gB * bR;
             } else {
+                const float gA = dbToLinear(driveDbNow
+                                            - grRefEra(modDelayA_));
                 const float aL = readDryRing(dryRingL_, osD + modDelayA_);
                 const float aR = readDryRing(dryRingR_, osD + modDelayA_);
-                dL = aL + (bL - aL) * tapFade;
-                dR = aR + (bR - aR) * tapFade;
+                dryArmL = gA * aL + (gB * bL - gA * aL) * tapFade;
+                dryArmR = gA * aR + (gB * bR - gA * aR) * tapFade;
             }
         }
-        // (dryGainLin: the value computed at the send tap
-        // above — the limiter's drive law for this sample.)
-        dryArmL = dryGainLin * dL;
-        dryArmR = dryGainLin * dR;
     }
     compWrite_ = (compWrite_ + 1) & compMask_;
 
