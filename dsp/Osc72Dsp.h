@@ -955,10 +955,10 @@ inline constexpr float kAdtWetDeckBoost = 1.75f;
 // programme (the notches remove energy); the wet leg
 // carries a fixed staging trim so the wet-solo level
 // lands within ~+-1 dB of the blend it replaces
-// (measured residuals -0.99..+0.75 dB across INPUT
+// (measured residuals -0.02..+0.61 dB across INPUT
 // 5/7/9, both comp settings, REPORT-TEST14).
-inline constexpr float kPhaserWetTrimDb  = 3.3f;
-inline constexpr float kPhaserWetTrimLin = 1.44544f; // 10^(3.3/20)
+inline constexpr float kPhaserWetTrimDb  = 3.2f;
+inline constexpr float kPhaserWetTrimLin = 1.44544f; // 10^(3.2/20)
 
 class Ba6aLimiter {
 public:
