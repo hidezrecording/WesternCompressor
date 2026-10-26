@@ -1563,7 +1563,7 @@ int main() {
                   && std::fabs(norm("compMix") - 1.0) < 1e-6      // COMP MIX 100%
                   && norm("modMix") == 0.0                        // MOD MIX 0%
                   && norm("outLink") == 1.0
-                  && std::fabs(norm("outLevelL") - 0.5) < 1e-6    // 0 dB (of -12..+12)
+                  && std::fabs(norm("outLevelL") - 0.5) < 1e-6    // 0 dB (of -30..+12 since TEST11; centre unchanged)
                   && std::fabs(norm("outLevelR") - 0.5) < 1e-6,
                   "P13a fresh instance: the full factory default state (staging-fix 2)", b);
         }
