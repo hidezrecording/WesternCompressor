@@ -380,6 +380,42 @@ inline float ba6aDriveDb(float knob01) {
     const float u = (0.5f - k) / 0.5f;            // 1 at 0, 0 at 5
     return d5 - (d5 - (-80.0f)) * std::pow(u, 1.2f);
 }
+// TEST15: the dry arm's static staging — the driven
+// input passed through the module's own signal-path
+// shoulders with the control voltage disconnected:
+// the plate soft shoulder (55/105 V), the 6J7 stage
+// (0.55/0.05/60 V) and the 6V6 stage at rest (sag 0;
+// 0.70/0.015/48 V), in the module's own order, in
+// volts, memoryless. A fixed function of the input
+// sample and the drive law at the knob — ZERO coupling
+// to the applied GR. It presents at the bus what the
+// comp path presents applying no reduction (measured
+// on the reference programme: RMS within +0.22/+0.92/
+// +1.62 dB of the GR-0 module at INPUT 5/7/9, peaks
+// within ~1 dB at every knob; the residue is the
+// irons' level-dependent losses, not statically
+// reproducible). TEST14's GR-referenced dry — a
+// smoothed follower of the applied GR subtracted from
+// the dry gain — made the dry breathe with the
+// release in every mix configuration (Nathan's TEST14
+// report: the noise floor pumps following the release
+// at COMP MIX 0, at COMP MIX 100's feed, and through
+// both MOD machines; "in all cases there's
+// compression... that's not how it should be
+// working"). It was a design error and is REMOVED
+// here, not tuned: a memoryless law cannot pump — on
+// a steady floor its output is steady (noise-floor
+// steadiness protocol, REPORT-TEST15: synthetic-bed
+// floor range 4.17 -> 0.53 dB, correlation with the
+// GR trajectory -0.993 -> -0.095).
+inline float ba6aDryStaging(float x, float driveLin)
+{
+    float v = x * kVoltsPerFs * driveLin;
+    v = softClipV(v, 55.0f, 105.0f);
+    v = tubeSatV(v, 0.55f, 0.05f, 60.0f);
+    v = tubeSatV(v, 0.70f, 0.015f, 48.0f);
+    return v / kVoltsPerFs;
+}
 // Detector sense: the 6H6 is fed from its own winding/tap,
 // scaled over the output-terminal level (per-mode sense,
 // §COMP/LIMIT below: 2.2 COMP / 1.4 LIMIT, as shipped).
@@ -912,25 +948,19 @@ inline constexpr float kBusStagingTrimDb  = -14.10f;     // TEST12 re-trim (meas
 inline constexpr float kBusStagingTrimLin = 0.19724227f; // 10^(-14.10/20)
 
 // ── TEST14 bus-arm constants (Nathan's TEST13 session
-// report; REPORT-TEST14) ──
-// A. The dry arm's gain is referenced to a smoothed
-// follower of the limiter's APPLIED GR: dry gain =
-// drive - grRef. The follower is one asymmetric
-// one-pole on the per-sample GR readout — it charges
-// toward rising GR with the charge tau and falls back
-// with the release tau, so the dry sits where the
-// compressed signal sits on programme (slow average:
-// no per-sample gain motion, no blend pumping) instead
-// of running the raw drive law into the shared bus
-// ceiling unprotected (the TEST13 dry crossed the
-// fuzz gate at knob ~6.85 and ran up to +11 dB hotter
-// than the comp path; with the reference, crossings
-// are > 10 in all four configs and the COMP MIX 0 vs
-// 100 level difference is within ~0.6 dB at INPUT
-// 5/7/9 on the reference file — measured, not fitted:
-// no material-specific constant anywhere in the law).
-inline constexpr float kDryGrRefChargeTauSec  = 0.025f;
-inline constexpr float kDryGrRefReleaseTauSec = 0.250f;
+// report; REPORT-TEST14), Part A REMOVED by TEST15 ──
+// A. (TEST15: the GR-referenced dry gain — dry gain =
+// drive - grRef, an asymmetric one-pole follower of
+// the applied GR — is REMOVED, not tuned. Nathan's
+// TEST14 report convicted it: the dry's level was
+// modulated by the compressor's gain trajectory by
+// design, so the noise floor pumped following the
+// release in every mix configuration and no truly
+// uncompressed signal survived either mix stage. The
+// dry is now ba6aDryStaging: the module's own
+// shoulders with the control voltage disconnected, a
+// fixed function of the input sample and the knob.
+// See the function's note and REPORT-TEST15.)
 // B. MOD wet-leg restoration (serial bus kept). The
 // ADT wet is formed from the machine's SRC and deck
 // components with the deck share boosted: in the
@@ -1601,20 +1631,6 @@ private:
     {
         return ring[(size_t)((compWrite_ - delay) & compMask_)];
     }
-    // TEST14: the GR reference at an era `delay` calls
-    // back — read with the signal rings' own indexing
-    // convention (compWrite_ - delay), so the dry arm's
-    // gain is the follower value of the very call at
-    // which the dry sample it scales emerged from the
-    // limiter. (Verified: with this convention the
-    // MOD-in dry passthrough is the MOD-out passthrough
-    // shifted by the insert latency, bit-exact — the
-    // processor suite's P7d.)
-    float grRefEra(int delay) const
-    {
-        return grRefRing_[(size_t)((compWrite_ - delay) & compMask_)];
-    }
-
     double fs_ = 48000.0;
     Ba6aLimiter limiter_;
     AdtChain adt_;
@@ -1659,15 +1675,6 @@ private:
     float busMakeupDb_ = 0.0f;
     // Insert-feed introspection (the send tap).
     float lastFeedL_ = 0.0f, lastFeedR_ = 0.0f;
-    // TEST14: smoothed applied-GR reference for the
-    // dry arm's gain (see kDryGrRefChargeTauSec), plus
-    // its history ring — written in lockstep with the
-    // comp/dry rings (same index, same mask) so the bus
-    // dry arm can read the reference at its own era:
-    // the follower value of the call at which the dry
-    // sample it scales emerged from the limiter.
-    float dryGrRefDb_ = 0.0f;
-    std::vector<float> grRefRing_;
 };
 
 } // namespace osc72

@@ -835,9 +835,6 @@ void Chain::prepare(double sampleRate)
     // 32 + 20 ms < 25 ms + 64).
     dryRingL_.assign((size_t)sz, 0.0f);
     dryRingR_.assign((size_t)sz, 0.0f);
-    // TEST14: the GR-reference history ring, same sizing
-    // and lockstep write index (see the follower below).
-    grRefRing_.assign((size_t)sz, 0.0f);
     compMask_ = sz - 1;
     reset();
     preparedFs_ = fs_;
@@ -868,7 +865,6 @@ void Chain::reset()
     std::fill(compRingR_.begin(), compRingR_.end(), 0.0f);
     std::fill(dryRingL_.begin(), dryRingL_.end(), 0.0f);
     std::fill(dryRingR_.begin(), dryRingR_.end(), 0.0f);
-    std::fill(grRefRing_.begin(), grRefRing_.end(), 0.0f);
     compWrite_ = 0;
     modDelayA_ = modDelayB_ = modExtraTarget();
     modTapFade_ = 1.0f;
@@ -876,7 +872,6 @@ void Chain::reset()
     // staging gain is the fixed trim from the first sample.
     busMakeupDb_ = kBusStagingTrimDb;
     lastFeedL_ = lastFeedR_ = 0.0f;
-    dryGrRefDb_ = 0.0f;   // TEST14: GR reference starts cold
 }
 
 void Chain::process(float inL, float inR, float& outL, float& outR)
@@ -926,49 +921,37 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     compRingR_[(size_t)compWrite_] = modR;
     dryRingL_[(size_t)compWrite_] = inL;
     dryRingR_[(size_t)compWrite_] = inR;
-    // ── TEST14 Part A: the dry gain is referenced to
-    // the smoothed applied GR (Nathan's TEST13 report:
-    // at COMP MIX 0 the dry ran the raw drive law into
-    // the shared bus ceiling — peaks ~15 dB over the
-    // park at INPUT 7 — while the GR-protected comp
-    // path stayed clean: "the distortion should not
-    // be different on the zero comp mix versus the
-    // 100"). The follower reads the limiter's applied
-    // GR for THIS sample (gainReductionDb() is the
-    // value the gain stage just applied) and smooths
-    // it asymmetrically; dryGain = drive - grRef. The
-    // dry remains the driven uncompressed signal —
-    // INPUT still drives it, and at GR = 0 (quiet
-    // programme, low knob) the law is the standing
-    // TEST8/13 law exactly — but on programme it sits
-    // where the compressed signal sits. The follower
-    // is also written to a history ring in lockstep
-    // with the signal rings: the bus dry arm below
-    // reads the reference at the ERA of the sample it
-    // scales (the call at which that sample emerged
-    // from the limiter — the same era the comp sample
-    // it blends against was gained in), so a dry sample
-    // and its comp counterpart always sit at the same
-    // reference level, in every MOD state; the send
-    // tap here sits at the module's own timeline and
-    // reads the current value. ──
-    {
-        const float grNow = limiter_.gainReductionDb();
-        const float tau = grNow > dryGrRefDb_
-            ? kDryGrRefChargeTauSec : kDryGrRefReleaseTauSec;
-        dryGrRefDb_ += (grNow - dryGrRefDb_) * tauCoef(tau, fs_);
-        if (dryGrRefDb_ < 0.0f) dryGrRefDb_ = 0.0f;
-        grRefRing_[(size_t)compWrite_] = dryGrRefDb_;
-    }
+    // ── TEST15: the dry arm is STATIC — the driven
+    // input through the module's own shoulders with
+    // the control voltage disconnected (ba6aDryStaging,
+    // header): a fixed function of the input sample and
+    // the drive law at the knob, with ZERO coupling to
+    // the applied GR. TEST14's GR-referenced dry (a
+    // smoothed follower of the GR subtracted from the
+    // dry gain) made the dry's level follow the
+    // compressor's gain trajectory by design — Nathan's
+    // TEST14 report: the noise floor pumps following
+    // the release in EVERY mix configuration (COMP MIX
+    // 0, COMP MIX 100's feed, COMP 0 through both MOD
+    // machines), because the serial MOD feed inherits
+    // the blend and the bus dry arm was the same slaved
+    // signal. A dry that breathes with the release is
+    // not a dry. The follower, its history ring and the
+    // era reads are REMOVED, not tuned: the staging is
+    // memoryless, so on a steady floor the dry's output
+    // is steady, and at COMP MIX 0 the MOD feed is a
+    // true dry. The drive still comes from the
+    // limiter's smoothed knob law (driveDb()), exactly
+    // as the module's own drive does. ──
     const float driveDbNow = limiter_.driveDb();
-    const float dryGainLin = dbToLinear(driveDbNow - dryGrRefDb_);
+    const float driveLinNow = dbToLinear(driveDbNow);
     float feedL, feedR;
     {
         const int osD = limiter_.osDelaySamples();
         const float dL = readDryRing(dryRingL_, osD);
         const float dR = readDryRing(dryRingR_, osD);
-        feedL = compMixCur_ * modL + (1.0f - compMixCur_) * (dryGainLin * dL);
-        feedR = compMixCur_ * modR + (1.0f - compMixCur_) * (dryGainLin * dR);
+        feedL = compMixCur_ * modL + (1.0f - compMixCur_) * ba6aDryStaging(dL, driveLinNow);
+        feedR = compMixCur_ * modR + (1.0f - compMixCur_) * ba6aDryStaging(dR, driveLinNow);
     }
     lastFeedL_ = feedL;   // the send tap: the comp blend
     lastFeedR_ = feedR;   // itself, at every pot position
@@ -1091,7 +1074,7 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // plus the comp channel's bus offset, through the
     // same A/B offset crossfade — so the dry sample and
     // the comp sample it blends against are the SAME
-    // input sample, and gained by the limiter's own
+    // input sample, and staged by the limiter's own
     // drive law (limiter_.driveDb(), the knob's current
     // smoothed position): at GR ~ 0 the crossfade below
     // trades two level-matched copies of one signal
@@ -1099,34 +1082,31 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // under GR it is true parallel compression referred
     // to the driven signal. The reported latency does
     // not change: the dry arm's delay IS the comp path's
-    // latency, in every MOD state. ──
+    // latency, in every MOD state.
+    // TEST15: each tap's sample passes through the
+    // static staging (ba6aDryStaging) at the current
+    // drive — the staging is memoryless, so a tap needs
+    // no era reference of any kind (TEST14's era-read
+    // GR references are gone with the follower), and
+    // the A/B crossfade blends two staged copies of the
+    // input exactly as it crossfades the comp channel. ──
     float dryArmL, dryArmR;
     {
         const int osD = limiter_.osDelaySamples();
-        // TEST14: each tap's sample is gained by the
-        // GR reference of ITS era — grRefEra(delay) is
-        // the follower value of the call at which the
-        // sample read at that delay emerged from the
-        // limiter (at delay 0 that is dryGainLin itself,
-        // the value computed at the send tap above).
         if (tapFade >= 1.0f && modDelayB_ == 0) {
-            dryArmL = dryGainLin * readDryRing(dryRingL_, osD);
-            dryArmR = dryGainLin * readDryRing(dryRingR_, osD);
+            dryArmL = ba6aDryStaging(readDryRing(dryRingL_, osD), driveLinNow);
+            dryArmR = ba6aDryStaging(readDryRing(dryRingR_, osD), driveLinNow);
         } else {
-            const float gB = dbToLinear(driveDbNow
-                                        - grRefEra(modDelayB_));
-            const float bL = readDryRing(dryRingL_, osD + modDelayB_);
-            const float bR = readDryRing(dryRingR_, osD + modDelayB_);
+            const float bL = ba6aDryStaging(readDryRing(dryRingL_, osD + modDelayB_), driveLinNow);
+            const float bR = ba6aDryStaging(readDryRing(dryRingR_, osD + modDelayB_), driveLinNow);
             if (tapFade >= 1.0f) {
-                dryArmL = gB * bL;
-                dryArmR = gB * bR;
+                dryArmL = bL;
+                dryArmR = bR;
             } else {
-                const float gA = dbToLinear(driveDbNow
-                                            - grRefEra(modDelayA_));
-                const float aL = readDryRing(dryRingL_, osD + modDelayA_);
-                const float aR = readDryRing(dryRingR_, osD + modDelayA_);
-                dryArmL = gA * aL + (gB * bL - gA * aL) * tapFade;
-                dryArmR = gA * aR + (gB * bR - gA * aR) * tapFade;
+                const float aL = ba6aDryStaging(readDryRing(dryRingL_, osD + modDelayA_), driveLinNow);
+                const float aR = ba6aDryStaging(readDryRing(dryRingR_, osD + modDelayA_), driveLinNow);
+                dryArmL = aL + (bL - aL) * tapFade;
+                dryArmR = aR + (bR - aR) * tapFade;
             }
         }
     }
