@@ -357,7 +357,28 @@ inline float ba6aDriveDb(float knob01) {
     const float k = clampf(knob01, 0.0f, 1.0f);
     auto sig = [](float x) { return 1.0f / (1.0f + std::exp(-5.0f * (x - 0.62f))); };
     const float g = (sig(k) - sig(0.0f)) / (sig(1.0f) - sig(0.0f));
-    return -5.0f + 56.0f * g;
+    const float full = -5.0f + 56.0f * g;
+    if (k >= 0.5f)
+        return full;   // TEST13: knobs 5..10 byte-identical to
+                       // the standing law — the calibration
+                       // (onsets, parity, fuzz, invariance)
+                       // lives at and above the home position.
+    // TEST13 Part B (Nathan, on TEST12: "there should be no
+    // signal at INPUT 0", and the gain felt unchanged until
+    // ~5): the standing law's bottom was -5 dB — never
+    // silence, and only 21 dB of travel across the whole
+    // bottom half. Below 5 the law is reshaped: knob 0 is
+    // -80 dB (silence), rising in graded steps of roughly
+    // 23 -> 14 dB per knob unit (u^1.2 — no dead zone, no
+    // single jump), joining the standing value at knob 5
+    // EXACTLY (the branch above takes over at k = 0.5 and
+    // the curve's limit from below is the same value).
+    // Stored sessions with INPUT < 5 will sound quieter
+    // than before — his directive overrides.
+    const float d5 = -5.0f + 56.0f
+        * ((sig(0.5f) - sig(0.0f)) / (sig(1.0f) - sig(0.0f)));
+    const float u = (0.5f - k) / 0.5f;            // 1 at 0, 0 at 5
+    return d5 - (d5 - (-80.0f)) * std::pow(u, 1.2f);
 }
 // Detector sense: the 6H6 is fed from its own winding/tap,
 // scaled over the output-terminal level (per-mode sense,
@@ -1050,6 +1071,12 @@ private:
     float detEnv_ = 0.0f;             // PHASE 3: detector envelope (SENSED VOLTS at the tap)
     float detSlowV_ = 0.0f;           // DUAL-SENSE: slow sustained sense (RAW volts at the tap)
     float peakHoldV_ = 0.0f;          // DUAL-SENSE: ~30 ms tap max-hold (gap-dump trigger)
+    float peakFastV_ = 0.0f;          // TEST13 Part A: seat-independent fast peak of the
+                                      // RAW tap (fixed 5 ms charge / 60 ms decay) — the
+                                      // sustainedness blend's fast reference, replacing
+                                      // the attack-shaped detEnv so the release's
+                                      // demand composition no longer depends on the
+                                      // ATTACK seat (Nathan, on TEST12).
     float stress_ = 0.0f;             // v45: T4 memory state (dB of sustained GR)
     float lastPreL_ = 0.0f, lastPreR_ = 0.0f; // post-iron, pre-makeup (detector source)
     float prePeak_ = 0.0f;            // slow-decay peak of the pre-makeup output (make-up ceiling)
@@ -1259,12 +1286,15 @@ public:
     // toward the cascade instead of toward the classic
     // 50/50 mix (exact input at fade 0, exact cascade at
     // fade 1). In AB3 this was the chain's MOD MIX wet
-    // arm; in FULL2 the bus takes the machine's own
+    // arm; in FULL2 the bus took the machine's own
     // output (process(), the classic 50/50 pedal) as the
-    // MOD channel, per Nathan's bus spec — the insert's
-    // own output IS the channel — so processEffect() is
-    // retained as the cascade's test surface (the J/L
-    // suites pin the machine's two arms directly).
+    // MOD channel. TEST13: under the serial bus the
+    // cascade IS the phaser's wet signal again — the bus
+    // crossfades the through blend against it, forming
+    // the classic 50/50 from the through signal at MOD
+    // MIX noon — so processEffect() is the chain's wet
+    // source once more (the J/L suites pin the machine's
+    // two arms directly).
     // process() above is unchanged: the machine's classic
     // self-contained output.
     void processEffect(float inL, float inR, float& outL, float& outR);
@@ -1398,6 +1428,15 @@ private:
 //      untouched), and between the endpoints the
 //      modulated proportion rises as a blend rather
 //      than the whole channel fading as one gain.
+// TEST13 (Nathan, 2026-10-26) supersedes (2)/(3)'s bus
+// algebra with SERIAL blend semantics: the comp blend
+// of (2) is formed first and the inserts are fed THAT
+// blend (not the raw module output); MOD MIX then
+// crossfades the blend against its modulated version —
+// MOD MIX 0 is the comp blend bit-exact, MOD MIX 100
+// is the wet signal only for any comp setting, and the
+// phaser at noon is the classic (blend + cascade)/2.
+// The (2) dry arm and the reported latency are unchanged.
 // ─────────────────────────────────────────────────────────────────────
 
 class Chain {

@@ -71,6 +71,7 @@ void Ba6aLimiter::reset()
     detEnv_ = 0.0f;
     detSlowV_ = 0.0f;
     peakHoldV_ = 0.0f;
+    peakFastV_ = 0.0f;
     susW_ = 0.0f;
     lastPreL_ = lastPreR_ = 0.0f;
     prePeak_ = 0.0f;
@@ -299,6 +300,12 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
         const float phDecay = tauCoef(releaseFast_ ? 0.006f : 0.030f, fs_);
         peakHoldV_ = peakV > peakHoldV_ ? peakV
                        : peakHoldV_ + (0.0f - peakHoldV_) * phDecay;
+        // TEST13 Part A: the seat-independent fast peak of
+        // the same raw tap (fixed taus — NOT the attack
+        // seat's shaped detector): the sustainedness
+        // blend's fast reference below.
+        peakFastV_ += (peakV - peakFastV_) * tauCoef(
+            peakV > peakFastV_ ? 0.005f : 0.060f, fs_);
         const float dnTau = (peakV <= detSlowV_
                              && peakHoldV_ < 0.35f * detSlowV_)
                                 ? (releaseFast_ ? 0.012f : 0.06f) : kBa6aSlowSenseDnTauSec;
@@ -329,12 +336,28 @@ void Ba6aLimiter::processCore(float inL, float inR, float& outL, float& outR)
                                       compMode_ ? kBa6aCompSlowKneeCtrDb : kBa6aLimitSlowKneeCtrDb,
                                       compMode_ ? kBa6aCompKneeSlopeDb : kBa6aLimitKneeSlopeDb);
     // Sustainedness blend: rho = slow/fast envelope ratio
-    // (the sense cancels -- both read the same tap). w
-    // ducks fast (a hit is programme, the fast law keeps
-    // it), recovers slower (sustained material earns the
-    // slow law's static curve).
+    // (both senses read the same tap). w ducks fast (a hit
+    // is programme, the fast law keeps it), recovers slower
+    // (sustained material earns the slow law's static
+    // curve).
+    // TEST13 Part A: through TEST12 the fast reference was
+    // detEnv_ — the ATTACK-SHAPED detector — so the blend
+    // (and therefore the release's demand composition)
+    // inherited the attack seat: with FAST attack detEnv
+    // rode the phrase peaks, rho sat near 0 and a release
+    // began from the fast law; with SLOW attack rho and
+    // detSlowV both sat hotter and the same release seat
+    // exited through the slow law — Nathan heard the
+    // release change speed with the attack seat (TEST12
+    // session). The reference is now peakFastV_, a fixed-
+    // tau peak follower of the raw tap: identical for both
+    // attack seats (up to the feedback tap's own physics),
+    // so a release is composed the same way regardless of
+    // how the phrase was attacked. On sustained tones the
+    // follower reads the same peak detEnv did, so the
+    // settled blend (w -> 1) and the statics are unchanged.
     {
-        const float peakRaw = detEnv_ / (lawSense_ > 0.01f ? lawSense_ : 1.0f);
+        const float peakRaw = peakFastV_;
         const float rho = detSlowV_ / (peakRaw > 0.05f ? peakRaw : 0.05f);
         float wT = (rho - kBa6aSusRho0) / (kBa6aSusRho1 - kBa6aSusRho0);
         wT = wT < 0.0f ? 0.0f : (wT > 1.0f ? 1.0f : wT);
@@ -861,8 +884,6 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // is the raw post-transformer signal, pre-make-up. ──
     float modL, modR;
     limiter_.process(inL, inR, modL, modR);
-    lastFeedL_ = modL;   // the send tap: what the inserts
-    lastFeedR_ = modR;   // are fed, at every pot position
 
     // TEST8: the two pot slews run FIRST (the retired
     // whole-chain mix's law, as in AB3: one-pole 0.002,
@@ -879,18 +900,57 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     if (std::fabs(modMixTarget_ - modMixCur_) < 2.0e-5f)
         modMixCur_ = modMixTarget_;
 
+    // ── TEST13 Part D: SERIAL BLEND SEMANTICS (Nathan, on
+    // TEST12). Through TEST12 the bus ADDED the wet arm on
+    // top of the comp blend and the inserts were fed the
+    // raw module output unconditionally — so COMP MIX at
+    // dry + MOD MIX 100 was never fully wet, and the MOD
+    // section processed the compressor's raw output (hot,
+    // pre-trim) even when the listener's blend was the
+    // clean driven dry. Now: the comp blend is formed
+    // FIRST (dry <-> comp, as built in TEST8), the inserts
+    // are fed THAT blend, and MOD MIX crossfades the blend
+    // against its modulated version. ──
+    // The rings are written first: the send is tapped from
+    // the blend at the module's own timeline (the oversam-
+    // pling delay only); the bus's alignment offset below
+    // delays the SAME blend for the through path, so the
+    // ADT's internal latency lands exactly where it did —
+    // the reported latency is unchanged.
+    compRingL_[(size_t)compWrite_] = modL;
+    compRingR_[(size_t)compWrite_] = modR;
+    dryRingL_[(size_t)compWrite_] = inL;
+    dryRingR_[(size_t)compWrite_] = inR;
+    const float dryGainLin = dbToLinear(limiter_.driveDb());
+    float feedL, feedR;
+    {
+        const int osD = limiter_.osDelaySamples();
+        const float dL = readDryRing(dryRingL_, osD);
+        const float dR = readDryRing(dryRingR_, osD);
+        feedL = compMixCur_ * modL + (1.0f - compMixCur_) * (dryGainLin * dL);
+        feedR = compMixCur_ * modR + (1.0f - compMixCur_) * (dryGainLin * dR);
+    }
+    lastFeedL_ = feedL;   // the send tap: the comp blend
+    lastFeedR_ = feedR;   // itself, at every pot position
+
     // ── The MOD send: both machines run continuously on
-    // the module output (POST-COMPRESSOR, unconditionally);
-    // the flavour blend selects between their own outputs
-    // — the ADT's natural output (SRC centre + decks) and
-    // the Phase 90's classic output (its internal 50/50).
-    // While MOD is out each machine returns its input
-    // bit-exact once settled, but the bus gate below keeps
-    // the channel silent regardless: the channel is the
-    // insert's output, gated by its engagement. ──
+    // the comp blend (the send tap above). The flavour
+    // blend selects between the two WET signals — TEST13:
+    // the ADT's full output (SRC centre + decks) and the
+    // Phase 90's bare cascade (its processEffect arm), so
+    // that the bus crossfade below can form the pedal's
+    // classic 50/50 (blend + cascade)/2 at MOD MIX noon
+    // from the through signal itself. (Through TEST12 the
+    // phaser channel was the classic output and the bus
+    // ADDED m . wet to the blend; the serial semantics
+    // supersede those blend laws — the TEST11 level
+    // restoration is subsumed: at every pot position the
+    // crossfade now trades the full-strength through
+    // signal against the full-strength wet, so no mid-
+    // travel staging loss exists by construction.) ──
     float aL, aR, pL, pR, eL, eR;
-    adt_.process(modL, modR, aL, aR);
-    phaser_.processBoth(modL, modR, pL, pR, eL, eR);
+    adt_.process(feedL, feedR, aL, aR);
+    phaser_.processBoth(feedL, feedR, pL, pR, eL, eR);
     const float target = modPhaser_ ? 1.0f : 0.0f;
     if (modBlend_ != target) {
         const float step = 1.0f / (kAdtFadeSec * (float)fs_);
@@ -898,65 +958,14 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
             ? std::min(target, modBlend_ + step)
             : std::max(target, modBlend_ - step);
     }
-    // ── The MOD MIX blend laws (TEST8 frame; TEST11
-    // correction). TEST8 formed each flavour's channel
-    // contribution from its machine's own components with
-    // a share that completed at noon (ADT decks) and a
-    // ratio that travelled to the classic 50/50 over the
-    // pot's bottom half (phaser). Nathan's TEST11 report:
-    // both flavours "feel inaudible — the section has lost
-    // some level in relation to the other signals."
-    // Measured on his file (component taps at the bus):
-    // the total wet contribution was unchanged, but the
-    // CHARACTER components — the ADT deck term and the
-    // phaser's cascade excess — sat ~6 dB lower at
-    // MOD MIX 0.25 than in TEST7/the baseline, recovering
-    // by noon; the loss was exactly the laws' mid-travel
-    // staging (the deck share halved the deck term at
-    // 0.25; the travelling ratio halved the cascade
-    // excess and shallowed the notches). TEST11 restores
-    // TEST7's per-position relationships, formed from the
-    // same components:
-    //   ADT:    chanA = m . (U + V)   — the pot's gain on
-    //     the machine's full faded output (U/V = its
-    //     SRC/deck parts).
-    //   PHASER: chanP = m . (in + cascade)/2 — the
-    //     pedal's classic 50/50 at every position, under
-    //     the pot's gain.
-    // The TEST8 endpoints and no-mute discipline stand:
-    // the extremes are HARD-SELECTED — at m = 1 each
-    // channel is its machine's output bit-for-bit, and
-    // at m = 0 the contribution is exactly zero, so the
-    // bus is bit-exact the MOD-out bus. ──
-    float chanAL, chanAR, chanPL, chanPR;
-    {
-        const float m = modMixCur_;
-        if (m >= 1.0f) {
-            chanAL = aL; chanAR = aR;
-            chanPL = pL; chanPR = pR;
-        } else if (m <= 0.0f) {
-            chanAL = chanAR = chanPL = chanPR = 0.0f;
-        } else {
-            const float gA = adt_.fadeGain();
-            const float uL = modL + (adt_.lastWetSrcL() - modL) * gA;
-            const float uR = modR + (adt_.lastWetSrcR() - modR) * gA;
-            chanAL = m * (uL + adt_.lastWetDeckL() * gA);
-            chanAR = m * (uR + adt_.lastWetDeckR() * gA);
-            chanPL = m * (0.5f * modL + 0.5f * eL);
-            chanPR = m * (0.5f * modR + 0.5f * eR);
-        }
-    }
-    // Hard-select at the extremes: a settled flavour is its
-    // own output, bit-for-bit (the subtractive blend is the
-    // transition law, as in the inserts themselves).
     float wetL, wetR;
     if (modBlend_ <= 0.0f) {
-        wetL = chanAL; wetR = chanAR;
+        wetL = aL; wetR = aR;
     } else if (modBlend_ >= 1.0f) {
-        wetL = chanPL; wetR = chanPR;
+        wetL = eL; wetR = eR;
     } else {
-        wetL = chanAL + (chanPL - chanAL) * modBlend_;
-        wetR = chanAR + (chanPR - chanAR) * modBlend_;
+        wetL = aL + (eL - aL) * modBlend_;
+        wetR = aR + (eR - aR) * modBlend_;
     }
     // The engagement gate: linear over the inserts' own
     // 30 ms span, exactly 0 settled-out, exactly 1
@@ -978,13 +987,11 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // MOD toggle and A/P flavour; a change starts the
     // v44-style 30 ms offset crossfade between the old and
     // new reads — the machinery's third home, its purpose
-    // unchanged). ──
-    compRingL_[(size_t)compWrite_] = modL;
-    compRingR_[(size_t)compWrite_] = modR;
-    // TEST8: the dry arm's rings are written in lockstep —
-    // the chain's raw input, every sample.
-    dryRingL_[(size_t)compWrite_] = inL;
-    dryRingR_[(size_t)compWrite_] = inR;
+    // unchanged). (TEST13: the rings were written at the
+    // top of this function, where the send is tapped; the
+    // reads below are unchanged.) ──
+    // (TEST13: the dry ring was written in lockstep at the
+    // top of this function, with the comp ring.)
     const int extra = modExtraTarget();
     if (extra != modDelayB_) {
         modDelayA_ = modDelayB_;
@@ -1045,23 +1052,41 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
                 dR = aR + (bR - aR) * tapFade;
             }
         }
-        const float dryGainLin = dbToLinear(limiter_.driveDb());
+        // (dryGainLin: the value computed at the send tap
+        // above — the limiter's drive law for this sample.)
         dryArmL = dryGainLin * dL;
         dryArmR = dryGainLin * dR;
     }
     compWrite_ = (compWrite_ + 1) & compMask_;
 
-    // ── The bus sum (TEST8): the COMP channel crossfaded
-    // against the dry arm by the COMP MIX pot (comple-
-    // mentary weights on the same slewed value), plus
-    // the MOD channel — its blend law already applied
-    // above — under its engagement gate. ──
-    const float busL = compMixCur_ * compL
-                     + (1.0f - compMixCur_) * dryArmL
-                     + modGate_ * wetL;
-    const float busR = compMixCur_ * compR
-                     + (1.0f - compMixCur_) * dryArmR
-                     + modGate_ * wetR;
+    // ── The bus (TEST8 comp blend; TEST13 serial MOD):
+    // the COMP channel crossfaded against the dry arm by
+    // the COMP MIX pot (complementary weights on the same
+    // slewed value) forms the THROUGH signal; MOD MIX
+    // then crossfades that result against its modulated
+    // version under the engagement gate. The extremes are
+    // HARD-SELECTED: at weight 0 the bus is the comp blend
+    // bit-for-bit (MOD-out equivalence), and at weight 1
+    // it is the wet signal only — for ANY comp setting,
+    // so COMP MIX 0 + MOD MIX 100 is the driven dry signal
+    // modulated, fully wet. (This supersedes the TEST8
+    // additive ADT endpoint at COMP 100 / MOD 100 by
+    // Nathan's directive; deck timings and bases are
+    // unchanged.) ──
+    const float thruL = compMixCur_ * compL
+                      + (1.0f - compMixCur_) * dryArmL;
+    const float thruR = compMixCur_ * compR
+                      + (1.0f - compMixCur_) * dryArmR;
+    const float wMod = modGate_ * modMixCur_;
+    float busL, busR;
+    if (wMod <= 0.0f) {
+        busL = thruL; busR = thruR;
+    } else if (wMod >= 1.0f) {
+        busL = wetL; busR = wetR;
+    } else {
+        busL = thruL + (wetL - thruL) * wMod;
+        busR = thruR + (wetR - thruR) * wMod;
+    }
 
     // ── TEST8: NO AUTO MAKE-UP AT THE BUS (Nathan:
     // "act like a normal compressor"). The FULL2 bus law
