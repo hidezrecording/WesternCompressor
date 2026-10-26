@@ -515,9 +515,10 @@ int main() {
         // (e): the FULL2 silence pins are replaced by
         // dry-passthrough pins). At compMix=0/modMix=0 the
         // bus is the pure dry arm: the input delayed by
-        // exactly the reported latency at the drive-
-        // referenced gain (limiter drive law at the knob x
-        // the fixed bus staging trim). P7c is the absolute
+        // exactly the reported latency at the static
+        // staging (TEST15: the drive law through the
+        // module's own shoulders, ba6aDryStaging, x the
+        // fixed bus staging trim). P7c is the absolute
         // anchor (MOD out, +32, knob 0.36 — a knee-clear
         // regime; TEST13 re-site, cause: Part B's taper —
         // 0.36 restores the old 0.1 site's ~-3.8 dB drive);
@@ -540,7 +541,21 @@ int main() {
             // unchanged: the processor's bus at both pots 0
             // IS the dry arm, anchored absolutely to the
             // input at the reported latency.
-            std::vector<float> traj(c.inL.size());
+            // TEST15 RE-PIN (cause: Nathan's TEST14 report
+            // — the GR-referenced dry pumped; follower
+            // REMOVED): the passthrough is the static
+            // staged dry. The expected output is replicated
+            // from a parallel Chain driven by the render's
+            // own input history — but only for its SLEWED
+            // drive (driveDb() at each sample); the staging
+            // itself is the shared header function
+            // ba6aDryStaging applied to the input sample of
+            // (i - 32), x the fixed trim. Nothing in the
+            // expectation reads the GR. The pin's substance
+            // is unchanged: the processor's bus at both
+            // pots 0 IS the dry arm, anchored absolutely to
+            // the input at the reported latency.
+            std::vector<float> wantL(c.inL.size(), 0.0f), wantR(c.inR.size(), 0.0f);
             {
                 osc72::Chain rep;
                 rep.prepare(kFs);
@@ -560,31 +575,28 @@ int main() {
                 rep.setModMix(0.0f);
                 rep.reset();
                 rep.setModIn(false);
-                float ref = 0.0f;
                 for (size_t i = 0; i < c.inL.size(); ++i) {
                     float oL, oR; rep.process(c.inL[i], c.inR[i], oL, oR);
-                    const float grNow = rep.gainReductionDb();
-                    const float tau = grNow > ref
-                        ? osc72::kDryGrRefChargeTauSec
-                        : osc72::kDryGrRefReleaseTauSec;
-                    ref += (grNow - ref) * osc72::tauCoef(tau, kFs);
-                    if (ref < 0.0f) ref = 0.0f;
-                    // The chain gains by the limiter's
+                    // The chain stages by the limiter's
                     // SLEWED drive (driveDb() at this
                     // sample), not the static law value —
                     // the replica mirrors it exactly.
-                    traj[i] = osc72::dbToLinear(
-                                  rep.limiter().driveDb() - ref)
-                            * osc72::kBusStagingTrimLin;
+                    const float dl = osc72::dbToLinear(rep.limiter().driveDb());
+                    if (i >= 32) {
+                        wantL[i] = osc72::kBusStagingTrimLin
+                                 * osc72::ba6aDryStaging(c.inL[i - 32], dl);
+                        wantR[i] = osc72::kBusStagingTrimLin
+                                 * osc72::ba6aDryStaging(c.inR[i - 32], dl);
+                    }
                 }
             }
             double maxErr = 0; bool audible = false;
             for (int i = settle; i < (int)c.outL.size(); ++i) {
-                maxErr = std::max(maxErr, (double)std::fabs(c.outL[(size_t)i] - traj[(size_t)i] * c.inL[(size_t)(i - 32)]));
-                maxErr = std::max(maxErr, (double)std::fabs(c.outR[(size_t)i] - traj[(size_t)i] * c.inR[(size_t)(i - 32)]));
+                maxErr = std::max(maxErr, (double)std::fabs(c.outL[(size_t)i] - wantL[(size_t)i]));
+                maxErr = std::max(maxErr, (double)std::fabs(c.outR[(size_t)i] - wantR[(size_t)i]));
                 if (std::fabs(c.outL[(size_t)i]) > 1.0e-3f) audible = true;
             }
-            std::snprintf(b, sizeof b, "max |out - gain(t)*in[t-32]| = %.2e, audible %d (GR-referenced trajectory)", maxErr, (int)audible);
+            std::snprintf(b, sizeof b, "max |out - trim*stagedDry[t-32]| = %.2e, audible %d (static staging)", maxErr, (int)audible);
             // TEST14 tolerance (2e-5 -> 5e-5, this pin
             // only): the measured residual is 2.88e-05,
             // and a bare Chain at the identical state
@@ -598,8 +610,15 @@ int main() {
             // chain level (DSP suite L2/M1a2); this pin
             // keeps asserting the trajectory's shape and
             // the latency anchor through the processor.
-            check(maxErr < 5.0e-5 && audible,
-                  "P7c TEST8+14: both pots 0 (MOD out) = GR-referenced dry passthrough at +32", b);
+            // TEST15: the tolerance returns to 2e-5 — the
+            // GR-history sensitivity that forced 5e-5 is
+            // gone with the follower (the dry expectation
+            // now reads only the slewed drive, which the
+            // wrapper and a bare chain compute identically;
+            // measured residual on this build is printed
+            // in the check detail).
+            check(maxErr < 2.0e-5 && audible,
+                  "P7c TEST8+15: both pots 0 (MOD out) = static staged dry passthrough at +32", b);
 
             auto d = runPots(0.0f, 0.0f, true, false, 1.5, 1.0f, 0.36f);
             bool exact = true; bool audibleD = false;
@@ -616,8 +635,16 @@ int main() {
             // reads the reference at each sample's own
             // era (see Chain::grRefEra) — a dry sample is
             // gained identically in both MOD states.
+            // TEST15 rider: the era mechanism is gone with
+            // the follower; the bit-exact form now rests
+            // on the static law — a dry sample is staged
+            // by a memoryless function of itself and the
+            // (settled, identical) drive in both MOD
+            // states, so the two renders still agree
+            // bit-for-bit on the settled overlap this pin
+            // asserts.
             check(exact && audibleD,
-                  "P7d TEST8+14: both pots 0 (MOD in, A) = the same dry passthrough at +992", b);
+                  "P7d TEST8+15: both pots 0 (MOD in, A) = the same dry passthrough at +992", b);
         }
         // P7e (FULL2 form): the COMP channel's gain is
         // linear — at 0.5 the bus carries exactly half the

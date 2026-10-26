@@ -2272,9 +2272,10 @@ int main() {
         // silence; it is the pure dry passthrough — the
         // input delayed by exactly the reported latency
         // (32, or 32+960 with the ADT engaged) at the
-        // drive-referenced gain (limiter drive law at the
-        // knob x the fixed bus staging trim; the bus knee
-        // cannot engage at this gain). The pin asserts the
+        // static staging (TEST15: the drive law through
+        // the module's own shoulders, ba6aDryStaging,
+        // x the fixed bus staging trim; the bus knee
+        // cannot engage at this level). The pin asserts the
         // identity on the settled tail AND that the bus is
         // not silent. (The old both-gains-0 silence cannot
         // coexist with the commissioned bus formula —
@@ -2303,31 +2304,31 @@ int main() {
             // order. At knob 0 the GR trace is identically
             // zero (drive -80 dB), so that sub-case is the
             // old constant-gain identity unchanged.)
-            auto dryGainTraj = [](const MixRender& r, float knob) {
-                std::vector<float> g(r.gr.size());
-                float ref = 0.0f;
-                const float drive = osc72::ba6aDriveDb(knob);
-                for (size_t i = 0; i < r.gr.size(); ++i) {
-                    const float grNow = r.gr[i];
-                    const float tau = grNow > ref
-                        ? osc72::kDryGrRefChargeTauSec
-                        : osc72::kDryGrRefReleaseTauSec;
-                    ref += (grNow - ref) * osc72::tauCoef(tau, kFs);
-                    if (ref < 0.0f) ref = 0.0f;
-                    g[i] = osc72::dbToLinear(drive - ref)
-                         * osc72::kBusStagingTrimLin;
-                }
-                return g;
+            // TEST15 RE-PIN (cause: Nathan's TEST14 report
+            // — the GR-referenced dry pumped the noise
+            // floor in every mix configuration; the
+            // follower and its era rule are REMOVED. The
+            // passthrough is now the STATIC staged dry:
+            // trim x ba6aDryStaging(input, drive at the
+            // knob), a memoryless function of the input
+            // sample and the knob — no trajectory, no era
+            // offset, nothing read from the render's GR
+            // trace. The expectation calls the same header
+            // function the Chain calls, so the identity is
+            // the law itself, asserted on the settled
+            // tail in every MOD state.)
+            auto dryWant = [](float x, float knob) {
+                return osc72::kBusStagingTrimLin
+                     * osc72::ba6aDryStaging(x, osc72::dbToLinear(osc72::ba6aDriveDb(knob)));
             };
             bool ok = true, audible = false, silent = true;
             for (int mod : { 0, 1, 2 }) {
                 auto r = renderMix(0.0f, 0.0f, mod, 0.0f, 2.0);
-                const auto gainRef = dryGainTraj(r, 0.0f);
                 const int lat = (mod == 1) ? 992 : 32; // Chain::latencySamples()
                 const int start = (int)(1.0 * kFs);
                 for (int i = start; i < (int)r.outL.size(); ++i) {
-                    const float wantL = gainRef[(size_t)i] * r.inL[(size_t)(i - lat)];
-                    const float wantR = gainRef[(size_t)i] * r.inR[(size_t)(i - lat)];
+                    const float wantL = dryWant(r.inL[(size_t)(i - lat)], 0.0f);
+                    const float wantR = dryWant(r.inR[(size_t)(i - lat)], 0.0f);
                     if (std::fabs(r.outL[(size_t)i] - wantL) > 1.0e-5f
                         || std::fabs(r.outR[(size_t)i] - wantR) > 1.0e-5f) ok = false;
                     if (std::fabs(r.outL[(size_t)i]) > 1.0e-3f) silent = false;
@@ -2335,23 +2336,17 @@ int main() {
             }
             for (int mod : { 0, 1, 2 }) {
                 auto r = renderMix(0.0f, 0.0f, mod, 0.36f, 2.0);
-                const auto gainRef5 = dryGainTraj(r, 0.36f);
                 const int lat = (mod == 1) ? 992 : 32;
-                // TEST14 era rule: the arm gains each
-                // sample by the reference of the call at
-                // which it emerged from the limiter — the
-                // trajectory read (lat - 32) calls back.
-                const int era = lat - 32;
                 const int start = (int)(1.0 * kFs);
                 for (int i = start; i < (int)r.outL.size(); ++i) {
-                    const float wantL = gainRef5[(size_t)(i - era)] * r.inL[(size_t)(i - lat)];
-                    const float wantR = gainRef5[(size_t)(i - era)] * r.inR[(size_t)(i - lat)];
+                    const float wantL = dryWant(r.inL[(size_t)(i - lat)], 0.36f);
+                    const float wantR = dryWant(r.inR[(size_t)(i - lat)], 0.36f);
                     if (std::fabs(r.outL[(size_t)i] - wantL) > 1.0e-5f
                         || std::fabs(r.outR[(size_t)i] - wantR) > 1.0e-5f) ok = false;
                     if (std::fabs(r.outL[(size_t)i]) > 1.0e-4f) audible = true;
                 }
             }
-            check(ok && audible && silent, "L2 TEST8+13+14: compMix 0 / modMix 0 = GR-referenced dry passthrough at the reported latency (silent at knob 0 per Part B, audible at working drive)", "");
+            check(ok && audible && silent, "L2 TEST8+13+15: compMix 0 / modMix 0 = static staged dry passthrough at the reported latency (no GR reference; silent at knob 0 per Part B, audible at working drive)", "");
         }
         // L3 (FULL2; replaces the AB3 alignment identity):
         // with MOD out, CH2 is gated to exactly zero, so
@@ -2602,6 +2597,18 @@ int main() {
                 // bit-exact, which is the pin's substance:
                 // the feed at compMix=0 is the same dry
                 // the bus arm delivers, computed once.
+                // TEST15 RE-PIN (cause: Nathan's TEST14
+                // report — the GR-referenced dry pumped;
+                // follower REMOVED): the expected dry is
+                // the input delayed by the oversampling
+                // delay through the static staging,
+                // ba6aDryStaging at the knob's drive —
+                // computed by the same header function the
+                // Chain calls, so the comparison stays
+                // bit-exact and the pin's substance is
+                // unchanged: the feed at compMix=0 is the
+                // same dry the bus arm delivers, computed
+                // once — and it reads nothing from the GR.
                 osc72::Chain c0;
                 c0.prepare(kFs);
                 c0.setKnob(0.5f);
@@ -2613,24 +2620,16 @@ int main() {
                 ProgGen pg0;
                 std::vector<float> hL, hR;
                 bool dryOk = true;
-                float grRef = 0.0f;
+                const float driveLin = osc72::dbToLinear(osc72::ba6aDriveDb(0.5f));
                 for (int i = 0; i < (int)(2.0 * kFs); ++i) {
                     float l, r; pg0.sample(i, l, r);
                     hL.push_back(l); hR.push_back(r);
                     float oL, oR; c0.process(l, r, oL, oR);
-                    const float grNow = c0.limiter().gainReductionDb();
-                    const float tau = grNow > grRef
-                        ? osc72::kDryGrRefChargeTauSec
-                        : osc72::kDryGrRefReleaseTauSec;
-                    grRef += (grNow - grRef) * osc72::tauCoef(tau, kFs);
-                    if (grRef < 0.0f) grRef = 0.0f;
-                    const float g = osc72::dbToLinear(
-                        osc72::ba6aDriveDb(0.5f) - grRef);
-                    const float wL = i >= osD ? g * hL[(size_t)(i - osD)] : 0.0f;
-                    const float wR = i >= osD ? g * hR[(size_t)(i - osD)] : 0.0f;
+                    const float wL = i >= osD ? osc72::ba6aDryStaging(hL[(size_t)(i - osD)], driveLin) : 0.0f;
+                    const float wR = i >= osD ? osc72::ba6aDryStaging(hR[(size_t)(i - osD)], driveLin) : 0.0f;
                     if (c0.insertFeedL() != wL || c0.insertFeedR() != wR) dryOk = false;
                 }
-                check(dryOk, "M1a2 TEST14: insert feed at compMix=0 == the GR-referenced driven dry, bit-exact in lockstep", "");
+                check(dryOk, "M1a2 TEST15: insert feed at compMix=0 == the static staged dry, bit-exact in lockstep", "");
             }
 
             std::printf("      insert feed at compMix=0 (programme, settled half of 6 s):\n");
@@ -2673,9 +2672,22 @@ int main() {
             // drive law's 131 less the reference's travel
             // on this fixture), crest -0.09 dB: the
             // assertion's clauses are unchanged and hold.
-            check(rmsK[4] - rmsK[0] > 10.0 && std::fabs(crestK[0] - crestK[4]) < 0.25
+            // TEST15 RE-PIN (cause: Nathan's TEST14 report
+            // — the GR reference is REMOVED; the send at
+            // compMix=0 is the driven dry through the
+            // static staging, ba6aDryStaging): travel is
+            // now +115.95 dB (the drive law's 131 less the
+            // shoulders' RMS squash), and the crest clause
+            // INVERTS: the staged dry's crest FALLS 19.74 dB
+            // across the sweep (20.87 -> 1.12) — the
+            // shoulders park the peaks at their asymptote
+            // while the RMS keeps climbing, the module's
+            // own GR-0 signature. A constant crest would
+            // now be the failure: it would mean the dry
+            // bypasses the staging.
+            check(rmsK[4] - rmsK[0] > 10.0 && (crestK[0] - crestK[4]) > 10.0
                   && rmsK[3] > rmsK[2] && rmsK[2] > rmsK[1],
-                  "M1b TEST13+14: the send at compMix=0 is the driven dry — moves with INPUT by the GR-referenced drive law, crest unchanged", d);
+                  "M1b TEST13+15: the send at compMix=0 is the driven dry — moves with INPUT by the static staging law, crest falls as the shoulders engage", d);
         }
         // M2 — the 1.600 ceiling, relocated to the bus:
         // programme peaks at the bus output stay bounded
