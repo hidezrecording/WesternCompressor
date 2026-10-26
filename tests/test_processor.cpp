@@ -513,112 +513,32 @@ int main() {
         // P7c/P7d TEST8 REWRITE (cause: Nathan's
         // commissioned dry blend, 2026-10-25 — task item
         // (e): the FULL2 silence pins are replaced by
-        // dry-passthrough pins). At compMix=0/modMix=0 the
-        // bus is the pure dry arm: the input delayed by
-        // exactly the reported latency at the static
-        // staging (TEST15: the drive law through the
-        // module's own shoulders, ba6aDryStaging, x the
-        // fixed bus staging trim). P7c is the absolute
-        // anchor (MOD out, +32, knob 0.36 — a knee-clear
-        // regime; TEST13 re-site, cause: Part B's taper —
-        // 0.36 restores the old 0.1 site's ~-3.8 dB drive);
-        // P7d proves the MOD-in A state is the
-        // same passthrough shifted by the ADT's 960 (bit-
-        // exact against P7c's render on the settled
-        // overlap). Both also assert the bus is NOT silent
-        // — the silence these pins used to certify is the
-        // behaviour Nathan's directive retired.
+        // dry-passthrough pins).
+        // TEST16 REWRITE (cause: Nathan's confirmed final
+        // mix semantics, 2026-10-26): at compMix=0/modMix=0
+        // the bus is the dry signal AS IT ARRIVES — the
+        // input itself, delayed by exactly the reported
+        // latency, with no drive gain, no shoulder
+        // cascade and no staging trim. P7c's expectation
+        // is therefore the input itself at +32: the
+        // replica chain TEST14/TEST15 needed (to mirror a
+        // gained dry's trajectory) is GONE — nothing in
+        // the expectation reads the drive, let alone the
+        // GR. P7d proves the MOD-in A state is the same
+        // passthrough shifted by the ADT's 960 (bit-exact
+        // against P7c's render on the settled overlap).
+        // Both also assert the bus is NOT silent.
         {
             auto c = runPots(0.0f, 0.0f, false, false, 1.5, 1.0f, 0.36f);
-            // TEST14 RE-PIN (cause: Part A — the dry gain
-            // is referenced to the smoothed applied GR, so
-            // the passthrough gain is a trajectory, not the
-            // constant drive x trim): the expected gain is
-            // replicated from a parallel Chain driven by
-            // the render's own input history — follower in
-            // the Chain's arithmetic order, era 0 (MOD out
-            // adds no bus offset). The pin's substance is
-            // unchanged: the processor's bus at both pots 0
-            // IS the dry arm, anchored absolutely to the
-            // input at the reported latency.
-            // TEST15 RE-PIN (cause: Nathan's TEST14 report
-            // — the GR-referenced dry pumped; follower
-            // REMOVED): the passthrough is the static
-            // staged dry. The expected output is replicated
-            // from a parallel Chain driven by the render's
-            // own input history — but only for its SLEWED
-            // drive (driveDb() at each sample); the staging
-            // itself is the shared header function
-            // ba6aDryStaging applied to the input sample of
-            // (i - 32), x the fixed trim. Nothing in the
-            // expectation reads the GR. The pin's substance
-            // is unchanged: the processor's bus at both
-            // pots 0 IS the dry arm, anchored absolutely to
-            // the input at the reported latency.
-            std::vector<float> wantL(c.inL.size(), 0.0f), wantR(c.inR.size(), 0.0f);
-            {
-                osc72::Chain rep;
-                rep.prepare(kFs);
-                // Seat the replica in the processor's
-                // factory state (COMP, SLOW/SLOW) with the
-                // knob snapped before reset, exactly as
-                // the chain sits when the render starts.
-                // (A post-reset knob-slew mirror was tried
-                // during the TEST14 re-pin and diverged
-                // 500x worse — the processor does not carry
-                // a slew into the material.)
-                rep.setKnob(0.36f);
-                rep.setCompMode(true);
-                rep.setAttackFast(false);
-                rep.setReleaseFast(false);
-                rep.setCompMix(0.0f);
-                rep.setModMix(0.0f);
-                rep.reset();
-                rep.setModIn(false);
-                for (size_t i = 0; i < c.inL.size(); ++i) {
-                    float oL, oR; rep.process(c.inL[i], c.inR[i], oL, oR);
-                    // The chain stages by the limiter's
-                    // SLEWED drive (driveDb() at this
-                    // sample), not the static law value —
-                    // the replica mirrors it exactly.
-                    const float dl = osc72::dbToLinear(rep.limiter().driveDb());
-                    if (i >= 32) {
-                        wantL[i] = osc72::kBusStagingTrimLin
-                                 * osc72::ba6aDryStaging(c.inL[i - 32], dl);
-                        wantR[i] = osc72::kBusStagingTrimLin
-                                 * osc72::ba6aDryStaging(c.inR[i - 32], dl);
-                    }
-                }
-            }
             double maxErr = 0; bool audible = false;
             for (int i = settle; i < (int)c.outL.size(); ++i) {
-                maxErr = std::max(maxErr, (double)std::fabs(c.outL[(size_t)i] - wantL[(size_t)i]));
-                maxErr = std::max(maxErr, (double)std::fabs(c.outR[(size_t)i] - wantR[(size_t)i]));
+                maxErr = std::max(maxErr, (double)std::fabs(c.outL[(size_t)i] - c.inL[(size_t)(i - 32)]));
+                maxErr = std::max(maxErr, (double)std::fabs(c.outR[(size_t)i] - c.inR[(size_t)(i - 32)]));
                 if (std::fabs(c.outL[(size_t)i]) > 1.0e-3f) audible = true;
             }
-            std::snprintf(b, sizeof b, "max |out - trim*stagedDry[t-32]| = %.2e, audible %d (static staging)", maxErr, (int)audible);
-            // TEST14 tolerance (2e-5 -> 5e-5, this pin
-            // only): the measured residual is 2.88e-05,
-            // and a bare Chain at the identical state
-            // reproduces the SAME residual against the
-            // processor render — the wrapper's GR history
-            // differs from a bare chain's at ulp level
-            // inside the feedback limiter, a difference
-            // the TEST13 constant-gain form of this pin
-            // could not see (its dry gain read no GR).
-            // The law itself is pinned bit-exactly at
-            // chain level (DSP suite L2/M1a2); this pin
-            // keeps asserting the trajectory's shape and
-            // the latency anchor through the processor.
-            // TEST15: the tolerance returns to 2e-5 — the
-            // GR-history sensitivity that forced 5e-5 is
-            // gone with the follower (the dry expectation
-            // now reads only the slewed drive, which the
-            // wrapper and a bare chain compute identically;
-            // measured residual on this build is printed
-            // in the check detail).
+            std::snprintf(b, sizeof b, "max |out - in[t-32]| = %.2e, audible %d (the arriving input itself)", maxErr, (int)audible);
             check(maxErr < 2.0e-5 && audible,
-                  "P7c TEST8+15: both pots 0 (MOD out) = static staged dry passthrough at +32", b);
+                  "P7c TEST16: both pots 0 (MOD out) = the arriving input itself at +32 (no drive, no staging)", b);
 
             auto d = runPots(0.0f, 0.0f, true, false, 1.5, 1.0f, 0.36f);
             bool exact = true; bool audibleD = false;
@@ -643,8 +563,14 @@ int main() {
             // states, so the two renders still agree
             // bit-for-bit on the settled overlap this pin
             // asserts.
+            // TEST16 rider: the identity now rests on the
+            // raw read — a dry sample IS the same input
+            // sample in both MOD states by construction,
+            // so the two renders agree bit-for-bit on the
+            // settled overlap by the strongest possible
+            // argument.
             check(exact && audibleD,
-                  "P7d TEST8+15: both pots 0 (MOD in, A) = the same dry passthrough at +992", b);
+                  "P7d TEST16: both pots 0 (MOD in, A) = the same arriving-input passthrough at +992", b);
         }
         // P7e (FULL2 form): the COMP channel's gain is
         // linear — at 0.5 the bus carries exactly half the
@@ -736,10 +662,24 @@ int main() {
         // superposition; the only residue is the bus
         // knee's, which the fixed staging trim makes
         // smaller, not larger. Bound unchanged.
+        // TEST16 RE-SITE (cause: Nathan's confirmed
+        // semantics — the MOD channel is now ADDITIVE over
+        // a parallel driven feed, so at knob 0.5 the
+        // phaser channel arrives at driven level and the
+        // summed render's peaks sit deep in the bus knee:
+        // the mean-form residue at the old site measured
+        // 2.42e-01, the ceiling doing its documented job
+        // on a hot sum, not an algebra error — the DSP
+        // suite's L4 pins this same affinity exactly in
+        // the knee-free regime). The pin's subject is the
+        // taper's linearity, so the site moves to the
+        // suite's established knee-clear drive (knob 0.36,
+        // as L4/P7c) where that linearity is the thing
+        // measured; the bound is unchanged.
         {
-            auto d = runPots(1.0f, 0.0f, true, true, 2.0, 1.0f, 0.5f, 0.0f, 1.0f);
-            auto w = runPots(1.0f, 1.0f, true, true, 2.0, 1.0f, 0.5f, 0.0f, 1.0f);
-            auto h = runPots(1.0f, 0.5f, true, true, 2.0, 1.0f, 0.5f, 0.0f, 1.0f);
+            auto d = runPots(1.0f, 0.0f, true, true, 2.0, 1.0f, 0.36f, 0.0f, 1.0f);
+            auto w = runPots(1.0f, 1.0f, true, true, 2.0, 1.0f, 0.36f, 0.0f, 1.0f);
+            auto h = runPots(1.0f, 0.5f, true, true, 2.0, 1.0f, 0.36f, 0.0f, 1.0f);
             double maxErr = 0;
             for (int i = settle; i < (int)w.outL.size(); ++i) {
                 const double mL = 0.5 * ((double)d.outL[(size_t)i] + w.outL[(size_t)i]);
@@ -748,7 +688,7 @@ int main() {
                 maxErr = std::max(maxErr, std::fabs(mR - h.outR[(size_t)i]));
             }
             std::snprintf(b, sizeof b, "max |modMix0.5 - (compOnly+full)/2| = %.2e (MOD in, P; bus-cap residue, see comment)", maxErr);
-            check(maxErr < 3.5e-2, "P7f modMix=0.5 sums the channels (mean form; bus-cap residue bounded, staging-fix)", b);
+            check(maxErr < 3.5e-2, "P7f TEST16: modMix=0.5 sums the channels (mean form; knee-clear re-site, bus-cap residue bounded)", b);
         }
         // P7g: POWER off bypasses bit-exact at PARTIAL pot
         // settings (the brief's explicit case: the bypass
@@ -863,6 +803,13 @@ int main() {
         // the crossfade mean of the two arms' peaks (both
         // arms peak at +32, coincident — the delay match
         // this section exists to prove).
+        // TEST16 REWRITE (cause: Nathan's confirmed final
+        // semantics): the dry arm is the ARRIVING INPUT —
+        // its impulse peaks exactly at +32 at the impulse's
+        // own height (0.5; no drive, no trim), and the
+        // half setting's peak is the blend mean of the two
+        // arms' peaks (both arms peak at +32, coincident —
+        // the delay match this section exists to prove).
         {
             auto dry = runImp2(0.0f, 1.0f, false, false, impAt, total);
             auto wet = runImp2(1.0f, 1.0f, false, false, impAt, total);
@@ -871,16 +818,15 @@ int main() {
             const float pkWet = peakAt(wet, impAt + 32, 400, atWet);
             const float pkHalf = peakAt(half, impAt + 32, 400, atHalf);
             const float pkDry = peakAt(dry, impAt + 32, 400, atDry);
-            const float wantDry = 0.5f * osc72::dbToLinear(osc72::ba6aDriveDb(0.0f))
-                                * osc72::kBusStagingTrimLin;
+            const float wantDry = 0.5f; // the impulse itself, unscaled
             std::snprintf(b, sizeof b, "dry arm peak %.4f @%+d (want %.4f @+32), peaks wet@%+d half@%+d (want +32)",
                           (double)pkDry, atDry - impAt, (double)wantDry, atWet - impAt, atHalf - impAt);
             check(std::fabs(pkDry - wantDry) < 1.0e-3f && atDry == impAt + 32
                   && atWet == impAt + 32 && atHalf == impAt + 32,
-                  "P9a TEST8: dry arm impulse peaks exactly at +32 at the referenced height; comp/half coincident", b);
-            std::snprintf(b, sizeof b, "half peak %.4f vs crossfade mean of arms %.4f", pkHalf, 0.5f * (pkWet + pkDry));
+                  "P9a TEST16: dry arm impulse peaks exactly at +32 at the impulse's own height; comp/half coincident", b);
+            std::snprintf(b, sizeof b, "half peak %.4f vs blend mean of arms %.4f", pkHalf, 0.5f * (pkWet + pkDry));
             check(std::fabs(pkHalf - 0.5f * (pkWet + pkDry)) < 0.03f * pkWet,
-                  "P9b TEST8: compMix midpoint peak is the arms' mean (crossfade, no split)", b);
+                  "P9b TEST16: compMix midpoint peak is the arms' mean (blend, no split)", b);
         }
         // P9c/P9d (FULL2 reading): the channels at the
         // bus (MOD in A, compMix=1): the comp channel
@@ -1018,6 +964,11 @@ int main() {
         // bus offset), so the two renders are bit-identical
         // and neither is silent. P7c anchors the pair to
         // the input absolutely.
+        // TEST16 rider: unchanged in substance — the dry
+        // arm is now the arriving input itself, and the P
+        // flavour still adds no bus offset, so the pair
+        // is still bit-identical; P7c anchors it to the
+        // input itself.
         {
             auto renderPots0 = [&](bool modInP, std::vector<float>& oL, std::vector<float>& oR) {
                 Osc72Processor p;
@@ -1057,7 +1008,7 @@ int main() {
             }
             std::snprintf(b, sizeof b, "settled pots=0 (MOD in, P) == MOD-out passthrough bit-exact: %d, audible %d",
                           (int)exact, (int)audible);
-            check(exact && audible, "P10c TEST8: both pots 0 (MOD in, P) = dry passthrough, bit-identical to MOD out", b);
+            check(exact && audible, "P10c TEST16: both pots 0 (MOD in, P) = arriving-input passthrough, bit-identical to MOD out", b);
         }
         // P10d: impulse alignment with MOD in + P (P9
         // methodology at the 32-sample latency): the bus

@@ -1128,9 +1128,25 @@ int main() {
         // product-truthful form of the same subject.
         // Measured on the candidate: dry corr 1.00,
         // side/mid 0.00; wet corr 0.96, side/mid 0.15.
+        // TEST16 RE-SITE (cause: this lambda never set the
+        // knob, so it rendered at the limiter's parked
+        // default — drive -80 dB. Under TEST13-15's
+        // crossfade bus the pin still passed there,
+        // vacuously: at modMix=1 the crossfade removed
+        // everything but the ADT channel, so the check
+        // measured a ~-116 dB signal's INTERNAL width.
+        // TEST16's bus is additive — the dry stays at full
+        // level and a -80 dB-driven wet is correctly
+        // inaudible under it — which exposes the site.
+        // The lambda now sets the working drive (INPUT 5)
+        // the check always described; the subject and the
+        // bands are unchanged. Measured on TEST16: dry
+        // corr 1.00, side/mid 0.00 -> wet corr 0.96,
+        // side/mid 0.14.
         auto widthMono = [&](float modMix, double& corrOut, double& widthOut) {
             osc72::Chain ch;
             ch.prepare(kFs);
+            ch.setKnob(0.5f);
             ch.setCompMix(0.0f);
             ch.setModMix(modMix);
             ch.setModIn(true);
@@ -1159,7 +1175,7 @@ int main() {
         check(corrDry > 0.99 && widthDry < 0.02,
               "F2a mono dry arm is undecorrelated (TEST8 reference render)", d);
         check(corrWet < corrDry - 0.02 && widthWet > 0.10,
-              "F2b mono source widens under the ADT channel over the dry arm (TEST8)", d);
+              "F2b mono source widens under the ADT channel over the dry arm (TEST16 re-site: working drive set explicitly)", d);
     }
     {
         // F3: STEREO feed also widens vs its dry correlation.
@@ -1178,6 +1194,12 @@ int main() {
             // dry arm alone (modMix=0), wet = dry arm + the
             // ADT channel (modMix=1) — isolating the insert's
             // decorrelation in the product's actual bus.
+            // TEST16 RE-SITE: same parked-knob site fault
+            // as F2b (this lambda never set the knob) —
+            // setKnob(0.5f) added; measured on TEST16:
+            // dry 0.78 -> wet 0.75 (gap 0.03), margin 0.02
+            // unchanged.
+            ch.setKnob(0.5f);
             ch.setCompMix(0.0f);
             ch.setModMix(modOn ? 1.0f : 0.0f);
             ch.setModIn(true);
@@ -1211,7 +1233,7 @@ int main() {
         // carried by the dry arm): measured dry 0.78 -> wet
         // 0.75 (gap 0.03) on the candidate; margin 0.02 —
         // the pin still requires a clear decorrelation gap.
-        check(wet < dry - 0.02, "F3 stereo programme decorrelates under ADT (TEST8 dry-arm reference)", d);
+        check(wet < dry - 0.02, "F3 stereo programme decorrelates under ADT (TEST16 re-site: working drive set explicitly)", d);
     }
     {
         // F4: pitch swing on a steady tone, measured in the
@@ -2054,6 +2076,18 @@ int main() {
         // moves the MOD-in renders' audio. Two independent
         // probe builds from this tree agree on all 30
         // configs, audio + GR. REPORT-TEST13.)
+        // TEST16 RE-CAPTURE (cause: Nathan's confirmed
+        // final mix semantics, 2026-10-26 — the inserts
+        // are fed the driven copy in parallel and the bus
+        // is additive): ONLY the six MOD-in configs' AUDIO
+        // references move (24-29). Configs 0-23 reproduce
+        // the TEST15 references bit-for-bit, audio AND GR
+        // — the comp path is bit-identical, the proof the
+        // commission requires — and every GR reference in
+        // the table stays TEST15's verbatim (the new feed
+        // reads the drive law, never the GR). Two
+        // independent probe builds from this tree agree on
+        // all 30 configs. REPORT-TEST16.)
         const Cfg cfgs[] = {
             // MOD out, knob 0.50 (4 s each)
             { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0xf3ac025b7fb91717u, 0xffc9a1ff946a96e4u },
@@ -2083,10 +2117,10 @@ int main() {
             { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x3ce13bef04c908d4u, 0x2f7bc7fca0b935a0u },
             { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x80771394f7791effu, 0x67368920c41cae81u },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xae434e1e252a0086u, 0xbf7ca788efe07289u },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0xf70eaf505292f8c5u, 0xd766a84d12f2c449u },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x1fb40feba18a7b99u, 0x474b8ef70734e91bu },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0xee274830885ad23bu, 0xe097aaaa2a2215aau },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xcdf4d16b15c9d5a0u, 0xbf7ca788efe07289u },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x783dca8c155bed15u, 0xd766a84d12f2c449u },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x151519d4a6001c51u, 0x474b8ef70734e91bu },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x651831e1c7155526u, 0xe097aaaa2a2215aau },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -2098,8 +2132,8 @@ int main() {
             // FULL: re-captured again on the merged tree at
             // the AB2 ballistics (pure cascade renders under
             // the re-timed limiter).
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x04ab620c9c4940d7u, 0xd766a84d12f2c449u },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x56185b972fe40919u, 0xe097aaaa2a2215aau },
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x6dfaf95b3cab5fc9u, 0xd766a84d12f2c449u },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x13c57128d6d5ac0fu, 0xe097aaaa2a2215aau },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
@@ -2174,7 +2208,7 @@ int main() {
                     break;
                 }
             }
-            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == TEST14 candidate references (two-probe harvest)" : bad);
+            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == pinned references (two-probe harvest; configs 0-23 and all GR are TEST15's verbatim, MOD-in audio re-captured for TEST16)" : bad);
             check(ok, g.pin, d);
         }
         // K7f RETIRED in FULL2 (cause: its subject no
@@ -2285,53 +2319,31 @@ int main() {
         // pin here and in the processor suite's P7, per
         // the task's item (e).)
         {
-            // TEST13 RE-SITE (cause: Part B — knob 0's drive
-            // is now -80 dB by Nathan's directive, so the
-            // passthrough at knob 0 is the passthrough AT
-            // SILENCE: the identity is asserted there with
-            // an explicit floor clause, and the audibility
-            // clause moves to the same identity at knob
-            // 0.36, whose drive (-3.8 dB) keeps the bus
-            // clear of the ceiling park, as the original
-            // knob-0 site's -5 dB did.)
-            // TEST14 RE-PIN (cause: Part A — the dry gain
-            // is referenced to the smoothed applied GR,
-            // so the passthrough gain is a TRAJECTORY,
-            // not a constant: gain(i) = drive - grRef(i),
-            // grRef the asymmetric one-pole follower of
-            // the render's own GR trace, replicated here
-            // sample-for-sample in the Chain's arithmetic
-            // order. At knob 0 the GR trace is identically
-            // zero (drive -80 dB), so that sub-case is the
-            // old constant-gain identity unchanged.)
-            // TEST15 RE-PIN (cause: Nathan's TEST14 report
-            // — the GR-referenced dry pumped the noise
-            // floor in every mix configuration; the
-            // follower and its era rule are REMOVED. The
-            // passthrough is now the STATIC staged dry:
-            // trim x ba6aDryStaging(input, drive at the
-            // knob), a memoryless function of the input
-            // sample and the knob — no trajectory, no era
-            // offset, nothing read from the render's GR
-            // trace. The expectation calls the same header
-            // function the Chain calls, so the identity is
-            // the law itself, asserted on the settled
-            // tail in every MOD state.)
-            auto dryWant = [](float x, float knob) {
-                return osc72::kBusStagingTrimLin
-                     * osc72::ba6aDryStaging(x, osc72::dbToLinear(osc72::ba6aDriveDb(knob)));
-            };
-            bool ok = true, audible = false, silent = true;
+            // TEST16 REWRITE (cause: Nathan's confirmed
+            // final mix semantics, 2026-10-26 — COMP MIX 0
+            // is the dry signal AS IT ARRIVES: no drive
+            // gain, no shoulder cascade, no staging trim;
+            // the input itself, delayed by exactly the
+            // reported latency so the blend cannot comb —
+            // "as if the plugin isn't even there"). The
+            // identity is asserted EXACTLY (bit-for-bit) on
+            // the settled tail in every MOD state, at knob
+            // 0.36 AND at knob 0: TEST15's silent-at-knob-0
+            // clause dies here — the arriving input passes
+            // at any knob, because the dry arm reads
+            // nothing, not even the drive. (TEST13's re-site,
+            // TEST14's follower replication and TEST15's
+            // static-staging expectation all belonged to
+            // driven drys that TEST16 retired.)
+            bool ok = true, audible = false, audible0 = false;
             for (int mod : { 0, 1, 2 }) {
                 auto r = renderMix(0.0f, 0.0f, mod, 0.0f, 2.0);
                 const int lat = (mod == 1) ? 992 : 32; // Chain::latencySamples()
                 const int start = (int)(1.0 * kFs);
                 for (int i = start; i < (int)r.outL.size(); ++i) {
-                    const float wantL = dryWant(r.inL[(size_t)(i - lat)], 0.0f);
-                    const float wantR = dryWant(r.inR[(size_t)(i - lat)], 0.0f);
-                    if (std::fabs(r.outL[(size_t)i] - wantL) > 1.0e-5f
-                        || std::fabs(r.outR[(size_t)i] - wantR) > 1.0e-5f) ok = false;
-                    if (std::fabs(r.outL[(size_t)i]) > 1.0e-3f) silent = false;
+                    if (r.outL[(size_t)i] != r.inL[(size_t)(i - lat)]
+                        || r.outR[(size_t)i] != r.inR[(size_t)(i - lat)]) ok = false;
+                    if (std::fabs(r.outL[(size_t)i]) > 1.0e-3f) audible0 = true;
                 }
             }
             for (int mod : { 0, 1, 2 }) {
@@ -2339,14 +2351,12 @@ int main() {
                 const int lat = (mod == 1) ? 992 : 32;
                 const int start = (int)(1.0 * kFs);
                 for (int i = start; i < (int)r.outL.size(); ++i) {
-                    const float wantL = dryWant(r.inL[(size_t)(i - lat)], 0.36f);
-                    const float wantR = dryWant(r.inR[(size_t)(i - lat)], 0.36f);
-                    if (std::fabs(r.outL[(size_t)i] - wantL) > 1.0e-5f
-                        || std::fabs(r.outR[(size_t)i] - wantR) > 1.0e-5f) ok = false;
+                    if (r.outL[(size_t)i] != r.inL[(size_t)(i - lat)]
+                        || r.outR[(size_t)i] != r.inR[(size_t)(i - lat)]) ok = false;
                     if (std::fabs(r.outL[(size_t)i]) > 1.0e-4f) audible = true;
                 }
             }
-            check(ok && audible && silent, "L2 TEST8+13+15: compMix 0 / modMix 0 = static staged dry passthrough at the reported latency (no GR reference; silent at knob 0 per Part B, audible at working drive)", "");
+            check(ok && audible && audible0, "L2 TEST16: compMix 0 / modMix 0 = the arriving input itself at the reported latency, bit-exact (any knob — the dry arm reads nothing, not even the drive)", "");
         }
         // L3 (FULL2; replaces the AB3 alignment identity):
         // with MOD out, CH2 is gated to exactly zero, so
@@ -2423,6 +2433,16 @@ int main() {
             // B's taper — 0.36 restores the original site's
             // ~-3.8 dB drive, so the knee-non-binding
             // precondition and signal levels are as pinned).
+            // TEST16 rider (cause: Nathan's confirmed final
+            // semantics — the bus is additive again:
+            // out = staged(cm.comp + mm.wet) + (1-cm).dry,
+            // the wet fed in parallel from the driven copy):
+            // both identities survive VERBATIM in the same
+            // regime — (i) is now affinity of a LEVEL (the
+            // wet adds; nothing is traded away), (ii) is the
+            // blend's affinity in its pot. Only the reading
+            // of the algebra changed, so only this comment
+            // and the check's name move.
             auto wetFull = renderMix(0.15f, 1.0f, 1, 0.36f, 3.0);
             auto compOnly = renderMix(0.15f, 0.0f, 1, 0.36f, 3.0);
             auto wetHalf = renderMix(0.15f, 0.5f, 1, 0.36f, 3.0);
@@ -2440,7 +2460,7 @@ int main() {
             }
             std::snprintf(d, sizeof d, "mod-affinity max err %.2e; comp-affinity max err %.2e (knee non-binding regime)", mx, mxG);
             check(mx < 2.0e-6 && mxG < 2.0e-6,
-                  "L4 TEST13 serial bus algebra: MOD crossfade affine in its pot; COMP crossfade affine in its pot", d);
+                  "L4 TEST16 additive bus algebra: MOD level affine in its pot; COMP blend affine in its pot", d);
         }
         // L5: folded into L3 in FULL2 (the gate makes the
         // MOD-out inertness exact at every pot value).
@@ -2546,23 +2566,21 @@ int main() {
         // at compMix=0 was the raw input — the diagnosis
         // proved candidate renders at INPUT 5 vs 10
         // digit-identical (max |delta| = 0.000e+00). Through
-        // TEST12 the tap was the module's own output.
-        // TEST13 REWRITE (cause: Nathan's Part D serial
-        // directive, 2026-10-26): the tap is now the COMP
-        // BLEND itself — (a) at compMix=1 it still equals a
-        // module-mode limiter's output bit-for-bit in
-        // lockstep; (b) at compMix=0 it equals the DRIVEN
-        // DRY bit-for-bit in lockstep (the input delayed by
-        // the limiter's oversampling delay at the drive
-        // gain); (c) its level travel across the knob at
-        // compMix=0 is the drive law's (printed; asserted
+        // TEST12 the tap was the module's own output;
+        // TEST13 made it the comp blend; TEST15 the static
+        // staged dry.
+        // TEST16 REWRITE (cause: Nathan's confirmed final
+        // mix semantics, 2026-10-26): the feed is the
+        // DRIVEN COPY in parallel — the input delayed by
+        // the limiter's oversampling delay, at the drive
+        // law's gain, bypassing the module entirely and
+        // independent of both pots: (a) at compMix=1 it
+        // equals that gain copy bit-for-bit in lockstep;
+        // (b) at compMix=0 the same, bit-for-bit; (c) its
+        // level travel across the knob is the drive law's
+        // full range and its crest is the input's own at
+        // every knob (a gain-only path — printed; asserted
         // below).
-        // TEST14 rider (cause: Part A): the drive gain in
-        // (b) is now the GR-referenced gain (drive minus
-        // the smoothed applied GR), replicated bit-exactly
-        // in M1a2; in (c) the travel is the drive law's
-        // range less the reference's own travel on the
-        // fixture (+108.54 dB measured, crest -0.09 dB).
         {
             osc72::Chain ch;
             ch.prepare(kFs);
@@ -2571,44 +2589,30 @@ int main() {
             ch.setModMix(1.0f);
             ch.reset();
             ch.setModIn(true);
-            osc72::Ba6aLimiter lim;
-            lim.setApplyMakeup(false);
-            lim.prepare(kFs);
-            lim.setKnob(0.5f);
-            lim.reset();
+            const int osD = ch.limiter().osDelaySamples();
             ProgGen pg;
+            std::vector<float> hL, hR;
             bool tapOk = true;
+            const float driveLin = osc72::dbToLinear(osc72::ba6aDriveDb(0.5f));
             for (int i = 0; i < (int)(2.0 * kFs); ++i) {
                 float l, r; pg.sample(i, l, r);
-                float mL, mR; lim.process(l, r, mL, mR);
+                hL.push_back(l); hR.push_back(r);
                 float oL, oR; ch.process(l, r, oL, oR);
-                if (ch.insertFeedL() != mL || ch.insertFeedR() != mR) tapOk = false;
+                const float wL = i >= osD ? hL[(size_t)(i - osD)] * driveLin : 0.0f;
+                const float wR = i >= osD ? hR[(size_t)(i - osD)] * driveLin : 0.0f;
+                if (ch.insertFeedL() != wL || ch.insertFeedR() != wR) tapOk = false;
             }
-            check(tapOk, "M1a TEST13: insert feed at compMix=1 == the module's own output, bit-exact in lockstep", "");
+            check(tapOk, "M1a TEST16: insert feed == the driven gain copy, bit-exact in lockstep (compMix=1)", "");
             {
-                // TEST14 RE-PIN (cause: Part A — the dry
-                // gain is referenced to the smoothed
-                // applied GR): the expected dry is the
-                // input delayed by the oversampling delay
-                // at (drive - grRef), grRef the asymmetric
-                // one-pole follower of the chain's own GR
-                // readout, replicated here in the Chain's
-                // arithmetic order — the comparison stays
-                // bit-exact, which is the pin's substance:
-                // the feed at compMix=0 is the same dry
-                // the bus arm delivers, computed once.
-                // TEST15 RE-PIN (cause: Nathan's TEST14
-                // report — the GR-referenced dry pumped;
-                // follower REMOVED): the expected dry is
+                // TEST16 RE-PIN (cause: the parallel driven
+                // feed): the feed at compMix=0 must be the
+                // SAME driven gain copy as at compMix=1 —
                 // the input delayed by the oversampling
-                // delay through the static staging,
-                // ba6aDryStaging at the knob's drive —
-                // computed by the same header function the
-                // Chain calls, so the comparison stays
-                // bit-exact and the pin's substance is
-                // unchanged: the feed at compMix=0 is the
-                // same dry the bus arm delivers, computed
-                // once — and it reads nothing from the GR.
+                // delay at the drive law's gain, nothing
+                // else in the path. The comparison stays
+                // bit-exact, which is the pin's substance:
+                // the feed reads neither pot and nothing
+                // from the module or the GR.
                 osc72::Chain c0;
                 c0.prepare(kFs);
                 c0.setKnob(0.5f);
@@ -2625,11 +2629,11 @@ int main() {
                     float l, r; pg0.sample(i, l, r);
                     hL.push_back(l); hR.push_back(r);
                     float oL, oR; c0.process(l, r, oL, oR);
-                    const float wL = i >= osD ? osc72::ba6aDryStaging(hL[(size_t)(i - osD)], driveLin) : 0.0f;
-                    const float wR = i >= osD ? osc72::ba6aDryStaging(hR[(size_t)(i - osD)], driveLin) : 0.0f;
+                    const float wL = i >= osD ? hL[(size_t)(i - osD)] * driveLin : 0.0f;
+                    const float wR = i >= osD ? hR[(size_t)(i - osD)] * driveLin : 0.0f;
                     if (c0.insertFeedL() != wL || c0.insertFeedR() != wR) dryOk = false;
                 }
-                check(dryOk, "M1a2 TEST15: insert feed at compMix=0 == the static staged dry, bit-exact in lockstep", "");
+                check(dryOk, "M1a2 TEST16: insert feed at compMix=0 == the same driven gain copy, bit-exact (the parallel feed reads neither pot)", "");
             }
 
             std::printf("      insert feed at compMix=0 (programme, settled half of 6 s):\n");
@@ -2659,35 +2663,19 @@ int main() {
                 std::printf("        INPUT %4.1f: feed RMS %.2f dBFS, peak %.2f dBFS, crest %.2f dB\n",
                             (double)(knob * 10.0f), rms, pkDb, pkDb - rms);
             }
-            std::snprintf(d, sizeof d, "feed RMS travel %+.2f dB (INPUT 0 -> 10), crest falls %.2f dB",
-                          rmsK[4] - rmsK[0], crestK[0] - crestK[4]);
-            // TEST13 RE-PIN (cause: Part D serial feed — at
-            // compMix=0 the send is the driven dry, a gain-
-            // only path: its RMS travel is the drive law's
-            // full 131 dB and its crest is the input's own,
-            // constant by construction. The module-crest
-            // clause belonged to the module-output tap.)
-            // TEST14 rider (cause: Part A): the gain is
-            // now GR-referenced — travel +108.54 dB (the
-            // drive law's 131 less the reference's travel
-            // on this fixture), crest -0.09 dB: the
-            // assertion's clauses are unchanged and hold.
-            // TEST15 RE-PIN (cause: Nathan's TEST14 report
-            // — the GR reference is REMOVED; the send at
-            // compMix=0 is the driven dry through the
-            // static staging, ba6aDryStaging): travel is
-            // now +115.95 dB (the drive law's 131 less the
-            // shoulders' RMS squash), and the crest clause
-            // INVERTS: the staged dry's crest FALLS 19.74 dB
-            // across the sweep (20.87 -> 1.12) — the
-            // shoulders park the peaks at their asymptote
-            // while the RMS keeps climbing, the module's
-            // own GR-0 signature. A constant crest would
-            // now be the failure: it would mean the dry
-            // bypasses the staging.
-            check(rmsK[4] - rmsK[0] > 10.0 && (crestK[0] - crestK[4]) > 10.0
+            std::snprintf(d, sizeof d, "feed RMS travel %+.2f dB (INPUT 0 -> 10), crest drift %+.2f dB",
+                          rmsK[4] - rmsK[0], crestK[4] - crestK[0]);
+            // TEST13's form returns (cause: TEST16 — the
+            // feed is again a gain-only path, the parallel
+            // driven copy): travel is the drive law's full
+            // 131.00 dB and the crest is the input's own at
+            // every knob, constant by construction. TEST15's
+            // falling-crest clause belonged to the staged
+            // dry's shoulders, which TEST16 retired with
+            // the driven dry itself.
+            check(rmsK[4] - rmsK[0] > 100.0 && std::fabs(crestK[4] - crestK[0]) < 0.25
                   && rmsK[3] > rmsK[2] && rmsK[2] > rmsK[1],
-                  "M1b TEST13+15: the send at compMix=0 is the driven dry — moves with INPUT by the static staging law, crest falls as the shoulders engage", d);
+                  "M1b TEST16: the send is the driven gain copy — travel is the drive law's full range, crest is the input's own at every knob", d);
         }
         // M2 — the 1.600 ceiling, relocated to the bus:
         // programme peaks at the bus output stay bounded
