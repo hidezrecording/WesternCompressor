@@ -380,42 +380,20 @@ inline float ba6aDriveDb(float knob01) {
     const float u = (0.5f - k) / 0.5f;            // 1 at 0, 0 at 5
     return d5 - (d5 - (-80.0f)) * std::pow(u, 1.2f);
 }
-// TEST15: the dry arm's static staging — the driven
-// input passed through the module's own signal-path
-// shoulders with the control voltage disconnected:
-// the plate soft shoulder (55/105 V), the 6J7 stage
-// (0.55/0.05/60 V) and the 6V6 stage at rest (sag 0;
-// 0.70/0.015/48 V), in the module's own order, in
-// volts, memoryless. A fixed function of the input
-// sample and the drive law at the knob — ZERO coupling
-// to the applied GR. It presents at the bus what the
-// comp path presents applying no reduction (measured
-// on the reference programme: RMS within +0.22/+0.92/
-// +1.62 dB of the GR-0 module at INPUT 5/7/9, peaks
-// within ~1 dB at every knob; the residue is the
-// irons' level-dependent losses, not statically
-// reproducible). TEST14's GR-referenced dry — a
-// smoothed follower of the applied GR subtracted from
-// the dry gain — made the dry breathe with the
-// release in every mix configuration (Nathan's TEST14
-// report: the noise floor pumps following the release
-// at COMP MIX 0, at COMP MIX 100's feed, and through
-// both MOD machines; "in all cases there's
-// compression... that's not how it should be
-// working"). It was a design error and is REMOVED
-// here, not tuned: a memoryless law cannot pump — on
-// a steady floor its output is steady (noise-floor
-// steadiness protocol, REPORT-TEST15: synthetic-bed
-// floor range 4.17 -> 0.53 dB, correlation with the
-// GR trajectory -0.993 -> -0.095).
-inline float ba6aDryStaging(float x, float driveLin)
-{
-    float v = x * kVoltsPerFs * driveLin;
-    v = softClipV(v, 55.0f, 105.0f);
-    v = tubeSatV(v, 0.55f, 0.05f, 60.0f);
-    v = tubeSatV(v, 0.70f, 0.015f, 48.0f);
-    return v / kVoltsPerFs;
-}
+// TEST15's dry-arm static staging (ba6aDryStaging —
+// the driven input through the module's own shoulders
+// with the control voltage disconnected) is RETIRED
+// in TEST16, with the whole notion of a staged dry:
+// Nathan's confirmed semantics (2026-10-26) define
+// COMP MIX 0 as the dry signal AS IT ARRIVES at the
+// plugin — the input itself at input level, aligned —
+// so the dry arm is now the raw ring read and no
+// staging law exists to keep. The function is removed,
+// not parked: the TEST15 record stands in
+// REPORT-TEST15 (it ended the TEST14 GR-referenced
+// dry's pumping — synthetic-bed floor range
+// 4.17 -> 0.53 dB, r(floor, GR) -0.993 -> -0.095 —
+// and its fuzz trade was stated there plainly).
 // Detector sense: the 6H6 is fed from its own winding/tap,
 // scaled over the output-terminal level (per-mode sense,
 // §COMP/LIMIT below: 2.2 COMP / 1.4 LIMIT, as shipped).
@@ -956,11 +934,10 @@ inline constexpr float kBusStagingTrimLin = 0.19724227f; // 10^(-14.10/20)
 // modulated by the compressor's gain trajectory by
 // design, so the noise floor pumped following the
 // release in every mix configuration and no truly
-// uncompressed signal survived either mix stage. The
-// dry is now ba6aDryStaging: the module's own
-// shoulders with the control voltage disconnected, a
-// fixed function of the input sample and the knob.
-// See the function's note and REPORT-TEST15.)
+// uncompressed signal survived either mix stage.
+// TEST16 retires the staged dry that replaced it:
+// the dry arm is the arriving input itself — see the
+// TEST16 note at the retired ba6aDryStaging site.)
 // B. MOD wet-leg restoration (serial bus kept). The
 // ADT wet is formed from the machine's SRC and deck
 // components with the deck share boosted: in the
@@ -973,7 +950,10 @@ inline constexpr float kBusStagingTrimLin = 0.19724227f; // 10^(-14.10/20)
 // level to +0.3..+1.3 dB of the blend it replaces
 // (INPUT 5/7/9; the spread is the deck's correlation
 // with the SRC across drive, measured on the
-// reference file — REPORT-TEST14).
+// reference file — REPORT-TEST14). TEST16 keeps the
+// formation verbatim on the new parallel driven feed;
+// the wet-solo level is re-measured against the comp
+// path on the same cells in REPORT-TEST16.
 inline constexpr float kAdtWetDeckBoost = 1.75f;
 // The Phase 90 wet leg is the pedal's CLASSIC output
 // (0.5 . (in + cascade)) — TEST13 took the bare
@@ -989,6 +969,42 @@ inline constexpr float kAdtWetDeckBoost = 1.75f;
 // 5/7/9, both comp settings, REPORT-TEST14).
 inline constexpr float kPhaserWetTrimDb  = 3.2f;
 inline constexpr float kPhaserWetTrimLin = 1.44544f; // 10^(3.2/20)
+
+// ── TEST16 wet-leg staging (Nathan's confirmed
+// semantics, 2026-10-26; REPORT-TEST16). The inserts
+// are now fed the DRIVEN copy in parallel, so the wet
+// legs carry the driven signal's level — which parts
+// from the compressed path's presentation as the knob
+// rises (the module's reduction and shoulder losses
+// are not in the copy). The wet legs therefore carry
+// a static, knob-referenced staging law — a fixed
+// function of the knob position only, fitted per
+// integer knob on the reference file (COMP SLOW seats)
+// so the wet-solo level lands on the comp path's at
+// every working knob, linear-interpolated between
+// integers. It reads nothing from the signal and
+// nothing from the GR: like the drive taper itself,
+// it cannot pump or breathe. The TEST14 formations
+// above are untouched — this is presentation only.
+// Fit residuals after the law (iterated against the
+// bus ceiling's coupled response, REPORT-TEST16):
+// within +-0.05 dB at INPUT 2-9 and -0.39/-0.32 dB
+// (ADT/phaser) at INPUT 10, on the fit seat. ──
+inline constexpr float kAdtWetStagingDb[11] = {
+    -1.79f, -1.79f, -1.79f, -1.79f, -1.78f, -3.09f,
+    -6.13f, -10.47f, -15.10f, -19.00f, -21.70f
+};
+inline constexpr float kPhaserWetStagingDb[11] = {
+    0.32f, 0.32f, 0.32f, 0.32f, 0.28f, -1.70f,
+    -5.36f, -10.06f, -14.80f, -18.80f, -21.50f
+};
+inline float ba6aWetStagingLin(const float (&tableDb)[11], float knob01)
+{
+    const float kf = clampf(knob01, 0.0f, 1.0f) * 10.0f;
+    const int k0 = kf >= 9.0f ? 9 : (int)kf;
+    const float fr = kf - (float)k0;
+    return dbToLinear(tableDb[k0] + (tableDb[k0 + 1] - tableDb[k0]) * fr);
+}
 
 class Ba6aLimiter {
 public:
@@ -1516,6 +1532,30 @@ private:
 // is the wet signal only for any comp setting, and the
 // phaser at noon is the classic (blend + cascade)/2.
 // The (2) dry arm and the reported latency are unchanged.
+// TEST16 (Nathan, 2026-10-26 — his confirmed final
+// semantics, after the TEST15 session) supersedes the
+// TEST13 algebra and the dry arm together:
+//  - COMP MIX is a BLEND whose zero end is redefined:
+//    the dry arm is the signal AS IT ARRIVES at the
+//    plugin — the input at input level, read at the
+//    comp path's total latency (the alignment machinery
+//    is unchanged) with NO drive, NO staging, NO trim —
+//    "as if the plugin isn't even there". 100 remains
+//    the fully compressed path, bit-identical.
+//  - MOD MIX is a LEVEL, not a blend: the inserts are
+//    fed the DRIVEN signal in parallel (the clean
+//    post-drive gain copy, on its own path bypassing
+//    the compressor entirely, independent of COMP MIX
+//    and of the GR), and their wet output — TEST14's
+//    formations verbatim — ADDS to the comp blend at
+//    the MOD MIX gain under the engagement gate.
+//    0 = the section contributes silence; 100 = its
+//    full output.
+//  - The processed sum (comp share + wet share) keeps
+//    the TEST15 output staging (fixed trim + soft
+//    ceiling); the dry share is added after it,
+//    untouched. The reported latency is unchanged
+//    (32 / 992-A / 32-P).
 // ─────────────────────────────────────────────────────────────────────
 
 class Chain {
@@ -1554,13 +1594,14 @@ public:
     void setModPhaser(bool phaser) { modPhaser_ = phaser; }
     bool modPhaser() const { return modPhaser_; }
 
-    // ── The two strip pots (AB3 repurposing; FULL2
-    // semantics, Nathan; TEST8 blend semantics): COMP MIX
-    // (the ex-SIDECHAIN pot) crossfades the COMP channel
-    // against the bus's dry arm, and MOD MIX (the ex-MIX
-    // pot) drives the per-flavour blend law of the MOD
-    // channel — see the class note above (TEST8 items
-    // (2) and (3)).
+    // ── The two strip pots (AB3 repurposing; TEST16
+    // semantics, Nathan — see the class note above):
+    // COMP MIX (the ex-SIDECHAIN pot) is a BLEND —
+    // it crossfades the COMP channel against the bus's
+    // dry arm (the arriving input, aligned); MOD MIX
+    // (the ex-MIX pot) is a LEVEL — the gain of the
+    // MOD channel's wet output into the bus sum. The
+    // two pots operate differently by his definition.
     // Both targets slew per sample on the retired whole-
     // chain mix's law (one-pole 0.002, snap 2e-5) and snap
     // to their targets in reset(). With MOD out the MOD
@@ -1580,9 +1621,9 @@ public:
     // gain in dB — through TEST7 this was the make-up
     // law's live value; TEST8 removed the law, so it now
     // reports the fixed staging trim (kBusStagingTrimDb)
-    // — and the insert feed — the module output sample
-    // the inserts were last fed (the send tap itself,
-    // pre-insert).
+    // — and the insert feed — the sample the inserts
+    // were last fed (the send tap itself, pre-insert;
+    // TEST16: the driven gain copy).
     float busMakeupDb() const { return busMakeupDb_; }
     float insertFeedL() const { return lastFeedL_; }
     float insertFeedR() const { return lastFeedR_; }

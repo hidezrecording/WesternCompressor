@@ -911,53 +911,45 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // FIRST (dry <-> comp, as built in TEST8), the inserts
     // are fed THAT blend, and MOD MIX crossfades the blend
     // against its modulated version. ──
-    // The rings are written first: the send is tapped from
-    // the blend at the module's own timeline (the oversam-
-    // pling delay only); the bus's alignment offset below
-    // delays the SAME blend for the through path, so the
-    // ADT's internal latency lands exactly where it did —
-    // the reported latency is unchanged.
+    // The rings are written first: the send is tapped at
+    // the module's own timeline (the oversampling delay
+    // only); the bus's alignment offset below delays the
+    // through path by the same amount the insert adds, so
+    // the ADT's internal latency lands exactly where it
+    // did — the reported latency is unchanged.
     compRingL_[(size_t)compWrite_] = modL;
     compRingR_[(size_t)compWrite_] = modR;
     dryRingL_[(size_t)compWrite_] = inL;
     dryRingR_[(size_t)compWrite_] = inR;
-    // ── TEST15: the dry arm is STATIC — the driven
-    // input through the module's own shoulders with
-    // the control voltage disconnected (ba6aDryStaging,
-    // header): a fixed function of the input sample and
-    // the drive law at the knob, with ZERO coupling to
-    // the applied GR. TEST14's GR-referenced dry (a
-    // smoothed follower of the GR subtracted from the
-    // dry gain) made the dry's level follow the
-    // compressor's gain trajectory by design — Nathan's
-    // TEST14 report: the noise floor pumps following
-    // the release in EVERY mix configuration (COMP MIX
-    // 0, COMP MIX 100's feed, COMP 0 through both MOD
-    // machines), because the serial MOD feed inherits
-    // the blend and the bus dry arm was the same slaved
-    // signal. A dry that breathes with the release is
-    // not a dry. The follower, its history ring and the
-    // era reads are REMOVED, not tuned: the staging is
-    // memoryless, so on a steady floor the dry's output
-    // is steady, and at COMP MIX 0 the MOD feed is a
-    // true dry. The drive still comes from the
-    // limiter's smoothed knob law (driveDb()), exactly
-    // as the module's own drive does. ──
+    // ── TEST16: THE SEND IS THE DRIVEN SIGNAL, IN
+    // PARALLEL (Nathan's confirmed semantics, 2026-10-26,
+    // superseding the TEST13 serial feed and the TEST15
+    // staged dry). The insert feed is the clean post-drive
+    // gain copy — the input sample at the module's own
+    // timeline (the oversampling delay) x the limiter's
+    // smoothed drive law, the same level the compressor
+    // itself receives — on its own path, BYPASSING the
+    // compressor entirely: independent of COMP MIX, of
+    // the blend and of the applied GR. Driving INPUT
+    // drives the effect, exactly as it drives the
+    // compressor. No shoulders, no staging law, no GR
+    // reference: a gain copy cannot compress and cannot
+    // breathe. (TEST15's feed was the comp blend, whose
+    // dry share was the staged driven dry; both are
+    // retired here — the blend no longer feeds anything.) ──
     const float driveDbNow = limiter_.driveDb();
     const float driveLinNow = dbToLinear(driveDbNow);
     float feedL, feedR;
     {
         const int osD = limiter_.osDelaySamples();
-        const float dL = readDryRing(dryRingL_, osD);
-        const float dR = readDryRing(dryRingR_, osD);
-        feedL = compMixCur_ * modL + (1.0f - compMixCur_) * ba6aDryStaging(dL, driveLinNow);
-        feedR = compMixCur_ * modR + (1.0f - compMixCur_) * ba6aDryStaging(dR, driveLinNow);
+        feedL = readDryRing(dryRingL_, osD) * driveLinNow;
+        feedR = readDryRing(dryRingR_, osD) * driveLinNow;
     }
-    lastFeedL_ = feedL;   // the send tap: the comp blend
+    lastFeedL_ = feedL;   // the send tap: the driven copy
     lastFeedR_ = feedR;   // itself, at every pot position
 
     // ── The MOD send: both machines run continuously on
-    // the comp blend (the send tap above). The flavour
+    // the driven copy (the send tap above). The flavour
     // blend selects between the two WET signals.
     // TEST13 took the ADT's full output and the Phase
     // 90's BARE CASCADE, reasoning that the serial
@@ -981,8 +973,7 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     //    term at ~-12 dB rel — against TEST11's
     //    additive presentation of the full wet at
     //    ~0 dB rel.
-    // TEST14 therefore forms the wet legs for the
-    // serial bus explicitly:
+    // TEST14 therefore forms the wet legs explicitly:
     //  - ADT: SRC + kAdtWetDeckBoost x deck, from the
     //    machine's exposed components (the machine's
     //    own engage fade is dropped here; the Chain's
@@ -991,9 +982,11 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     //    (0.5 . (in + cascade)) — the full pedal, as
     //    through TEST12 — under the fixed wet-leg
     //    staging trim kPhaserWetTrimLin.
-    // The serial endpoints are untouched: MOD MIX 0
-    // is bit-exact the blend; the flavour crossfade
-    // below is unchanged in form. ──
+    // TEST16 keeps both formations (and the flavour
+    // crossfade below) exactly; what changed is the
+    // feed (the driven copy, above) and the bus algebra
+    // (the wet now ADDS to the comp blend under MOD
+    // MIX as a level — see the bus block below). ──
     float aL, aR, pL, pR, eL, eR;
     adt_.process(feedL, feedR, aL, aR);
     aL = adt_.lastWetSrcL() + kAdtWetDeckBoost * adt_.lastWetDeckL();
@@ -1001,6 +994,21 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     phaser_.processBoth(feedL, feedR, pL, pR, eL, eR);
     eL = kPhaserWetTrimLin * pL;
     eR = kPhaserWetTrimLin * pR;
+    // TEST16: the wet-leg staging law (header: the
+    // static, knob-referenced presentation of each
+    // flavour's formed wet, fitted so the wet-solo
+    // level tracks the compressed path's across the
+    // knob — the driven feed's level parts from the
+    // module's as drive rises). Applied per flavour
+    // BEFORE the flavour crossfade, so a mid-blend
+    // trades two correctly-presented legs.
+    {
+        const float knob01Now = limiter_.knob();
+        const float aSt = ba6aWetStagingLin(kAdtWetStagingDb, knob01Now);
+        const float pSt = ba6aWetStagingLin(kPhaserWetStagingDb, knob01Now);
+        aL *= aSt; aR *= aSt;
+        eL *= pSt; eR *= pSt;
+    }
     const float target = modPhaser_ ? 1.0f : 0.0f;
     if (modBlend_ != target) {
         const float step = 1.0f / (kAdtFadeSec * (float)fs_);
@@ -1074,37 +1082,37 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // plus the comp channel's bus offset, through the
     // same A/B offset crossfade — so the dry sample and
     // the comp sample it blends against are the SAME
-    // input sample, and staged by the limiter's own
-    // drive law (limiter_.driveDb(), the knob's current
-    // smoothed position): at GR ~ 0 the crossfade below
-    // trades two level-matched copies of one signal
-    // (the module's colour for the clean input), and
-    // under GR it is true parallel compression referred
-    // to the driven signal. The reported latency does
+    // input sample. The reported latency does
     // not change: the dry arm's delay IS the comp path's
     // latency, in every MOD state.
-    // TEST15: each tap's sample passes through the
-    // static staging (ba6aDryStaging) at the current
-    // drive — the staging is memoryless, so a tap needs
-    // no era reference of any kind (TEST14's era-read
-    // GR references are gone with the follower), and
-    // the A/B crossfade blends two staged copies of the
-    // input exactly as it crossfades the comp channel. ──
+    // TEST16 (Nathan's confirmed semantics, 2026-10-26):
+    // the dry arm is the arriving signal ITSELF — the
+    // raw ring read, no drive law, no shoulder staging,
+    // no trim. TEST8 staged it by the drive law, TEST15
+    // by the module's shoulders (ba6aDryStaging, now
+    // retired with both): every staged form made COMP
+    // MIX 0 something other than what arrived. Now the
+    // blend's zero end is the plugin's input at input
+    // level, delay/phase-aligned — "as if the plugin
+    // isn't even there" — and it cannot distort, pump
+    // or breathe, because nothing is done to it at all.
+    // The A/B crossfade blends two raw reads exactly as
+    // it crossfades the comp channel. ──
     float dryArmL, dryArmR;
     {
         const int osD = limiter_.osDelaySamples();
         if (tapFade >= 1.0f && modDelayB_ == 0) {
-            dryArmL = ba6aDryStaging(readDryRing(dryRingL_, osD), driveLinNow);
-            dryArmR = ba6aDryStaging(readDryRing(dryRingR_, osD), driveLinNow);
+            dryArmL = readDryRing(dryRingL_, osD);
+            dryArmR = readDryRing(dryRingR_, osD);
         } else {
-            const float bL = ba6aDryStaging(readDryRing(dryRingL_, osD + modDelayB_), driveLinNow);
-            const float bR = ba6aDryStaging(readDryRing(dryRingR_, osD + modDelayB_), driveLinNow);
+            const float bL = readDryRing(dryRingL_, osD + modDelayB_);
+            const float bR = readDryRing(dryRingR_, osD + modDelayB_);
             if (tapFade >= 1.0f) {
                 dryArmL = bL;
                 dryArmR = bR;
             } else {
-                const float aL = ba6aDryStaging(readDryRing(dryRingL_, osD + modDelayA_), driveLinNow);
-                const float aR = ba6aDryStaging(readDryRing(dryRingR_, osD + modDelayA_), driveLinNow);
+                const float aL = readDryRing(dryRingL_, osD + modDelayA_);
+                const float aR = readDryRing(dryRingR_, osD + modDelayA_);
                 dryArmL = aL + (bL - aL) * tapFade;
                 dryArmR = aR + (bR - aR) * tapFade;
             }
@@ -1112,34 +1120,34 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     }
     compWrite_ = (compWrite_ + 1) & compMask_;
 
-    // ── The bus (TEST8 comp blend; TEST13 serial MOD):
-    // the COMP channel crossfaded against the dry arm by
-    // the COMP MIX pot (complementary weights on the same
-    // slewed value) forms the THROUGH signal; MOD MIX
-    // then crossfades that result against its modulated
-    // version under the engagement gate. The extremes are
-    // HARD-SELECTED: at weight 0 the bus is the comp blend
-    // bit-for-bit (MOD-out equivalence), and at weight 1
-    // it is the wet signal only — for ANY comp setting,
-    // so COMP MIX 0 + MOD MIX 100 is the driven dry signal
-    // modulated, fully wet. (This supersedes the TEST8
-    // additive ADT endpoint at COMP 100 / MOD 100 by
-    // Nathan's directive; deck timings and bases are
-    // unchanged.) ──
-    const float thruL = compMixCur_ * compL
-                      + (1.0f - compMixCur_) * dryArmL;
-    const float thruR = compMixCur_ * compR
-                      + (1.0f - compMixCur_) * dryArmR;
+    // ── The bus (TEST16 — Nathan's confirmed semantics,
+    // 2026-10-26, superseding the TEST13 serial crossfade
+    // and every earlier bus algebra). The two pots now
+    // operate DIFFERENTLY, by his definition:
+    //  - COMP MIX is a BLEND: the COMP channel crossfaded
+    //    against the dry arm (the arriving input, aligned)
+    //    with complementary weights on the same slewed
+    //    value. 0 = the input itself; 100 = the fully
+    //    compressed path.
+    //  - MOD MIX is a LEVEL: the wet leg (the inserts on
+    //    the driven copy) ADDS to the blend at this gain,
+    //    under the engagement gate. 0 = silence from the
+    //    section; 100 = its full output. It is NOT a
+    //    crossfade — nothing is traded away as it rises.
+    // The processed sum (comp share + wet share) passes
+    // the bus's output staging (the fixed trim and the
+    // soft ceiling below — the TEST15 output stage,
+    // unchanged law) and the dry share is added AFTER
+    // it, untouched: the arriving signal is never
+    // trimmed or ceilinged by the bus that carries it.
+    // Endpoints, exact in the settled state: 0/0 = the
+    // aligned input itself; 100/0 = the comp path alone,
+    // bit-identical to TEST15's; 0/100 = the aligned
+    // input + the full wet(driven); 100/100 = the comp
+    // path + the full wet combined. ──
     const float wMod = modGate_ * modMixCur_;
-    float busL, busR;
-    if (wMod <= 0.0f) {
-        busL = thruL; busR = thruR;
-    } else if (wMod >= 1.0f) {
-        busL = wetL; busR = wetR;
-    } else {
-        busL = thruL + (wetL - thruL) * wMod;
-        busR = thruR + (wetR - thruR) * wMod;
-    }
+    const float procL = compMixCur_ * compL + wMod * wetL;
+    const float procR = compMixCur_ * compR + wMod * wetR;
 
     // ── TEST8: NO AUTO MAKE-UP AT THE BUS (Nathan:
     // "act like a normal compressor"). The FULL2 bus law
@@ -1166,8 +1174,11 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // peak — overshoot arrives as progressive squash,
     // never a flat top, and the 1.600 absolute bound is
     // never reached. A ceiling, not make-up: it only
-    // ever bends peaks DOWN toward the park.
-    float oL = busL * kBusStagingTrimLin, oR = busR * kBusStagingTrimLin;
+    // ever bends peaks DOWN toward the park. TEST16: the
+    // ceiling reads the PROCESSED sum (comp + wet shares)
+    // — the dry share of the blend is added after it and
+    // is never bent (it is the arriving signal itself).
+    float oL = procL * kBusStagingTrimLin, oR = procR * kBusStagingTrimLin;
     const float pairPk = std::max(std::fabs(oL), std::fabs(oR));
     if (pairPk > kBusParkCeilLin) {
         const float soft = kBusParkCeilLin
@@ -1176,8 +1187,8 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
         const float g = soft / pairPk;
         oL *= g; oR *= g;
     }
-    outL = oL;
-    outR = oR;
+    outL = oL + (1.0f - compMixCur_) * dryArmL;
+    outR = oR + (1.0f - compMixCur_) * dryArmR;
 }
 
 } // namespace osc72
