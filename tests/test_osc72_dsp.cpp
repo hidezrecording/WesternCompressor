@@ -2033,6 +2033,20 @@ int main() {
             return h;
         };
         struct Cfg { const char* name; float knob; bool comp, att, rel; int mod; double secs; uint64_t want; uint64_t grWant; };
+        // TEST14 RE-CAPTURE (cause: Part B — the MOD
+        // wet legs are re-formed for the serial bus: the
+        // ADT wet is SRC + 2x deck and the Phase 90 wet
+        // is the trimmed classic output, moving ONLY the
+        // six MOD-in configs' audio (24-29). Configs
+        // 0-23 reproduce the TEST13 references bit-for-
+        // bit, audio AND GR — the comp path and the dry
+        // law's GR-independence are the proof — and every
+        // GR reference in the table is TEST13's verbatim:
+        // the GR-referenced dry gain reads the GR, it
+        // never writes it. Two independent probe builds
+        // from this tree agree on all 30 configs, and
+        // the harvest's group-first hashes match the
+        // suite's own failure printouts. REPORT-TEST14.)
         // TEST13 RE-CAPTURE (cause: Part A — the sustai-
         // nedness blend's fast reference is now a seat-
         // independent raw-tap peak follower, moving every
@@ -2069,10 +2083,10 @@ int main() {
             { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x3ce13bef04c908d4u, 0x2f7bc7fca0b935a0u },
             { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x80771394f7791effu, 0x67368920c41cae81u },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xc8b140626f279fbfu, 0xbf7ca788efe07289u },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x2e21d7381ccdd212u, 0xd766a84d12f2c449u },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0xd64f92ce0171245bu, 0x474b8ef70734e91bu },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x8fc1882b8c75b318u, 0xe097aaaa2a2215aau },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xae434e1e252a0086u, 0xbf7ca788efe07289u },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0xf70eaf505292f8c5u, 0xd766a84d12f2c449u },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x1fb40feba18a7b99u, 0x474b8ef70734e91bu },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0xee274830885ad23bu, 0xe097aaaa2a2215aau },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -2084,8 +2098,8 @@ int main() {
             // FULL: re-captured again on the merged tree at
             // the AB2 ballistics (pure cascade renders under
             // the re-timed limiter).
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x0d2538f5b506fd2fu, 0xd766a84d12f2c449u },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x220b610995d74640u, 0xe097aaaa2a2215aau },
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x04ab620c9c4940d7u, 0xd766a84d12f2c449u },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x56185b972fe40919u, 0xe097aaaa2a2215aau },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
@@ -2160,7 +2174,7 @@ int main() {
                     break;
                 }
             }
-            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == TEST13 candidate references (two-probe harvest)" : bad);
+            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == TEST14 candidate references (two-probe harvest)" : bad);
             check(ok, g.pin, d);
         }
         // K7f RETIRED in FULL2 (cause: its subject no
@@ -2279,36 +2293,65 @@ int main() {
             // 0.36, whose drive (-3.8 dB) keeps the bus
             // clear of the ceiling park, as the original
             // knob-0 site's -5 dB did.)
+            // TEST14 RE-PIN (cause: Part A — the dry gain
+            // is referenced to the smoothed applied GR,
+            // so the passthrough gain is a TRAJECTORY,
+            // not a constant: gain(i) = drive - grRef(i),
+            // grRef the asymmetric one-pole follower of
+            // the render's own GR trace, replicated here
+            // sample-for-sample in the Chain's arithmetic
+            // order. At knob 0 the GR trace is identically
+            // zero (drive -80 dB), so that sub-case is the
+            // old constant-gain identity unchanged.)
+            auto dryGainTraj = [](const MixRender& r, float knob) {
+                std::vector<float> g(r.gr.size());
+                float ref = 0.0f;
+                const float drive = osc72::ba6aDriveDb(knob);
+                for (size_t i = 0; i < r.gr.size(); ++i) {
+                    const float grNow = r.gr[i];
+                    const float tau = grNow > ref
+                        ? osc72::kDryGrRefChargeTauSec
+                        : osc72::kDryGrRefReleaseTauSec;
+                    ref += (grNow - ref) * osc72::tauCoef(tau, kFs);
+                    if (ref < 0.0f) ref = 0.0f;
+                    g[i] = osc72::dbToLinear(drive - ref)
+                         * osc72::kBusStagingTrimLin;
+                }
+                return g;
+            };
             bool ok = true, audible = false, silent = true;
-            const float gainRef = osc72::dbToLinear(osc72::ba6aDriveDb(0.0f))
-                                * osc72::kBusStagingTrimLin;
             for (int mod : { 0, 1, 2 }) {
                 auto r = renderMix(0.0f, 0.0f, mod, 0.0f, 2.0);
+                const auto gainRef = dryGainTraj(r, 0.0f);
                 const int lat = (mod == 1) ? 992 : 32; // Chain::latencySamples()
                 const int start = (int)(1.0 * kFs);
                 for (int i = start; i < (int)r.outL.size(); ++i) {
-                    const float wantL = gainRef * r.inL[(size_t)(i - lat)];
-                    const float wantR = gainRef * r.inR[(size_t)(i - lat)];
+                    const float wantL = gainRef[(size_t)i] * r.inL[(size_t)(i - lat)];
+                    const float wantR = gainRef[(size_t)i] * r.inR[(size_t)(i - lat)];
                     if (std::fabs(r.outL[(size_t)i] - wantL) > 1.0e-5f
                         || std::fabs(r.outR[(size_t)i] - wantR) > 1.0e-5f) ok = false;
                     if (std::fabs(r.outL[(size_t)i]) > 1.0e-3f) silent = false;
                 }
             }
-            const float gainRef5 = osc72::dbToLinear(osc72::ba6aDriveDb(0.36f))
-                                 * osc72::kBusStagingTrimLin;
             for (int mod : { 0, 1, 2 }) {
                 auto r = renderMix(0.0f, 0.0f, mod, 0.36f, 2.0);
+                const auto gainRef5 = dryGainTraj(r, 0.36f);
                 const int lat = (mod == 1) ? 992 : 32;
+                // TEST14 era rule: the arm gains each
+                // sample by the reference of the call at
+                // which it emerged from the limiter — the
+                // trajectory read (lat - 32) calls back.
+                const int era = lat - 32;
                 const int start = (int)(1.0 * kFs);
                 for (int i = start; i < (int)r.outL.size(); ++i) {
-                    const float wantL = gainRef5 * r.inL[(size_t)(i - lat)];
-                    const float wantR = gainRef5 * r.inR[(size_t)(i - lat)];
+                    const float wantL = gainRef5[(size_t)(i - era)] * r.inL[(size_t)(i - lat)];
+                    const float wantR = gainRef5[(size_t)(i - era)] * r.inR[(size_t)(i - lat)];
                     if (std::fabs(r.outL[(size_t)i] - wantL) > 1.0e-5f
                         || std::fabs(r.outR[(size_t)i] - wantR) > 1.0e-5f) ok = false;
                     if (std::fabs(r.outL[(size_t)i]) > 1.0e-4f) audible = true;
                 }
             }
-            check(ok && audible && silent, "L2 TEST8+13: compMix 0 / modMix 0 = pure dry passthrough at the reported latency (silent at knob 0 per Part B, audible at working drive)", "");
+            check(ok && audible && silent, "L2 TEST8+13+14: compMix 0 / modMix 0 = GR-referenced dry passthrough at the reported latency (silent at knob 0 per Part B, audible at working drive)", "");
         }
         // L3 (FULL2; replaces the AB3 alignment identity):
         // with MOD out, CH2 is gated to exactly zero, so
@@ -2519,6 +2562,12 @@ int main() {
         // gain); (c) its level travel across the knob at
         // compMix=0 is the drive law's (printed; asserted
         // below).
+        // TEST14 rider (cause: Part A): the drive gain in
+        // (b) is now the GR-referenced gain (drive minus
+        // the smoothed applied GR), replicated bit-exactly
+        // in M1a2; in (c) the travel is the drive law's
+        // range less the reference's own travel on the
+        // fixture (+108.54 dB measured, crest -0.09 dB).
         {
             osc72::Chain ch;
             ch.prepare(kFs);
@@ -2542,6 +2591,17 @@ int main() {
             }
             check(tapOk, "M1a TEST13: insert feed at compMix=1 == the module's own output, bit-exact in lockstep", "");
             {
+                // TEST14 RE-PIN (cause: Part A — the dry
+                // gain is referenced to the smoothed
+                // applied GR): the expected dry is the
+                // input delayed by the oversampling delay
+                // at (drive - grRef), grRef the asymmetric
+                // one-pole follower of the chain's own GR
+                // readout, replicated here in the Chain's
+                // arithmetic order — the comparison stays
+                // bit-exact, which is the pin's substance:
+                // the feed at compMix=0 is the same dry
+                // the bus arm delivers, computed once.
                 osc72::Chain c0;
                 c0.prepare(kFs);
                 c0.setKnob(0.5f);
@@ -2550,19 +2610,27 @@ int main() {
                 c0.reset();
                 c0.setModIn(true);
                 const int osD = c0.limiter().osDelaySamples();
-                const float g = osc72::dbToLinear(osc72::ba6aDriveDb(0.5f));
                 ProgGen pg0;
                 std::vector<float> hL, hR;
                 bool dryOk = true;
+                float grRef = 0.0f;
                 for (int i = 0; i < (int)(2.0 * kFs); ++i) {
                     float l, r; pg0.sample(i, l, r);
                     hL.push_back(l); hR.push_back(r);
                     float oL, oR; c0.process(l, r, oL, oR);
+                    const float grNow = c0.limiter().gainReductionDb();
+                    const float tau = grNow > grRef
+                        ? osc72::kDryGrRefChargeTauSec
+                        : osc72::kDryGrRefReleaseTauSec;
+                    grRef += (grNow - grRef) * osc72::tauCoef(tau, kFs);
+                    if (grRef < 0.0f) grRef = 0.0f;
+                    const float g = osc72::dbToLinear(
+                        osc72::ba6aDriveDb(0.5f) - grRef);
                     const float wL = i >= osD ? g * hL[(size_t)(i - osD)] : 0.0f;
                     const float wR = i >= osD ? g * hR[(size_t)(i - osD)] : 0.0f;
                     if (c0.insertFeedL() != wL || c0.insertFeedR() != wR) dryOk = false;
                 }
-                check(dryOk, "M1a2 TEST13: insert feed at compMix=0 == the driven dry, bit-exact in lockstep", "");
+                check(dryOk, "M1a2 TEST14: insert feed at compMix=0 == the GR-referenced driven dry, bit-exact in lockstep", "");
             }
 
             std::printf("      insert feed at compMix=0 (programme, settled half of 6 s):\n");
@@ -2600,9 +2668,14 @@ int main() {
             // full 131 dB and its crest is the input's own,
             // constant by construction. The module-crest
             // clause belonged to the module-output tap.)
+            // TEST14 rider (cause: Part A): the gain is
+            // now GR-referenced — travel +108.54 dB (the
+            // drive law's 131 less the reference's travel
+            // on this fixture), crest -0.09 dB: the
+            // assertion's clauses are unchanged and hold.
             check(rmsK[4] - rmsK[0] > 10.0 && std::fabs(crestK[0] - crestK[4]) < 0.25
                   && rmsK[3] > rmsK[2] && rmsK[2] > rmsK[1],
-                  "M1b TEST13: the send at compMix=0 is the driven dry — moves with INPUT by the drive law, crest unchanged", d);
+                  "M1b TEST13+14: the send at compMix=0 is the driven dry — moves with INPUT by the GR-referenced drive law, crest unchanged", d);
         }
         // M2 — the 1.600 ceiling, relocated to the bus:
         // programme peaks at the bus output stay bounded

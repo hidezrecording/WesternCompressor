@@ -529,17 +529,77 @@ int main() {
         // behaviour Nathan's directive retired.
         {
             auto c = runPots(0.0f, 0.0f, false, false, 1.5, 1.0f, 0.36f);
-            const float g = osc72::dbToLinear(osc72::ba6aDriveDb(0.36f))
-                          * osc72::kBusStagingTrimLin;
+            // TEST14 RE-PIN (cause: Part A — the dry gain
+            // is referenced to the smoothed applied GR, so
+            // the passthrough gain is a trajectory, not the
+            // constant drive x trim): the expected gain is
+            // replicated from a parallel Chain driven by
+            // the render's own input history — follower in
+            // the Chain's arithmetic order, era 0 (MOD out
+            // adds no bus offset). The pin's substance is
+            // unchanged: the processor's bus at both pots 0
+            // IS the dry arm, anchored absolutely to the
+            // input at the reported latency.
+            std::vector<float> traj(c.inL.size());
+            {
+                osc72::Chain rep;
+                rep.prepare(kFs);
+                // Seat the replica in the processor's
+                // factory state (COMP, SLOW/SLOW) with the
+                // knob snapped before reset, exactly as
+                // the chain sits when the render starts.
+                // (A post-reset knob-slew mirror was tried
+                // during the TEST14 re-pin and diverged
+                // 500x worse — the processor does not carry
+                // a slew into the material.)
+                rep.setKnob(0.36f);
+                rep.setCompMode(true);
+                rep.setAttackFast(false);
+                rep.setReleaseFast(false);
+                rep.setCompMix(0.0f);
+                rep.setModMix(0.0f);
+                rep.reset();
+                rep.setModIn(false);
+                float ref = 0.0f;
+                for (size_t i = 0; i < c.inL.size(); ++i) {
+                    float oL, oR; rep.process(c.inL[i], c.inR[i], oL, oR);
+                    const float grNow = rep.gainReductionDb();
+                    const float tau = grNow > ref
+                        ? osc72::kDryGrRefChargeTauSec
+                        : osc72::kDryGrRefReleaseTauSec;
+                    ref += (grNow - ref) * osc72::tauCoef(tau, kFs);
+                    if (ref < 0.0f) ref = 0.0f;
+                    // The chain gains by the limiter's
+                    // SLEWED drive (driveDb() at this
+                    // sample), not the static law value —
+                    // the replica mirrors it exactly.
+                    traj[i] = osc72::dbToLinear(
+                                  rep.limiter().driveDb() - ref)
+                            * osc72::kBusStagingTrimLin;
+                }
+            }
             double maxErr = 0; bool audible = false;
             for (int i = settle; i < (int)c.outL.size(); ++i) {
-                maxErr = std::max(maxErr, (double)std::fabs(c.outL[(size_t)i] - g * c.inL[(size_t)(i - 32)]));
-                maxErr = std::max(maxErr, (double)std::fabs(c.outR[(size_t)i] - g * c.inR[(size_t)(i - 32)]));
+                maxErr = std::max(maxErr, (double)std::fabs(c.outL[(size_t)i] - traj[(size_t)i] * c.inL[(size_t)(i - 32)]));
+                maxErr = std::max(maxErr, (double)std::fabs(c.outR[(size_t)i] - traj[(size_t)i] * c.inR[(size_t)(i - 32)]));
                 if (std::fabs(c.outL[(size_t)i]) > 1.0e-3f) audible = true;
             }
-            std::snprintf(b, sizeof b, "max |out - gain*in[t-32]| = %.2e, audible %d (gain %.5f)", maxErr, (int)audible, (double)g);
-            check(maxErr < 2.0e-5 && audible,
-                  "P7c TEST8: both pots 0 (MOD out) = dry passthrough at +32, drive-referenced gain", b);
+            std::snprintf(b, sizeof b, "max |out - gain(t)*in[t-32]| = %.2e, audible %d (GR-referenced trajectory)", maxErr, (int)audible);
+            // TEST14 tolerance (2e-5 -> 5e-5, this pin
+            // only): the measured residual is 2.88e-05,
+            // and a bare Chain at the identical state
+            // reproduces the SAME residual against the
+            // processor render — the wrapper's GR history
+            // differs from a bare chain's at ulp level
+            // inside the feedback limiter, a difference
+            // the TEST13 constant-gain form of this pin
+            // could not see (its dry gain read no GR).
+            // The law itself is pinned bit-exactly at
+            // chain level (DSP suite L2/M1a2); this pin
+            // keeps asserting the trajectory's shape and
+            // the latency anchor through the processor.
+            check(maxErr < 5.0e-5 && audible,
+                  "P7c TEST8+14: both pots 0 (MOD out) = GR-referenced dry passthrough at +32", b);
 
             auto d = runPots(0.0f, 0.0f, true, false, 1.5, 1.0f, 0.36f);
             bool exact = true; bool audibleD = false;
@@ -551,8 +611,13 @@ int main() {
             }
             std::snprintf(b, sizeof b, "MOD-in A render == MOD-out render shifted 960, bit-exact: %d, audible %d",
                           (int)exact, (int)audibleD);
+            // TEST14 rider: the bit-exact form survives
+            // the GR-referenced dry gain BECAUSE the arm
+            // reads the reference at each sample's own
+            // era (see Chain::grRefEra) — a dry sample is
+            // gained identically in both MOD states.
             check(exact && audibleD,
-                  "P7d TEST8: both pots 0 (MOD in, A) = the same dry passthrough at +992", b);
+                  "P7d TEST8+14: both pots 0 (MOD in, A) = the same dry passthrough at +992", b);
         }
         // P7e (FULL2 form): the COMP channel's gain is
         // linear — at 0.5 the bus carries exactly half the
@@ -1039,10 +1104,20 @@ int main() {
             // arrival: the energy peak and the dry arm both
             // sit at the latency, and P10e/P10f close the
             // question.
+            // TEST14 RE-PIN (cause: Part B — the wet leg is
+            // the pedal's CLASSIC output again): the
+            // classic's direct term carries the module's
+            // own waveform, pre-ring included, so the wet
+            // peak can sit on the pre-ring sample (+31) —
+            // the same documented sample the onset clause
+            // already accepts. The window's substance is
+            // unchanged: nothing arrives before the
+            // pre-ring, no bulk delay; the comp channel's
+            // peak stays at +32 exactly.
             check(atDry == impAt + 32
-                  && atWet >= impAt + 32 && atWet <= impAt + 36
+                  && atWet >= impAt + 31 && atWet <= impAt + 36
                   && onset >= impAt + 30 && onset <= impAt + 38,
-                  "P10d P flavour: comp channel peaks at +32, bus onset at the latency (no bulk delay, FULL2)", b);
+                  "P10d TEST14: P flavour: comp channel peaks at +32, bus onset at the latency (no bulk delay)", b);
             // P10e (FULL2 form): the half-gain render is
             // the superposition of the channel renders
             // through the whole processor path — to float
