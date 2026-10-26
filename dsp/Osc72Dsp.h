@@ -217,7 +217,15 @@ private:
 // measured envelope span. Final file onsets 5.43 / 5.19 /
 // 5.20 / 4.99 vs TEST10's 5.41 / 5.25 / 5.26 / 5.04.
 // Measured: REPORT-TEST11.md.
-inline constexpr float kBa6aThreshVolts = 1.75f;
+// TEST12 (2026-10-26): the TEST11 onset figures above did
+// not survive re-measurement from the shipped tree (final
+// file onsets 5.97 / 5.66 / 5.53 / 5.23; see the correction
+// banner in REPORT-TEST11). With the knee map corrected
+// (plus sign, slow laws only), the reference returns to
+// the TEST7-TEST10 value 3.50 V; the TEST11 sense/factor
+// residuals (4.35 / 0.91 / 0.88) stay in force. Final
+// onsets re-measured from this tree: REPORT-TEST12.
+inline constexpr float kBa6aThreshVolts = 3.50f;
 // TEST8 (Nathan, 2026-10-25): per-mode / per-seat REFERENCE
 // compensation, costed and verified by renders in
 // DIAGNOSIS-test7-insertion-gain.md §D on the same file.
@@ -385,36 +393,47 @@ inline float ba6aSenseShape(float envV, float toeV) {
 // clamps down -- make the slope of that knee more gentle in all
 // cases." Each law's sensed envelope is re-mapped in dB relative
 // to its own reference before the law runs:
-//   xr = x - (1-s0) * softplus((xc - x))   (softplus in dB units)
+//   xr = x + (1-s0) * softplus((xc - x))   (softplus in dB units)
 // Below the knee centre xc the map's slope is s0: the
 // onset region's env axis is stretched ~1/s0, so GR rises
 // gradually through it; the slope firms smoothly back to 1.0
-// above xc (softness 2.5 dB), the deep law is EXACTLY the
-// TEST10 law, and as env -> 0 the map tends to s0*x + const, so
-// GR still reaches exactly zero (no bias floor). Centres are
-// per law, placed from the LOOP's measured envelope at the
-// settled GR ~4 dB point (not from the laws in isolation --
-// the settled statics are carried substantially by the
-// fast law leaking through the sustainedness blend at
-// susW ~0.94, so the fast laws' windows must sit on the
-// fast envelope's working span, ~15 dB above the naive
-// law-domain position; an earlier TEST11 cubic-window map
-// and a first softplus placement both measured inert on
-// the settled curve for exactly these reasons. See
-// REPORT-TEST11.) Measured result: statics knee width
-// (GR 0.5 -> 6 dB, input dB) x1.5-1.75 in all four
-// mode/seat combinations, slopes progressive.
-inline constexpr float kBa6aCompKneeSlopeDb  = 0.45f;  // in-knee env slope, COMP
-inline constexpr float kBa6aLimitKneeSlopeDb = 0.38f;  // in-knee env slope, LIMIT
-inline constexpr float kBa6aKneeSoftDb    = 2.5f;   // transition softness (dB)
-inline constexpr float kBa6aCompKneeDb      = 2.5f;
-inline constexpr float kBa6aCompKneeCtrDb   = 35.5f;
-inline constexpr float kBa6aLimitKneeDb     = 2.5f;
-inline constexpr float kBa6aLimitKneeCtrDb  = 18.0f;
-inline constexpr float kBa6aCompSlowKneeDb     = 2.5f;
-inline constexpr float kBa6aCompSlowKneeCtrDb  = 37.5f;
-inline constexpr float kBa6aLimitSlowKneeDb    = 2.5f;
-inline constexpr float kBa6aLimitSlowKneeCtrDb = 17.0f;
+// above xc, the deep law is EXACTLY the TEST10 law, and as
+// env -> 0 the map tends to s0*x + const, so GR still reaches
+// exactly zero (no bias floor).
+//
+// TEST12 CORRECTION (2026-10-26, see REPORT-TEST12): the
+// TEST11 build implemented the softplus term with a MINUS
+// sign, whose slope below centre is 1 + (1-s0)*sigma(z)
+// (1.55x at s0 = 0.45) -- an expander, the inverse of the
+// map described above. Measured consequence in the shipped
+// TEST11: settled width x0.89 of TEST10 (12.8-13.0 dB vs
+// 14.3-14.6), i.e. the "widening" ran backwards in the
+// loop. TEST12 restores the PLUS sign (the function's own
+// asymptote branches already described the plus form),
+// applies the map on the SLOW laws only -- the settled
+// statics are carried by the slow law (sustainedness
+// settles at 0.9974 on tones; probe-measured, round18) --
+// and returns the fast laws to their TEST10 form (map off,
+// softness 0), so TEST11's Parts A/B/C and the TEST10
+// fast-side programme behaviour are untouched. Centres sit
+// at/above the top of each slow law's settled 0.5 -> 6 dB
+// window so the whole window rides the gentle slope;
+// softness 3.0 dB firms the slope back to 1.0 into the
+// deep-softening region. Fit against the settled loop
+// (probe-tap fixed-point predictor, validated to <=0.09 dB
+// on the shipped TEST11 widths) and re-verified on the
+// final tree's statics bench: REPORT-TEST12.
+inline constexpr float kBa6aCompKneeSlopeDb  = 0.44f;  // in-knee env slope, COMP
+inline constexpr float kBa6aLimitKneeSlopeDb = 0.44f;  // in-knee env slope, LIMIT
+inline constexpr float kBa6aKneeSoftDb    = 3.0f;   // transition softness (dB)
+inline constexpr float kBa6aCompKneeDb      = 0.0f;   // TEST12: fast map OFF (TEST10 form)
+inline constexpr float kBa6aCompKneeCtrDb   = 35.5f;   // inert while softness is 0
+inline constexpr float kBa6aLimitKneeDb     = 0.0f;   // TEST12: fast map OFF (TEST10 form)
+inline constexpr float kBa6aLimitKneeCtrDb  = 18.0f;   // inert while softness is 0
+inline constexpr float kBa6aCompSlowKneeDb     = 3.0f;
+inline constexpr float kBa6aCompSlowKneeCtrDb  = 36.0f;
+inline constexpr float kBa6aLimitSlowKneeDb    = 3.0f;
+inline constexpr float kBa6aLimitSlowKneeCtrDb = 15.0f;
 inline float ba6aKneeEnvDb(float envSensed, float refSensed,
                            float softDb, float ctrDb, float slopeDb) {
     if (envSensed <= 0.0f || refSensed <= 0.0f || softDb <= 0.0f)
@@ -433,7 +452,16 @@ inline float ba6aKneeEnvDb(float envSensed, float refSensed,
         // softplus(z) in dB: S * ln(1 + e^z) = S * ln2 * log2(1 + 2^(z/ln2))
         const float sp = softDb * 0.6931472f
                        * std::log2(1.0f + std::exp2(z * 1.4426950f));
-        xr = x - (1.0f - slopeDb) * sp;
+        // TEST12: PLUS. The TEST11 form subtracted the softplus
+        // term, giving map slope 1 + (1-slope)*sigma(z) -- an
+        // EXPANDER (1.55x below centre at slope 0.45), the
+        // inverse of the documented knee; that sign is the
+        // measured cause of TEST11's settled width landing at
+        // x0.89 of TEST10 instead of x1.5. With PLUS the slope
+        // is slope + (1-slope)*sigma(-z)... i.e. slopeDb below
+        // centre rising smoothly to 1.0 above, and both
+        // asymptote branches below already describe this form.
+        xr = x + (1.0f - slopeDb) * sp;
     }
     return refSensed * std::exp2(xr * 0.16609640f);
 }
@@ -852,9 +880,15 @@ inline constexpr float kStagingAnchorDb     = 0.0f;      // staging anchor trim 
 // softening draws less GR at defaults on the file
 // (insertion measured +1.111 dB before the re-trim);
 // -1.11 dB of trim restores flat (REPORT-TEST11).
+// TEST12 rider: re-measured at -14.10 dB. The corrected
+// knee draws more GR at defaults on the file (insertion
+// measured -1.211 dB before the re-trim); +1.21 dB of
+// trim restores flat (REPORT-TEST12). The trim is
+// post-module: GR traces, onsets and statics are
+// unaffected by it.
 // ─────────────────────────────────────────────────────────────────────
-inline constexpr float kBusStagingTrimDb  = -15.31f;     // TEST11 re-trim (measured; see header note)
-inline constexpr float kBusStagingTrimLin = 0.17159317f; // 10^(-15.31/20)
+inline constexpr float kBusStagingTrimDb  = -14.10f;     // TEST12 re-trim (measured; see header note)
+inline constexpr float kBusStagingTrimLin = 0.19724227f; // 10^(-14.10/20)
 
 class Ba6aLimiter {
 public:
