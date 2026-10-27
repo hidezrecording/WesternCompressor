@@ -2088,6 +2088,19 @@ int main() {
         // reads the drive law, never the GR). Two
         // independent probe builds from this tree agree on
         // all 30 configs. REPORT-TEST16.)
+        // TEST17 RE-CAPTURE (cause: Nathan's -3 dB MOD
+        // feed pad, 2026-10-27): ONLY the six MOD-in
+        // configs' AUDIO references move (24-29) — the
+        // pad scales the insert feed, so every MOD-in
+        // render presents 3 dB less driven signal to the
+        // machines. Configs 0-23 reproduce the TEST15/16
+        // references bit-for-bit, audio AND GR — the comp
+        // path is bit-identical — and every GR reference
+        // in the table stays verbatim: the pad reads the
+        // drive law, never the GR, and writes nothing the
+        // module can hear. Two independent probe builds
+        // from this tree agree on all 30 configs.
+        // REPORT-TEST17.)
         const Cfg cfgs[] = {
             // MOD out, knob 0.50 (4 s each)
             { "out k0.50 LIMIT attF relF", 0.50f, false, true,  true,  0, 4.0, 0xf3ac025b7fb91717u, 0xffc9a1ff946a96e4u },
@@ -2117,10 +2130,10 @@ int main() {
             { "out k1.00 COMP  attS relF", 1.00f, true,  false, true,  0, 4.0, 0x3ce13bef04c908d4u, 0x2f7bc7fca0b935a0u },
             { "out k1.00 COMP  attS relS", 1.00f, true,  false, false, 0, 4.0, 0x80771394f7791effu, 0x67368920c41cae81u },
             // MOD in, flavour A (ADT), knob 0.75, DUAL (6 s each)
-            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xcdf4d16b15c9d5a0u, 0xbf7ca788efe07289u },
-            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x783dca8c155bed15u, 0xd766a84d12f2c449u },
-            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x151519d4a6001c51u, 0x474b8ef70734e91bu },
-            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x651831e1c7155526u, 0xe097aaaa2a2215aau },
+            { "inA k0.75 LIMIT attF relS", 0.75f, false, true,  false, 1, 6.0, 0xa7e2668733495ea9u, 0xbf7ca788efe07289u },
+            { "inA k0.75 LIMIT attS relS", 0.75f, false, false, false, 1, 6.0, 0x89267092bb7ef123u, 0xd766a84d12f2c449u },
+            { "inA k0.75 COMP  attF relS", 0.75f, true,  true,  false, 1, 6.0, 0x889c6df2cf155600u, 0x474b8ef70734e91bu },
+            { "inA k0.75 COMP  attS relS", 0.75f, true,  false, false, 1, 6.0, 0x4dfbdb5676b57b5du, 0xe097aaaa2a2215aau },
             // MOD in, flavour P (Phase 90), knob 0.75, SLOW/DUAL (6 s)
             // AB3 RE-BASE (cause: the P wet arm is the bare
             // cascade now; at modMix = 1 the chain delivers
@@ -2132,8 +2145,8 @@ int main() {
             // FULL: re-captured again on the merged tree at
             // the AB2 ballistics (pure cascade renders under
             // the re-timed limiter).
-            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0x6dfaf95b3cab5fc9u, 0xd766a84d12f2c449u },
-            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0x13c57128d6d5ac0fu, 0xe097aaaa2a2215aau },
+            { "inP k0.75 LIMIT attS relS", 0.75f, false, false, false, 2, 6.0, 0xaaa4fbb120a205b2u, 0xd766a84d12f2c449u },
+            { "inP k0.75 COMP  attS relS", 0.75f, true,  false, false, 2, 6.0, 0xb74d415db90a0131u, 0xe097aaaa2a2215aau },
         };
         // AB3 protocol note: the renders now also pin both
         // mix pots at 1.0 ahead of the reset (the setters
@@ -2208,7 +2221,7 @@ int main() {
                     break;
                 }
             }
-            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == pinned references (two-probe harvest; configs 0-23 and all GR are TEST15's verbatim, MOD-in audio re-captured for TEST16)" : bad);
+            std::snprintf(d, sizeof d, "%s", ok ? "audio + GR == pinned references (two-probe harvest; configs 0-23 and all GR are TEST15's verbatim, MOD-in audio re-captured for TEST17)" : bad);
             check(ok, g.pin, d);
         }
         // K7f RETIRED in FULL2 (cause: its subject no
@@ -2581,6 +2594,15 @@ int main() {
         // full range and its crest is the input's own at
         // every knob (a gain-only path — printed; asserted
         // below).
+        // TEST17 (cause: Nathan's -3 dB MOD feed pad,
+        // 2026-10-27): the copy carries one added constant,
+        // kModFeedPadLin, folded into the gain the two
+        // lockstep pins below expect — the pins' substance
+        // is unchanged (bit-exact gain copy, reads neither
+        // pot, nothing from the module or the GR); M1b's
+        // printed feed levels sit exactly 3.00 dB under
+        // TEST16's table at every knob, travel and crest
+        // clauses unmoved.
         {
             osc72::Chain ch;
             ch.prepare(kFs);
@@ -2593,7 +2615,7 @@ int main() {
             ProgGen pg;
             std::vector<float> hL, hR;
             bool tapOk = true;
-            const float driveLin = osc72::dbToLinear(osc72::ba6aDriveDb(0.5f));
+            const float driveLin = osc72::dbToLinear(osc72::ba6aDriveDb(0.5f)) * osc72::kModFeedPadLin;
             for (int i = 0; i < (int)(2.0 * kFs); ++i) {
                 float l, r; pg.sample(i, l, r);
                 hL.push_back(l); hR.push_back(r);
@@ -2602,7 +2624,7 @@ int main() {
                 const float wR = i >= osD ? hR[(size_t)(i - osD)] * driveLin : 0.0f;
                 if (ch.insertFeedL() != wL || ch.insertFeedR() != wR) tapOk = false;
             }
-            check(tapOk, "M1a TEST16: insert feed == the driven gain copy, bit-exact in lockstep (compMix=1)", "");
+            check(tapOk, "M1a TEST17: insert feed == the driven gain copy under the -3 dB pad, bit-exact in lockstep (compMix=1)", "");
             {
                 // TEST16 RE-PIN (cause: the parallel driven
                 // feed): the feed at compMix=0 must be the
@@ -2613,6 +2635,8 @@ int main() {
                 // bit-exact, which is the pin's substance:
                 // the feed reads neither pot and nothing
                 // from the module or the GR.
+                // TEST17: the expected gain folds in the
+                // -3 dB pad constant, as at M1a above.
                 osc72::Chain c0;
                 c0.prepare(kFs);
                 c0.setKnob(0.5f);
@@ -2624,7 +2648,7 @@ int main() {
                 ProgGen pg0;
                 std::vector<float> hL, hR;
                 bool dryOk = true;
-                const float driveLin = osc72::dbToLinear(osc72::ba6aDriveDb(0.5f));
+                const float driveLin = osc72::dbToLinear(osc72::ba6aDriveDb(0.5f)) * osc72::kModFeedPadLin;
                 for (int i = 0; i < (int)(2.0 * kFs); ++i) {
                     float l, r; pg0.sample(i, l, r);
                     hL.push_back(l); hR.push_back(r);
@@ -2633,7 +2657,7 @@ int main() {
                     const float wR = i >= osD ? hR[(size_t)(i - osD)] * driveLin : 0.0f;
                     if (c0.insertFeedL() != wL || c0.insertFeedR() != wR) dryOk = false;
                 }
-                check(dryOk, "M1a2 TEST16: insert feed at compMix=0 == the same driven gain copy, bit-exact (the parallel feed reads neither pot)", "");
+                check(dryOk, "M1a2 TEST17: insert feed at compMix=0 == the same driven gain copy under the pad, bit-exact (the parallel feed reads neither pot)", "");
             }
 
             std::printf("      insert feed at compMix=0 (programme, settled half of 6 s):\n");
@@ -2673,9 +2697,14 @@ int main() {
             // falling-crest clause belonged to the staged
             // dry's shoulders, which TEST16 retired with
             // the driven dry itself.
+            // TEST17 (cause: the -3 dB pad): the printed
+            // per-knob feed RMS/peak sit exactly 3.00 dB
+            // under TEST16's prints; the span (travel) and
+            // the crest are untouched by a constant gain,
+            // so the clauses below stand verbatim.
             check(rmsK[4] - rmsK[0] > 100.0 && std::fabs(crestK[4] - crestK[0]) < 0.25
                   && rmsK[3] > rmsK[2] && rmsK[2] > rmsK[1],
-                  "M1b TEST16: the send is the driven gain copy — travel is the drive law's full range, crest is the input's own at every knob", d);
+                  "M1b TEST17: the send is the driven gain copy under the -3 dB pad — travel is the drive law's full range, crest is the input's own at every knob", d);
         }
         // M2 — the 1.600 ceiling, relocated to the bus:
         // programme peaks at the bus output stay bounded
