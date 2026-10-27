@@ -936,14 +936,21 @@ void Chain::process(float inL, float inR, float& outL, float& outR)
     // reference: a gain copy cannot compress and cannot
     // breathe. (TEST15's feed was the comp blend, whose
     // dry share was the staged driven dry; both are
-    // retired here — the blend no longer feeds anything.) ──
+    // retired here — the blend no longer feeds anything.)
+    // TEST17 (Nathan, 2026-10-27): the copy carries ONE
+    // added constant — the -3 dB MOD feed pad
+    // (kModFeedPadLin, header): the drive was hitting
+    // the MOD section with a little too much force. The
+    // pad sits at the tap, before both machines; nothing
+    // downstream is re-gained. ──
     const float driveDbNow = limiter_.driveDb();
     const float driveLinNow = dbToLinear(driveDbNow);
+    const float feedGain = driveLinNow * kModFeedPadLin;
     float feedL, feedR;
     {
         const int osD = limiter_.osDelaySamples();
-        feedL = readDryRing(dryRingL_, osD) * driveLinNow;
-        feedR = readDryRing(dryRingR_, osD) * driveLinNow;
+        feedL = readDryRing(dryRingL_, osD) * feedGain;
+        feedR = readDryRing(dryRingR_, osD) * feedGain;
     }
     lastFeedL_ = feedL;   // the send tap: the driven copy
     lastFeedR_ = feedR;   // itself, at every pot position

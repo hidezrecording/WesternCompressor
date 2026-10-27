@@ -1006,6 +1006,23 @@ inline float ba6aWetStagingLin(const float (&tableDb)[11], float knob01)
     return dbToLinear(tableDb[k0] + (tableDb[k0 + 1] - tableDb[k0]) * fr);
 }
 
+// ── TEST17: the MOD feed pad (Nathan, on TEST16,
+// 2026-10-27 — "put about a 3 dB pad between the input
+// to the mod section and the input gain; it just seems
+// like the input gain is hitting the mod with a little
+// too much force"). The driven copy is attenuated by
+// exactly -3.00 dB at the feed tap, before either
+// machine: the section is hit less hard and presents
+// accordingly. NO compensating gain is added anywhere
+// — the TEST16 wet formations and the staging law
+// above stay byte-for-byte as fitted; their calibration
+// constants are not re-derived. The feed remains a
+// pure gain copy: its travel across the knob is the
+// drive law's, its crest the input's own; only its
+// level shifts, by this constant. ──
+inline constexpr float kModFeedPadDb  = -3.0f;
+inline constexpr float kModFeedPadLin = 0.7079457843841379f; // 10^(-3/20)
+
 class Ba6aLimiter {
 public:
     void prepare(double sampleRate);
